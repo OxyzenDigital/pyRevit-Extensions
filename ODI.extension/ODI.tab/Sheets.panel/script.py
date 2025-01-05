@@ -39,11 +39,17 @@ if not source_guide_grid:
 def create_or_get_guide_grid(view, doc):
     guide_grids = DB.FilteredElementCollector(doc).OfClass(DB.GuideGrid).ToElements()
     for guide_grid in guide_grids:
-        if guide_grid.ViewId == view.Id:
+        if guide_grid.Name == source_guide_grid.Name:
+            if guide_grid.ViewId != view.Id:
+                with Transaction(doc, "Assign Guide Grid to Sheet") as t:
+                    t.Start()
+                    guide_grid.ViewId = view.Id
+                    t.Commit()
             return guide_grid
     with Transaction(doc, "Create Guide Grid") as t:
         t.Start()
         new_guide_grid = DB.GuideGrid.Create(doc, view.Id)
+        new_guide_grid.Name = source_guide_grid.Name
         # Set default outline to fit the sheet if no outline exists
         view_outline = view.CropBox
         if view_outline:
