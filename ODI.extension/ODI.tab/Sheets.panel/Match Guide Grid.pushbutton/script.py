@@ -1,42 +1,33 @@
-from pyrevit import revit, DB
+from pyrevit import revit, DB, script
 from pyrevit.revit import Transaction
 
-# Ensure the active view is a Sheet View
-doc = revit.doc
-active_view = doc.ActiveView
-if not isinstance(active_view, DB.ViewSheet):
-    print("Error: Active view must be a Sheet View.")
-    sys.exit()
+def ensure_sheet_view(view):
+    """Ensure the active view is a Sheet View."""
+    if not isinstance(view, DB.ViewSheet):
+        script.exit()
 
-# Get the currently opened documents
-doc_manager = revit.doc_manager
-background_docs = [d for d in doc_manager.docs if d != doc]
-if not background_docs:
-    print("Error: No background documents found.")
-    sys.exit()
+def get_background_sheet_view():
+    """Get the active sheet view of the first background document."""
+    background_docs = [doc for doc in revit.docs if doc != revit.doc]
+    if not background_docs:
+        script.exit()
 
-# Get the active view of the first background document
-background_doc = background_docs[0]
-background_active_view = background_doc.ActiveView
-if not isinstance(background_active_view, DB.ViewSheet):
-    print("Error: Background active view must be a Sheet View.")
-    sys.exit()
+    background_doc = background_docs[0]
+    background_active_view = background_doc.ActiveView
+    if not isinstance(background_active_view, DB.ViewSheet):
+        script.exit()
+    return background_active_view, background_doc
 
-# Find the Guide Grid in the background active view
 def get_guide_grid(view, doc):
+    """Find the Guide Grid associated with a specific view."""
     guide_grids = DB.FilteredElementCollector(doc).OfClass(DB.GuideGrid).ToElements()
     for guide_grid in guide_grids:
         if guide_grid.ViewId == view.Id:
             return guide_grid
     return None
 
-source_guide_grid = get_guide_grid(background_active_view, background_doc)
-if not source_guide_grid:
-    print("Error: No Guide Grid found in the background document's active view.")
-    sys.exit()
-
-# Find or create a Guide Grid in the active view
-def create_or_get_guide_grid(view, doc):
+def create_or_get_guide_grid(view, doc, source_guide_grid):
+    """Find or create a Guide Grid for the active view."""
     guide_grids = DB.FilteredElementCollector(doc).OfClass(DB.GuideGrid).ToElements()
     for guide_grid in guide_grids:
         if guide_grid.Name == source_guide_grid.Name:
@@ -46,31 +37,45 @@ def create_or_get_guide_grid(view, doc):
                     guide_grid.ViewId = view.Id
                     t.Commit()
             return guide_grid
+
     with Transaction(doc, "Create Guide Grid") as t:
         t.Start()
         new_guide_grid = DB.GuideGrid.Create(doc, view.Id)
         new_guide_grid.Name = source_guide_grid.Name
-        # Set default outline to fit the sheet if no outline exists
         view_outline = view.CropBox
         if view_outline:
             min_point = view_outline.Min
             max_point = view_outline.Max
-            outline = DB.Outline(min_point, max_point)
+            min_width = abs(max_point.X - min_point.X)
+            min_height = abs(max_point.Y - min_point.Y)
+            expanded_min_point = DB.XYZ(min_point.X - min_width / 2, min_point.Y - min_height / 2, min_point.Z)
+            expanded_max_point = DB.XYZ(max_point.X + min_width / 2, max_point.Y + min_height / 2, max_point.Z)
+            outline = DB.Outline(expanded_min_point, expanded_max_point)
             new_guide_grid.SetOutline(outline)
         t.Commit()
         return new_guide_grid
 
-# Transfer properties to the Guide Grid
 def transfer_guide_grid_properties(source, target):
+    """Transfer properties from the source Guide Grid to the target Guide Grid."""
     with Transaction(doc, "Transfer Guide Grid Properties") as t:
         t.Start()
         target.GridSpacing = source.GridSpacing
-        outline = source.GetOutline()
-        target.SetOutline(outline)
+        source_outline = source.GetOutline()
+        target_outline = target.GetOutline()
+        if not source_outline.IsAlmostEqualTo(target_outline):
+            target.SetOutline(source_outline)
         t.Commit()
 
-# Perform the transfer
-target_guide_grid = create_or_get_guide_grid(active_view, doc)
+# Main execution
+active_view = revit.doc.ActiveView
+ensure_sheet_view(active_view)
+
+background_active_view, background_doc = get_background_sheet_view()
+source_guide_grid = get_guide_grid(background_active_view, background_doc)
+if not source_guide_grid:
+    script.exit()
+
+target_guide_grid = create_or_get_guide_grid(active_view, revit.doc, source_guide_grid)
 transfer_guide_grid_properties(source_guide_grid, target_guide_grid)
 
-print("Guide Grid successfully transferred.")
+script.exit()
