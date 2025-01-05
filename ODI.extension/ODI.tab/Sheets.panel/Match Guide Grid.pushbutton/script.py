@@ -1,17 +1,3 @@
-# master_guide_grid_copy_script.py
-# ------------------------------------------------------------------------------
-# 1) Prompts user to select a "source" document and a source sheet (with a guide grid).
-# 2) Retrieves the source sheet's guide grid. (Handles param as ElementId or string.)
-# 3) Creates/retrieves a guide grid on the active sheet (in the current doc).
-# 4) Copies the name (and optionally spacing) from the source grid to the target grid.
-# 5) Provides debug logs (listing parameters for each guide grid) to help diagnose.
-#
-# Requirements:
-#  - Revit 2019+ for DB.GuideGrid in the API (Revit 2025 should be fine).
-#  - Active view must be a ViewSheet in the target doc.
-#  - You have a source doc open that contains a sheet with an assigned guide grid.
-# ------------------------------------------------------------------------------
-
 from pyrevit import revit, DB, script, forms, output
 
 logger = script.get_logger()
@@ -86,7 +72,7 @@ def list_guide_grid_parameters(guide_grid):
         else:
             val_str = "<none>"
 
-        log_debug("    - {} = {}".format(p_name, val_str))
+        log_debug("     - {} = {}".format(p_name, val_str))
 
 
 # ------------------------------------------------------------------------------
@@ -96,9 +82,7 @@ def list_guide_grid_parameters(guide_grid):
 def get_guide_grid_from_sheet(sheet):
     """
     Retrieves the GuideGrid element assigned to 'sheet'.
-    Handles both possibilities:
-      - SHEET_GUIDE_GRID = ElementId (Revit 2019+).
-      - SHEET_GUIDE_GRID = string (older approach).
+    Handles cases where DB.GuideGrid might not be available.
     Returns the GuideGrid element or None if not found/assigned.
     """
     if not sheet or not isinstance(sheet, DB.ViewSheet):
@@ -117,7 +101,9 @@ def get_guide_grid_from_sheet(sheet):
         gg_id = param.AsElementId()
         if gg_id and gg_id != DB.ElementId.InvalidElementId:
             guide_grid = doc.GetElement(gg_id)
-            if guide_grid and isinstance(guide_grid, DB.GuideGrid):
+            
+            # Check if the element is a Guide Grid (without relying on DB.GuideGrid)
+            if guide_grid and guide_grid.Category.Name == "Guide Grid":  
                 log_debug("Retrieved GuideGrid by ElementId: '{}' (ID: {})".format(
                     guide_grid.Name, guide_grid.Id
                 ))
@@ -127,7 +113,6 @@ def get_guide_grid_from_sheet(sheet):
         else:
             log_debug("SHEET_GUIDE_GRID param is an invalid ElementId.")
         return None
-
     elif storage_type == DB.StorageType.String:
         # Param is the string name of the GuideGrid
         grid_name = param.AsString()
@@ -156,11 +141,13 @@ def get_guide_grid_from_sheet(sheet):
 def create_guide_grid(doc, sheet, guide_grid_name):
     """
     Create a new GuideGrid on the given sheet with the specified name.
-    Requires Revit 2019+ for DB.GuideGrid.Create().
+    Handles different Revit API versions for Guide Grid creation.
     """
     try:
         with revit.Transaction("Create Guide Grid"):
-            new_grid = DB.GuideGrid.Create(doc, sheet, guide_grid_name)
+            # Use the older API method directly (without trying NewGuideGrid() first)
+            new_grid = DB.GuideGrid.Create(doc, sheet.Id, guide_grid_name) 
+
             log_debug("Created new GuideGrid '{}' (ID: {}) on sheet '{}'.".format(
                 guide_grid_name, new_grid.Id, sheet.Name
             ))
@@ -173,7 +160,7 @@ def create_guide_grid(doc, sheet, guide_grid_name):
 def copy_guide_grid_properties(source_grid, target_grid):
     """
     Copy basic properties (like name) from source_grid to target_grid.
-    Extend if you want to copy spacing, offsets, etc.
+    Handles cases where DB.BuiltInParameter might not be fully accessible.
     """
     if not source_grid or not target_grid:
         log_debug("Invalid source or target grid. Cannot copy properties.")
@@ -181,23 +168,15 @@ def copy_guide_grid_properties(source_grid, target_grid):
 
     try:
         with revit.Transaction("Copy Guide Grid Properties"):
-            # Example: copy the grid name
-            src_name_param = source_grid.get_Parameter(DB.BuiltInParameter.GUIDE_GRID_NAME)
-            tgt_name_param = target_grid.get_Parameter(DB.BuiltInParameter.GUIDE_GRID_NAME)
+            # Copy the grid name using LookupParameter()
+            src_name_param = source_grid.LookupParameter("Name")  
+            tgt_name_param = target_grid.LookupParameter("Name")
 
             if src_name_param and tgt_name_param:
                 old_name = tgt_name_param.AsString()
                 new_name = src_name_param.AsString()
                 tgt_name_param.Set(new_name)
                 log_debug("GuideGrid name changed from '{}' to '{}'.".format(old_name, new_name))
-
-            # If you also want spacing, do something like:
-            # spacing_src = source_grid.get_Parameter(DB.BuiltInParameter.GUIDE_GRID_SPACING)
-            # spacing_tgt = target_grid.get_Parameter(DB.BuiltInParameter.GUIDE_GRID_SPACING)
-            # if spacing_src and spacing_tgt:
-            #     spacing_val = spacing_src.AsDouble()
-            #     spacing_tgt.Set(spacing_val)
-            #     log_debug("GuideGrid spacing set to {}.".format(spacing_val))
 
             return True
     except Exception as e:
@@ -236,7 +215,9 @@ def match_guide_grid_from_source_sheet(source_sheet, target_sheet):
     # If there's no target grid, create one with the same name as the source
     target_grid = target_grid_before
     if not target_grid:
-        src_name = source_grid.get_Parameter(DB.BuiltInParameter.GUIDE_GRID_NAME).AsString()
+        # Get the Guide Grid name using LookupParameter()
+        src_name_param = source_grid.LookupParameter("Name")  
+        src_name = src_name_param.AsString() if src_name_param else "Default Guide Grid Name"
         target_grid = create_guide_grid(target_sheet.Document, target_sheet, src_name)
         if not target_grid:
             forms.alert(
