@@ -1,86 +1,105 @@
-#pylint: disable=import-error,invalid-name,broad-except
-"""Creates an equipment schedule with specified fields."""
+"""Creates a specialty equipment schedule."""
 
-__title__ = "Add Equipment\nSchedule"
-__doc__ = "Creates a new equipment schedule with Type, Type Name, Type Comments, Count, and Level fields"
+__title__ = "Specialty\nEquipment\nSchedule"
+__doc__ = "Creates a schedule of all specialty equipment with Type, Comments, Count and Level"
 __author__ = "ODI"
 
 from Autodesk.Revit.DB import *
-from pyrevit import revit, forms, script
+from pyrevit import revit, forms
 
-# Get current document
 doc = __revit__.ActiveUIDocument.Document
-uidoc = __revit__.ActiveUIDocument
 
-def schedule_exists(doc, schedule_name):
-    """Check if schedule with given name exists."""
-    for schedule in FilteredElementCollector(doc).OfClass(ViewSchedule):
-        if schedule.Name == schedule_name:
-            return True
-    return False
-
-def get_unique_schedule_name(doc, base_name):
-    """Generate unique schedule name."""
-    if not schedule_exists(doc, base_name):
-        return base_name
-    
-    counter = 1
-    while schedule_exists(doc, f"{base_name} {counter}"):
-        counter += 1
-    return f"{base_name} {counter}"
-
-def create_equipment_schedule(doc, schedule_name):
-    """Create new equipment schedule with required fields."""
+def create_specialty_schedule(doc, schedule_name="Specialty Equipment Schedule"):
+    """Creates a new specialty equipment schedule."""
     try:
-        with revit.Transaction("Create Equipment Schedule") as t:
+        with revit.Transaction("Create Specialty Equipment Schedule"):
             # Create schedule
             schedule = ViewSchedule.CreateSchedule(
-                doc, 
-                ElementId(BuiltInCategory.OST_MechanicalEquipment)
+                doc,
+                ElementId(BuiltInCategory.OST_SpecialityEquipment)
             )
             schedule.Name = schedule_name
             
             # Get schedule definition
             sched_def = schedule.Definition
             
-            # Add required fields
-            fields = [
-                ("Type", lambda s: ScheduleField.CreateElementType(s)),
-                ("Type Name", ElementId(BuiltInParameter.ELEM_TYPE_PARAM)),
-                ("Type Comments", ElementId(BuiltInParameter.ALL_MODEL_TYPE_COMMENTS)),
-                ("Count", lambda s: ScheduleField.CreateCount(s)),
-                ("Level", ElementId(BuiltInParameter.SCHEDULE_LEVEL_PARAM))
-            ]
+            # Get all available fields and print them for debugging
+            available_fields = schedule.Definition.GetSchedulableFields()
+            added_param_ids = set()  # Track parameter IDs to prevent duplicates
             
-            for field_name, field_creator in fields:
-                if callable(field_creator):
-                    field = field_creator(schedule)
-                    sched_def.AddField(field)
-                else:
-                    param = SchedulableField(ScheduleFieldType.Instance, field_creator)
-                    sched_def.AddField(param)
+            # First pass - add only the specific fields we want
+            desired_fields = {
+                'Family and Type': 'Type',  # Map the actual parameter name to desired heading
+                'Level': 'Level',
+                'Type Comments': 'Type Comments'
+            }
+            
+            # Add fields one by one with validation
+            for field in available_fields:
+                param_name = field.GetName(doc)
+                param_id = field.ParameterId
+                
+                # Skip if we already added this parameter
+                if param_id in added_param_ids:
+                    continue
+                
+                # Only add if it's in our desired fields
+                if param_name in desired_fields:
+                    try:
+                        added_field = sched_def.AddField(field)
+                        if added_field:
+                            added_field.ColumnHeading = desired_fields[param_name]
+                            added_param_ids.add(param_id)
+                    except Exception as e:
+                        forms.alert("Could not add field {}: {}".format(param_name, str(e)))
+            
+            # Add count field last
+            try:
+                count_field = sched_def.AddField(ScheduleFieldType.Count)
+                count_field.ColumnHeading = "Count"
+            except Exception as e:
+                forms.alert("Could not add Count field: {}".format(str(e)))
+            
+            # Make schedule show all instances
+            sched_def.IsItemized = True
             
             return schedule
             
     except Exception as e:
-        forms.alert(f"Error creating schedule: {str(e)}")
+        forms.alert("Failed to create schedule: {}".format(str(e)))
         return None
 
+def get_unique_schedule_name(doc, base_name):
+    """Generate unique schedule name with increment if needed."""
+    schedule_names = set()
+    
+    # Get all existing schedule names
+    for schedule in FilteredElementCollector(doc).OfClass(ViewSchedule):
+        schedule_names.add(schedule.Name)
+    
+    if base_name not in schedule_names:
+        return base_name
+        
+    counter = 1
+    while "{}{}".format(base_name, counter) in schedule_names:
+        counter += 1
+    
+    return "{}{}".format(base_name, counter)
+
 def main():
-    base_name = "Equipment Schedule"
+    if not doc:
+        forms.alert("No active document found.")
+        return
     
-    # Check for existing schedule
-    if schedule_exists(doc, base_name):
-        if not forms.alert("An Equipment Schedule already exists. Create another one?",
-                          yes=True, no=True):
-            script.exit()
-    
-    # Get unique name and create schedule
+    base_name = "Specialty Equipment Schedule"
     schedule_name = get_unique_schedule_name(doc, base_name)
-    new_schedule = create_equipment_schedule(doc, schedule_name)
+    
+    new_schedule = create_specialty_schedule(doc, schedule_name)
     
     if new_schedule:
-        forms.alert(f"Schedule '{schedule_name}' created successfully!")
+        forms.alert("Schedule '{}' created successfully!".format(schedule_name))
+    else:
+        forms.alert("Failed to create schedule.")
 
 if __name__ == '__main__':
     main()
