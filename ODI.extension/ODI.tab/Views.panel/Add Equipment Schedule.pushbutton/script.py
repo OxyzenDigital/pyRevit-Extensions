@@ -27,31 +27,36 @@ def create_specialty_schedule(doc, schedule_name="Specialty Equipment Schedule")
             available_fields = schedule.Definition.GetSchedulableFields()
             added_param_ids = set()  # Track parameter IDs to prevent duplicates
             
-            # First pass - add only the specific fields we want
+            # Define fields and their order
+            field_order = [
+                'Level',
+                'Type Mark',
+                'Type Comments'
+            ]
+            
             desired_fields = {
-                'Family and Type': 'Type',  # Map the actual parameter name to desired heading
                 'Level': 'Level',
+                'Type Mark': 'Equipment Type',
                 'Type Comments': 'Type Comments'
             }
-            
-            # Add fields one by one with validation
-            for field in available_fields:
-                param_name = field.GetName(doc)
-                param_id = field.ParameterId
-                
-                # Skip if we already added this parameter
-                if param_id in added_param_ids:
-                    continue
-                
-                # Only add if it's in our desired fields
-                if param_name in desired_fields:
-                    try:
-                        added_field = sched_def.AddField(field)
-                        if added_field:
-                            added_field.ColumnHeading = desired_fields[param_name]
-                            added_param_ids.add(param_id)
-                    except Exception as e:
-                        forms.alert("Could not add field {}: {}".format(param_name, str(e)))
+
+            # Add fields in specified order
+            for field_name in field_order:
+                for field in available_fields:
+                    param_name = field.GetName(doc)
+                    param_id = field.ParameterId
+                    
+                    if param_id in added_param_ids:
+                        continue
+                    
+                    if param_name == field_name:
+                        try:
+                            added_field = sched_def.AddField(field)
+                            if added_field:
+                                added_field.ColumnHeading = desired_fields[param_name]
+                                added_param_ids.add(param_id)
+                        except Exception as e:
+                            forms.alert("Could not add field {}: {}".format(param_name, str(e)))
             
             # Add count field last
             try:
