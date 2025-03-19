@@ -1,5 +1,5 @@
 title:
-  en_us: Excel Schedule
+  en_us: Select Framing in Beam System
   fr_fr: french title
   es_es: spanish title
 tooltip: 
@@ -7,4 +7,3 @@ tooltip:
   fr_fr: french tooltip
   es_es: spanish tooltip
 # highlight: new
-run-mode: "automatic"

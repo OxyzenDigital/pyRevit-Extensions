@@ -1,76 +1,79 @@
-#!Python3
-from Autodesk.Revit.DB import *
-from pyrevit import revit, DB, UI
+import json
+from pyrevit import revit, DB
 
-def create_legend_from_excel(json_path):
-    """Creates a legend view in Revit based on extracted Excel data."""
-    try:
-        doc = revit.doc
-        with open(json_path, "r") as json_file:
-            excel_data = json.load(json_file)
+# Load JSON data
+with open('c:\\tmp\\save_data.json', 'r') as json_file:
+    excel_data = json.load(json_file)
 
-        # Duplicate Legend View
-        legend_view = FilteredElementCollector(doc).OfClass(View).WhereElementIsViewTemplate().Where(lambda v: v.Name == "Legend").First() #Get Legend View Template
-        if legend_view:
-            new_legend_view = View.Create(doc, legend_view.Id)
-            new_legend_view.Name = "Excel Import Legend"
-            new_legend_view.Scale = 4 # 1/4" scale
+def setup_legend_view():
+    doc = revit.doc
+    view = next((v for v in DB.FilteredElementCollector(doc).OfClass(DB.View).ToElements() if v.ViewType == DB.ViewType.Legend), None)
+    if view:
+        print "Found legend view: " + view.Name
+        with DB.Transaction(doc, "Duplicate Legend View") as t:
+            t.Start()
+            new_view_id = view.Duplicate(DB.ViewDuplicateOption.Duplicate)
+            new_view = doc.GetElement(new_view_id)
+            if new_view:
+                print "New view created: " + new_view.Name
+                new_view.Scale = 48  # 1/4" = 1'-0"
+                t.Commit()
+                return new_view
+            else:
+                print "Failed to create new view"
+                t.RollBack()
+                return None
+    else:
+        print "No Legend View found to duplicate."
+        return None
 
-        else:
-            print("No Legend View Template was found")
-            return
+def create_legend_elements(view, data):
+    if view is None:
+        print "Cannot proceed: View not created or found."
+        return
 
-        # Start a transaction
-        TransactionManager.Instance.EnsureInTransaction(doc)
+    doc = revit.doc
+    with DB.Transaction(doc, "Create Legend Elements") as t:
+        t.Start()
+        
+        for cell in data['cells']:
+            # Get row height and column width
+            row_height = data['row_heights'].get(str(cell['row']), 12.75)  # Default to smallest height if not found
+            col_width = data['column_widths'].get(str(cell['col']), 13.0)  # Default to smallest width if not found
 
-        # Revit units are in feet, Excel dimensions are in points. Conversion factor needed. 72 points = 1 inch
-        points_to_feet = 1.0 / (72.0 * 12.0)
+            # Convert from Excel points to Revit units (feet)
+            height = row_height * 0.013888888888889  # 1 point = 1/72 inch, 1 inch = 1/12 ft
+            width = col_width * 0.013888888888889
 
-        # Use the JSON data to create Revit elements
-        x_offset = 0
-        y_offset = 0
-        for row_index, row_data in enumerate(excel_data["cells"]):
-            x_offset = 0
-            for cell_index, cell_data in enumerate(row_data):
+            # Positioning - Assuming top-left corner of view is origin (0,0)
+            x = (cell['col'] - 1) * width
+            y = -(cell['row'] - 1) * height  # Negative because Revit's Y-axis points downward
 
-                #Filled Region
-                fill_color = cell_data.get("fill_color")
-                if fill_color:
-                    r = int(fill_color[2:4], 16)
-                    g = int(fill_color[4:6], 16)
-                    b = int(fill_color[6:8], 16)
-                    color = Color(r, g, b)
-                    # Create a solid fill pattern (you might need to create it if it doesn't exist)
-                    fill_pattern_element = FilteredElementCollector(doc).OfClass(FillPatternElement).Where(lambda x: x.Name == "Solid fill").First()
-                    if fill_pattern_element:
-                        fill_type = FillPatternElement.GetFillPattern(doc, fill_pattern_element.Id)
-                        # Create a filled region
-                        curve_loop = CurveLoop()
-                        width = cell_data["width"] * points_to_feet
-                        height = cell_data["height"] * points_to_feet
-                        curve_loop.Add(Line.CreateBound(XYZ(x_offset, y_offset, 0), XYZ(x_offset + width, y_offset, 0)))
-                        curve_loop.Add(Line.CreateBound(XYZ(x_offset + width, y_offset, 0), XYZ(x_offset + width, y_offset - height, 0)))
-                        curve_loop.Add(Line.CreateBound(XYZ(x_offset + width, y_offset - height, 0), XYZ(x_offset, y_offset - height, 0)))
-                        curve_loop.Add(Line.CreateBound(XYZ(x_offset, y_offset - height, 0), XYZ(x_offset, y_offset, 0)))
+            # Create Filled Region for cell background
+            bg_fill = DB.FillPatternElement.GetFillPatternElementByName(doc, DB.FillPatternTarget.Model, "Solid Fill")
+            if bg_fill:
+                # Create lines to form a rectangle
+                lines = [
+                    DB.Line.CreateBound(DB.XYZ(x, y, 0), DB.XYZ(x + width, y, 0)),  # Bottom line
+                    DB.Line.CreateBound(DB.XYZ(x + width, y, 0), DB.XYZ(x + width, y - height, 0)),  # Right line
+                    DB.Line.CreateBound(DB.XYZ(x + width, y - height, 0), DB.XYZ(x, y - height, 0)),  # Top line
+                    DB.Line.CreateBound(DB.XYZ(x, y - height, 0), DB.XYZ(x, y, 0))  # Left line
+                ]
+                
+                filled_region = DB.FilledRegion.Create(doc, view.Id, bg_fill.Id, lines)
+            else:
+                print "Failed to find solid fill pattern for cell background."
 
-                        filled_region = FilledRegion.Create(doc, new_legend_view.Id, fill_type.Id, [curve_loop])
-                        filled_region.Color = color
+            # Add text note for cell content
+            text = DB.TextNote.Create(doc, view.Id, DB.XYZ(x + width/2, y - height/2, 0), cell['value'])
+            text_type = text.TextNoteType
+            text_type.FontSize = cell['font']['size']  # Revit will handle conversion from points to feet
 
-                #Text Note
-                text_value = cell_data.get("value")
-                if text_value:
-                    text_note_options = TextNoteOptions(cell_data["font_name"], cell_data["font_size"] * points_to_feet)
-                    text_note = TextNote.Create(doc, new_legend_view.Id, XYZ(x_offset + width/2, y_offset - height/2, 0), text_value, text_note_options)
+        t.Commit()
 
-                x_offset += cell_data["width"] * points_to_feet
-            y_offset -= excel_data["dimensions"]["max_row_height"] * points_to_feet #Move down to the next row
-
-        TransactionManager.Instance.TransactionTaskDone()
-        print("Excel data imported to Revit Legend View.")
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-# Example usage (within pyRevit command):
-json_file_path = r"C:\tmp\excel_data.json" # Replace with the actual path
-create_legend_from_excel(json_file_path)
+# Main execution
+legend_view = setup_legend_view()
+if legend_view:
+    create_legend_elements(legend_view, excel_data)
+else:
+    print "Failed to create or find Legend View. Script execution stopped."
