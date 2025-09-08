@@ -6,6 +6,8 @@ from Autodesk.Revit.DB import (
     FilteredElementCollector,
     BeamSystem,
     ElementId,
+    FamilyInstance,
+    BuiltInParameter,
 )
 from Autodesk.Revit.UI import UIDocument, TaskDialog
 from rpw import ui  # Optional: for pyRevit UI selection; remove if not using pyRevit
@@ -13,6 +15,9 @@ from rpw import ui  # Optional: for pyRevit UI selection; remove if not using py
 # Get the active document and UI document
 doc = __revit__.ActiveUIDocument.Document
 uidoc = __revit__.ActiveUIDocument
+
+# Minimum length threshold (in feet, Revit's internal unit); 6 inches = 0.5 feet
+MIN_BEAM_LENGTH = 0.5  # Adjust this value as needed (e.g., 0.25 for 3 inches)
 
 # Function to get selected BeamSystem
 def get_selected_beam_system():
@@ -30,19 +35,47 @@ def get_selected_beam_system():
         TaskDialog.Show("Error", "Please select a Beam System.")
         return None
 
-# Function to select beams in the BeamSystem
+# Function to select beams in the BeamSystem, filtering out tiny members
 def select_beam_system_members(beam_system):
     beam_ids = beam_system.GetBeamIds()
     if not beam_ids or len(beam_ids) == 0:
         TaskDialog.Show("Warning", "No beams found in the selected Beam System.")
         return False
 
-    # Convert to .NET List<ElementId> for selection
-    beam_id_list = NETList[ElementId](beam_ids)
+    # Filter beams by length
+    valid_beam_ids = NETList[ElementId]()
+    tiny_beam_count = 0
+    
+    for beam_id in beam_ids:
+        beam = doc.GetElement(beam_id)
+        if isinstance(beam, FamilyInstance):
+            # Get the Length parameter (BuiltInParameter.CURVE_ELEM_LENGTH)
+            length_param = beam.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH)
+            if length_param and length_param.HasValue:
+                length = length_param.AsDouble()  # Length in feet (Revit's internal unit)
+                if length >= MIN_BEAM_LENGTH:
+                    valid_beam_ids.Add(beam_id)
+                else:
+                    tiny_beam_count += 1
+            else:
+                # If length parameter is missing, include the beam to avoid exclusion errors
+                valid_beam_ids.Add(beam_id)
+        else:
+            # If not a FamilyInstance, include it (unlikely in a BeamSystem)
+            valid_beam_ids.Add(beam_id)
+
+    if valid_beam_ids.Count == 0:
+        TaskDialog.Show("Warning", "No beams meet the minimum length threshold ({} feet).".format(MIN_BEAM_LENGTH))
+        return False
 
     try:
-        # Set the selection in the Revit UI
-        uidoc.Selection.SetElementIds(beam_id_list)
+        # Select only valid beams
+        uidoc.Selection.SetElementIds(valid_beam_ids)
+        
+        # Report tiny beams excluded
+        if tiny_beam_count > 0:
+            TaskDialog.Show("Info", "Selected {} beams. Excluded {} tiny beams (< {} feet).".format(
+                valid_beam_ids.Count, tiny_beam_count, MIN_BEAM_LENGTH))
         return True
     except Exception as e:
         TaskDialog.Show("Error", "Failed to select beams: {}".format(str(e)))
@@ -59,7 +92,8 @@ try:
     success = select_beam_system_members(beam_system)
     if success:
         beam_count = len(beam_system.GetBeamIds())
-        TaskDialog.Show("Success", "Selected {} beams from the Beam System.".format(beam_count))
+        filtered_count = uidoc.Selection.GetElementIds().Count
+        TaskDialog.Show("Success", "Selected {} of {} beams from the Beam System.".format(filtered_count, beam_count))
     else:
         TaskDialog.Show("Warning", "Selection failed or no beams were found.")
 
