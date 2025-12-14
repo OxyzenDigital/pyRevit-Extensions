@@ -1,17 +1,17 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Grading Tool" Height="600" Width="450"
+        Title="Grading Tool" Height="450" Width="400"
         WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
     
     <StackPanel Margin="20">
         
         <TextBlock Text="Grading Assistant" FontSize="18" FontWeight="Bold" Margin="0,0,0,5"/>
-        <TextBlock Text="Follow the steps below to define the grading path." TextWrapping="Wrap" Margin="0,0,0,20" Foreground="#555"/>
+        <TextBlock Text="Define your grading path below." TextWrapping="Wrap" Margin="0,0,0,20" Foreground="#555"/>
 
         <GroupBox Header="Step 1: Define Stakes" Margin="0,0,0,15" Padding="10">
             <StackPanel>
                 <DockPanel LastChildFill="False" Margin="0,0,0,5">
-                    <TextBlock Text="Select the two site elements (Start &amp; End)." VerticalAlignment="Center" Foreground="#444"/>
+                    <TextBlock Text="Select Start &amp; End Stakes." VerticalAlignment="Center" Foreground="#444"/>
                     <Button Content="Select Stakes" Width="100" Height="25" Click="select_stakes" DockPanel.Dock="Right"/>
                 </DockPanel>
 
@@ -34,7 +34,7 @@
         <GroupBox Header="Step 2: Define Path" Margin="0,0,0,15" Padding="10">
             <DockPanel LastChildFill="False">
                 <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="Select the grading model line." Foreground="#444"/>
+                    <TextBlock Text="Select the model line/spline." Foreground="#444"/>
                     <TextBlock Name="LineID" Text="Line: [Not Selected]" Foreground="Red" FontWeight="Bold" Margin="0,5,0,0"/>
                 </StackPanel>
                 <Button Content="Select Line" Width="100" Height="25" Click="select_line" DockPanel.Dock="Right" VerticalAlignment="Top"/>
@@ -45,7 +45,7 @@
         <Label Name="StatusLabel" Content="Ready..." Foreground="Gray" HorizontalAlignment="Center" Margin="0,0,0,10" FontStyle="Italic"/>
 
         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Name="RunBtn" Content="Calculate Grading" Width="140" Height="30" Margin="0,0,10,0" Click="run_grading" IsEnabled="False"/>
+            <Button Name="RunBtn" Content="Calculate &amp; Grade" Width="140" Height="30" Margin="0,0,10,0" Click="run_grading" IsEnabled="False"/>
             <Button Content="Cancel" Width="80" Height="30" IsCancel="True"/>
         </StackPanel>
 
