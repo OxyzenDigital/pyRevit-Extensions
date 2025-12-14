@@ -1,53 +1,78 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Grading Tool" Height="500" Width="400"
-        WindowStartupLocation="CenterScreen" ResizeMode="NoResize">
-    
-    <StackPanel Margin="20">
-        
-        <TextBlock Text="Grading Assistant" FontSize="18" FontWeight="Bold" Margin="0,0,0,5"/>
-        <TextBlock Text="Define your grading path below." TextWrapping="Wrap" Margin="0,0,0,20" Foreground="#555"/>
+        Title="Toposolid Grading Tool" Height="600" Width="400"
+        WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
+        Background="#F0F0F0">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-        <GroupBox Header="Step 1: Define Stakes" Margin="0,0,0,15" Padding="10">
+        <StackPanel Grid.Row="0" Margin="0,0,0,15">
+            <TextBlock Text="Grading Assistant" FontSize="20" FontWeight="Bold" Foreground="#333"/>
+            <TextBlock Text="State-Preserving Architecture" FontSize="12" Foreground="#666"/>
+        </StackPanel>
+
+        <GroupBox Header="1. Define Geometry" Grid.Row="1" Margin="0,0,0,15" Padding="10" Background="White">
             <StackPanel>
-                <DockPanel LastChildFill="False" Margin="0,0,0,5">
-                    <TextBlock Text="Select Start &amp; End Stakes." VerticalAlignment="Center" Foreground="#444"/>
-                    <Button Content="Select Stakes" Width="100" Height="25" Click="select_stakes" DockPanel.Dock="Right"/>
-                </DockPanel>
-
-                <Grid Margin="0,5,0,0">
+                <Grid Margin="0,0,0,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="60"/>
                     </Grid.ColumnDefinitions>
-                    
                     <StackPanel Grid.Column="0">
-                        <TextBlock Name="StartStakeID" Text="Start: [Not Selected]" Foreground="Red" Margin="0,2"/>
-                        <TextBlock Name="EndStakeID" Text="End: [Not Selected]" Foreground="Red" Margin="0,2"/>
+                        <Button Name="Btn_SelectStakes" Content="Select Stakes (Start/End)" Height="25" HorizontalAlignment="Left" Width="180"/>
+                        <TextBlock Name="Lb_StartStake" Text="Start: [None]" FontSize="11" Foreground="#999" Margin="2,4,0,0"/>
+                        <TextBlock Name="Lb_EndStake" Text="End: [None]" FontSize="11" Foreground="#999" Margin="2,2,0,0"/>
                     </StackPanel>
-
-                    <Button Name="SwapBtn" Content="Swap" Grid.Column="1" Height="22" Click="swap_stakes" IsEnabled="False"/>
+                    <Button Name="Btn_Swap" Content="Swap" Grid.Column="1" Height="25" VerticalAlignment="Top" IsEnabled="False"/>
                 </Grid>
+                <Separator Margin="0,5"/>
+                <StackPanel>
+                    <Button Name="Btn_SelectLine" Content="Select Guide Line" Height="25" HorizontalAlignment="Left" Width="180"/>
+                    <TextBlock Name="Lb_Line" Text="Line: [None]" FontSize="11" Foreground="#999" Margin="2,4,0,0"/>
+                </StackPanel>
             </StackPanel>
         </GroupBox>
 
-        <GroupBox Header="Step 2: Define Path" Margin="0,0,0,15" Padding="10">
-            <DockPanel LastChildFill="False">
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="Select the model line/spline." Foreground="#444"/>
-                    <TextBlock Name="LineID" Text="Line: [Not Selected]" Foreground="Red" FontWeight="Bold" Margin="0,5,0,0"/>
-                </StackPanel>
-                <Button Content="Select Line" Width="100" Height="25" Click="select_line" DockPanel.Dock="Right" VerticalAlignment="Top"/>
-            </DockPanel>
+        <GroupBox Header="2. Parameters" Grid.Row="2" Margin="0,0,0,15" Padding="10" Background="White">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="140"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="30"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="30"/>
+                    <RowDefinition Height="30"/>
+                    <RowDefinition Height="30"/>
+                </Grid.RowDefinitions>
+                
+                <TextBlock Text="Path Width:" VerticalAlignment="Center" Grid.Row="0" Grid.Column="0"/>
+                <TextBox Name="Tb_Width" Text="6.0" VerticalContentAlignment="Center" Grid.Row="0" Grid.Column="1"/>
+                
+                <TextBlock Text="Falloff:" VerticalAlignment="Center" Grid.Row="1" Grid.Column="0"/>
+                <TextBox Name="Tb_Falloff" Text="10.0" VerticalContentAlignment="Center" Grid.Row="1" Grid.Column="1"/>
+                
+                <TextBlock Text="Grid Res:" VerticalAlignment="Center" Grid.Row="2" Grid.Column="0"/>
+                <TextBox Name="Tb_Grid" Text="3.0" VerticalContentAlignment="Center" Grid.Row="2" Grid.Column="1"/>
+            </Grid>
         </GroupBox>
 
-        <Separator Margin="0,10"/>
-        <Label Name="StatusLabel" Content="Ready..." Foreground="Gray" HorizontalAlignment="Center" Margin="0,0,0,10" FontStyle="Italic"/>
-
-        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-            <Button Name="RunBtn" Content="Calculate &amp; Grade" Width="140" Height="30" Margin="0,0,10,0" Click="run_grading" IsEnabled="False"/>
-            <Button Content="Cancel" Width="80" Height="30" IsCancel="True"/>
+        <StackPanel Grid.Row="4">
+            <Label Name="Lb_Status" Content="Ready." HorizontalContentAlignment="Center" Foreground="Gray" Margin="0,5"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Button Name="Btn_Edging" Content="Run Edging" Height="40" Margin="0,0,5,0" Grid.Column="0" IsEnabled="False"/>
+                <Button Name="Btn_Run" Content="Sculpt Terrain" Height="40" Margin="5,0,0,0" Grid.Column="1" FontWeight="Bold" IsEnabled="False"/>
+            </Grid>
         </StackPanel>
-
-    </StackPanel>
+    </Grid>
 </Window>
