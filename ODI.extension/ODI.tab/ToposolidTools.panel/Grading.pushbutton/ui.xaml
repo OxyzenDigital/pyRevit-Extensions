@@ -1,37 +1,63 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Toposolid Grading Tool" Height="600" Width="400"
+        Title="Toposolid Grading Tool" Height="680" Width="400"
         WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
         Background="#F0F0F0">
     <Grid Margin="15">
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-        </Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <RowDefinition Height="Auto"/> <RowDefinition Height="Auto"/> <RowDefinition Height="Auto"/> <RowDefinition Height="*"/>    <RowDefinition Height="Auto"/> </Grid.RowDefinitions>
 
-        <StackPanel Grid.Row="0" Margin="0,0,0,15">
+        <StackPanel Grid.Row="0" Margin="0,0,0,10">
             <TextBlock Text="Grading Assistant" FontSize="20" FontWeight="Bold" Foreground="#333"/>
-            <TextBlock Text="State-Preserving Architecture" FontSize="12" Foreground="#666"/>
+            <TextBlock Text="Slope Control &amp; Edge Repair" FontSize="12" Foreground="#666"/>
         </StackPanel>
 
-        <GroupBox Header="1. Define Geometry" Grid.Row="1" Margin="0,0,0,15" Padding="10" Background="White">
+        <Expander Header="Data Persistence" Grid.Row="1" Margin="0,0,0,15" 
+                  IsExpanded="False" Background="#E8F1F2" BorderBrush="#88B0B9">
+            <Grid Margin="10">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="Select a graded Toposolid to recall settings." 
+                           FontSize="10" Foreground="Gray" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                <Button Name="Btn_ReadRecipe" Content="Load Recipe" Grid.Column="1" Width="100" Height="26" FontWeight="SemiBold"/>
+            </Grid>
+        </Expander>
+
+        <GroupBox Header="2. Geometry &amp; Method" Grid.Row="2" Margin="0,0,0,15" Padding="10" Background="White">
             <StackPanel>
-                <Grid Margin="0,0,0,8">
+                <TextBlock Text="Calculation Mode:" FontWeight="Bold" Margin="0,0,0,5"/>
+                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                    <RadioButton Name="Rb_MatchStakes" Content="Match Stakes" GroupName="Method" IsChecked="True" Margin="0,0,15,0"/>
+                    <RadioButton Name="Rb_UseSlope" Content="Use Slope %" GroupName="Method"/>
+                </StackPanel>
+                
+                <Grid Margin="0,0,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="80"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="30"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="Slope:" VerticalAlignment="Center" FontWeight="Bold"/>
+                    <TextBox Name="Tb_Slope" Text="2.0" Grid.Column="1" VerticalContentAlignment="Center" IsEnabled="False"/>
+                    <TextBlock Text="%" Grid.Column="2" VerticalAlignment="Center" Margin="5,0,0,0" Foreground="Gray"/>
+                </Grid>
+                <Separator Margin="0,5"/>
+
+                <Grid Margin="0,5,0,8">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="60"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Grid.Column="0">
-                        <Button Name="Btn_SelectStakes" Content="Select Stakes (Start/End)" Height="25" HorizontalAlignment="Left" Width="180"/>
+                        <Button Name="Btn_SelectStakes" Content="Select Stakes (Start &amp; End)" Height="25" HorizontalAlignment="Left" Width="180"/>
                         <TextBlock Name="Lb_StartStake" Text="Start: [None]" FontSize="11" Foreground="#999" Margin="2,4,0,0"/>
                         <TextBlock Name="Lb_EndStake" Text="End: [None]" FontSize="11" Foreground="#999" Margin="2,2,0,0"/>
                     </StackPanel>
                     <Button Name="Btn_Swap" Content="Swap" Grid.Column="1" Height="25" VerticalAlignment="Top" IsEnabled="False"/>
                 </Grid>
-                <Separator Margin="0,5"/>
+                
                 <StackPanel>
                     <Button Name="Btn_SelectLine" Content="Select Guide Line" Height="25" HorizontalAlignment="Left" Width="180"/>
                     <TextBlock Name="Lb_Line" Text="Line: [None]" FontSize="11" Foreground="#999" Margin="2,4,0,0"/>
@@ -39,7 +65,7 @@
             </StackPanel>
         </GroupBox>
 
-        <GroupBox Header="2. Parameters" Grid.Row="2" Margin="0,0,0,15" Padding="10" Background="White">
+        <GroupBox Header="3. Parameters" Grid.Row="3" Margin="0,0,0,15" Padding="10" Background="White">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="140"/>
@@ -54,24 +80,29 @@
                 
                 <TextBlock Text="Path Width:" VerticalAlignment="Center" Grid.Row="0" Grid.Column="0"/>
                 <TextBox Name="Tb_Width" Text="6.0" VerticalContentAlignment="Center" Grid.Row="0" Grid.Column="1"/>
+                <TextBlock Text="ft" VerticalAlignment="Center" Margin="5,0,0,0" Grid.Row="0" Grid.Column="2" Foreground="Gray"/>
                 
-                <TextBlock Text="Falloff:" VerticalAlignment="Center" Grid.Row="1" Grid.Column="0"/>
+                <TextBlock Text="Falloff Dist:" VerticalAlignment="Center" Grid.Row="1" Grid.Column="0"/>
                 <TextBox Name="Tb_Falloff" Text="10.0" VerticalContentAlignment="Center" Grid.Row="1" Grid.Column="1"/>
+                <TextBlock Text="ft" VerticalAlignment="Center" Margin="5,0,0,0" Grid.Row="1" Grid.Column="2" Foreground="Gray"/>
                 
-                <TextBlock Text="Grid Res:" VerticalAlignment="Center" Grid.Row="2" Grid.Column="0"/>
+                <TextBlock Text="Grid Resolution:" VerticalAlignment="Center" Grid.Row="2" Grid.Column="0"/>
                 <TextBox Name="Tb_Grid" Text="3.0" VerticalContentAlignment="Center" Grid.Row="2" Grid.Column="1"/>
+                <TextBlock Text="ft" VerticalAlignment="Center" Margin="5,0,0,0" Grid.Row="2" Grid.Column="2" Foreground="Gray"/>
             </Grid>
         </GroupBox>
 
-        <StackPanel Grid.Row="4">
+        <StackPanel Grid.Row="5">
             <Label Name="Lb_Status" Content="Ready." HorizontalContentAlignment="Center" Foreground="Gray" Margin="0,5"/>
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
-                <Button Name="Btn_Edging" Content="Run Edging" Height="40" Margin="0,0,5,0" Grid.Column="0" IsEnabled="False"/>
-                <Button Name="Btn_Run" Content="Sculpt Terrain" Height="40" Margin="5,0,0,0" Grid.Column="1" FontWeight="Bold" IsEnabled="False"/>
+                <Button Name="Btn_Stitch" Content="Stitch Edge" Height="40" Margin="0,0,5,0" Grid.Column="0" FontWeight="SemiBold"/>
+                <Button Name="Btn_Edging" Content="Run Edging" Height="40" Margin="0,0,5,0" Grid.Column="1" IsEnabled="False"/>
+                <Button Name="Btn_Run" Content="Sculpt" Height="40" Margin="0,0,0,0" Grid.Column="2" FontWeight="Bold" IsEnabled="False"/>
             </Grid>
         </StackPanel>
     </Grid>
