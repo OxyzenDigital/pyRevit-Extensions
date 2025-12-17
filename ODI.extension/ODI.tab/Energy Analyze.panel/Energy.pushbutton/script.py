@@ -1,40 +1,54 @@
 # -*- coding: utf-8 -*-
 """
-Final Version 4.0: 
-- Naming: "Manage Rooms - Energy Analyze"
-- Zoom: Forces Zoom-to-Fit on all opened views.
-- Visibility: robustly enables Room/Space Interior & Reference subcategories.
+Universal Version 5.0 (Revit 2023-2026+ Compatible)
+- Replaces '.IntegerValue' with a version-safe ID check.
+- Uses BuiltInCategory directly to avoid Integer conversion errors.
+- Robust visibility handling for all versions.
 """
 from pyrevit import revit, forms, script
 from Autodesk.Revit.DB import (FilteredElementCollector, ViewPlan, ViewFamily, 
                                BuiltInCategory, CategoryType, ElementId, Level)
 
-# --- Configuration ---
-# Updated Naming Convention: Suffix moved to end
-VIEW_CONFIGS = [
-    {"suffix": "Manage Rooms - Energy Analyze",        "category": BuiltInCategory.OST_Rooms},
-    {"suffix": "Manage Spaces - Energy Analyze",       "category": BuiltInCategory.OST_MEPSpaces},
-    {"suffix": "Manage System Zones - Energy Analyze", "category": BuiltInCategory.OST_HVAC_Zones},
-]
-
-MODEL_WHITELIST = [
-    int(BuiltInCategory.OST_Walls),
-    int(BuiltInCategory.OST_Doors),
-    int(BuiltInCategory.OST_Windows),
-    int(BuiltInCategory.OST_StructuralColumns),
-    int(BuiltInCategory.OST_StructuralFraming),
-    int(BuiltInCategory.OST_CurtainWallMullions),
-    int(BuiltInCategory.OST_CurtainWallPanels),
-    int(BuiltInCategory.OST_Floors),
-]
-
-ANNOTATION_WHITELIST = [
-    int(BuiltInCategory.OST_Grids),
-]
-
 doc = revit.doc
 uidoc = revit.uidoc
 logger = script.get_logger()
+
+# --- COMPATIBILITY HELPER ---
+def get_id_val(element_id):
+    """
+    Universal helper to get the Integer/Long value of an ElementId.
+    Revit 2024+ uses .Value (Long)
+    Revit <2024 uses .IntegerValue (Int)
+    """
+    try:
+        # Try newer API first (2024/2025/2026)
+        return element_id.Value
+    except AttributeError:
+        # Fallback to older API
+        return element_id.IntegerValue
+
+# --- Configuration ---
+# Keeping BICs as Objects, not Ints, to be safe across versions
+VIEW_CONFIGS = [
+    {"suffix": "Manage Rooms - Energy Analyze",        "bic": BuiltInCategory.OST_Rooms},
+    {"suffix": "Manage Spaces - Energy Analyze",       "bic": BuiltInCategory.OST_MEPSpaces},
+    {"suffix": "Manage System Zones - Energy Analyze", "bic": BuiltInCategory.OST_HVAC_Zones},
+]
+
+MODEL_WHITELIST_BIC = [
+    BuiltInCategory.OST_Walls,
+    BuiltInCategory.OST_Doors,
+    BuiltInCategory.OST_Windows,
+    BuiltInCategory.OST_StructuralColumns,
+    BuiltInCategory.OST_StructuralFraming,
+    BuiltInCategory.OST_CurtainWallMullions,
+    BuiltInCategory.OST_CurtainWallPanels,
+    BuiltInCategory.OST_Floors,
+]
+
+ANNOTATION_WHITELIST_BIC = [
+    BuiltInCategory.OST_Grids,
+]
 
 # --- Custom UI Wrapper ---
 class LevelUIItem(object):
@@ -58,7 +72,10 @@ def get_floor_plan_type():
             return t.Id
     return None
 
-def get_safe_model_categories():
+def get_safe_model_category_ids():
+    """
+    Returns a list of ElementIds for all Model Categories.
+    """
     safe_ids = []
     categories = doc.Settings.Categories
     for cat in categories:
@@ -78,32 +95,43 @@ def check_level_status(level):
             return False
     return True
 
-def ensure_subcategories_visible(view, parent_category_id):
+def ensure_subcategories_visible(view, parent_bic):
     """
-    Robustly turns on 'Interior Fill', 'Reference', etc.
-    We skip 'CanCategoryBeHidden' check which can sometimes be false for system subcats.
+    Robustly turns on subcategories.
+    Uses ElementId(BuiltInCategory) to ensure 2026 compatibility.
     """
     try:
-        parent_cat = doc.Settings.Categories.get_Item(ElementId(parent_category_id))
+        parent_id = ElementId(parent_bic)
+        parent_cat = doc.Settings.Categories.get_Item(parent_id)
         if parent_cat and parent_cat.SubCategories:
             for sub_cat in parent_cat.SubCategories:
                 try:
-                    # Force Un-hide
                     if view.GetCategoryHidden(sub_cat.Id):
                         view.SetCategoryHidden(sub_cat.Id, False)
                 except:
-                    # Some subcats are strictly controlled, ignore failures
                     pass
     except Exception:
         pass 
 
-def configure_visibility(view, target_category_id, all_model_cat_ids):
-    whitelist_set = set(MODEL_WHITELIST)
-    whitelist_set.add(target_category_id.IntegerValue)
+def configure_visibility(view, target_bic, all_model_ids):
+    # 1. Prepare Whitelist Set (using Universal ID Values)
+    whitelist_vals = set()
     
-    # 1. Hide Non-Whitelisted
-    for cat_id in all_model_cat_ids:
-        if cat_id.IntegerValue in whitelist_set:
+    # Add Standard Model Whitelist
+    for bic in MODEL_WHITELIST_BIC:
+        try:
+            eid = ElementId(bic)
+            whitelist_vals.add(get_id_val(eid))
+        except: pass
+        
+    # Add Target Category
+    target_eid = ElementId(target_bic)
+    whitelist_vals.add(get_id_val(target_eid))
+    
+    # 2. Hide Non-Whitelisted
+    for cat_id in all_model_ids:
+        # Compare Values, not Objects
+        if get_id_val(cat_id) in whitelist_vals:
             continue
         try:
             if view.CanCategoryBeHidden(cat_id):
@@ -111,20 +139,22 @@ def configure_visibility(view, target_category_id, all_model_cat_ids):
         except:
             continue
 
-    # 2. Force ON Whitelist + Target
-    full_on_list = MODEL_WHITELIST + ANNOTATION_WHITELIST + [target_category_id.IntegerValue]
-    for int_id in full_on_list:
+    # 3. Force ON Whitelist + Target + Annotation
+    # Combine lists
+    full_on_bics = MODEL_WHITELIST_BIC + ANNOTATION_WHITELIST_BIC + [target_bic]
+    
+    for bic in full_on_bics:
         try:
-            eid = ElementId(int_id)
+            eid = ElementId(bic)
             if view.CanCategoryBeHidden(eid):
                 view.SetCategoryHidden(eid, False)
         except:
             continue
             
-    # 3. Force Subcategories (Rooms/Spaces internals)
-    ensure_subcategories_visible(view, target_category_id.IntegerValue)
+    # 4. Force Subcategories
+    ensure_subcategories_visible(view, target_bic)
 
-def create_or_get_view(level, view_type_id, view_suffix, target_category_enum, all_model_cat_ids):
+def create_or_get_view(level, view_type_id, view_suffix, target_bic, all_model_ids):
     view_name = "{} - {}".format(level.Name, view_suffix)
     is_new = False
     
@@ -144,21 +174,18 @@ def create_or_get_view(level, view_type_id, view_suffix, target_category_enum, a
             pass
 
     if target_view:
-        target_id = ElementId(target_category_enum)
-        configure_visibility(target_view, target_id, all_model_cat_ids)
+        configure_visibility(target_view, target_bic, all_model_ids)
     
     return target_view, is_new
 
 def apply_zoom_to_fit(views):
-    """
-    Finds the UI window for each view and applies ZoomToFit.
-    """
-    # Get all open UI Views
     uiviews = uidoc.GetOpenUIViews()
-    view_ids = [v.Id.IntegerValue for v in views]
+    # Create set of ID Values for the views we just touched
+    target_ids = set([get_id_val(v.Id) for v in views])
     
     for uiv in uiviews:
-        if uiv.ViewId.IntegerValue in view_ids:
+        # Check if this UI View matches one of ours
+        if get_id_val(uiv.ViewId) in target_ids:
             try:
                 uiv.ZoomToFit()
             except:
@@ -194,7 +221,7 @@ def main():
     if not view_type_id:
         forms.alert("No Floor Plan Type found.", exitscript=True)
 
-    all_model_cat_ids = get_safe_model_categories()
+    all_model_ids = get_safe_model_category_ids()
     views_to_open = []
     created_count = 0
 
@@ -207,8 +234,8 @@ def main():
                         level, 
                         view_type_id, 
                         config["suffix"], 
-                        config["category"],
-                        all_model_cat_ids
+                        config["bic"],
+                        all_model_ids
                     )
                     if view:
                         views_to_open.append(view)
@@ -228,10 +255,10 @@ def main():
             except:
                 pass
         
-        # Apply Zoom (Must be done after they are opened)
+        # Apply Zoom
         apply_zoom_to_fit(views_to_open)
         
-        # 4. Final MODAL Dialog
+        # 4. Final Dialog
         result_message = "Process Complete.\n\nTotal Views Active: {}\nNew Views Created: {}".format(
             len(views_to_open), 
             created_count
