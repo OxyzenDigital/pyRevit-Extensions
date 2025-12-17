@@ -1,19 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-Smart Version 3.2: 
-- Uses a custom wrapper class to handle UI display names safely.
-- Resolves 'readonly attribute' and 'unexpected keyword' errors.
-- Ensures Interior Fill and Reference visibility.
+Final Version 4.0: 
+- Naming: "Manage Rooms - Energy Analyze"
+- Zoom: Forces Zoom-to-Fit on all opened views.
+- Visibility: robustly enables Room/Space Interior & Reference subcategories.
 """
 from pyrevit import revit, forms, script
 from Autodesk.Revit.DB import (FilteredElementCollector, ViewPlan, ViewFamily, 
                                BuiltInCategory, CategoryType, ElementId, Level)
 
 # --- Configuration ---
+# Updated Naming Convention: Suffix moved to end
 VIEW_CONFIGS = [
-    {"suffix": "Energy Analyze - Manage Rooms",        "category": BuiltInCategory.OST_Rooms},
-    {"suffix": "Energy Analyze - Manage Spaces",       "category": BuiltInCategory.OST_MEPSpaces},
-    {"suffix": "Energy Analyze - Manage System Zones", "category": BuiltInCategory.OST_HVAC_Zones},
+    {"suffix": "Manage Rooms - Energy Analyze",        "category": BuiltInCategory.OST_Rooms},
+    {"suffix": "Manage Spaces - Energy Analyze",       "category": BuiltInCategory.OST_MEPSpaces},
+    {"suffix": "Manage System Zones - Energy Analyze", "category": BuiltInCategory.OST_HVAC_Zones},
 ]
 
 MODEL_WHITELIST = [
@@ -34,26 +35,17 @@ ANNOTATION_WHITELIST = [
 doc = revit.doc
 uidoc = revit.uidoc
 logger = script.get_logger()
-output = script.get_output()
 
-# --- Custom UI Wrapper Class ---
+# --- Custom UI Wrapper ---
 class LevelUIItem(object):
-    """
-    A simple wrapper class to control how Levels appear in the list.
-    We use this instead of TemplateListItem to avoid readonly/constructor errors.
-    """
     def __init__(self, level_element, is_existing):
         self.element = level_element
-        # This 'name' attribute is what pyRevit displays in the list
         if is_existing:
             self.name = "{}   --   [Existing Views]".format(level_element.Name)
         else:
             self.name = "{}   --   [Create New]".format(level_element.Name)
-        
-        # Default all items to checked
         self.checked = True
 
-    # This ensures the name is displayed correctly in all contexts
     def __repr__(self):
         return self.name
 
@@ -78,10 +70,8 @@ def get_safe_model_categories():
     return safe_ids
 
 def check_level_status(level):
-    """Returns True if all 3 Energy views exist for this level."""
     collector = FilteredElementCollector(doc).OfClass(ViewPlan)
     existing_names = set([v.Name for v in collector])
-    
     for config in VIEW_CONFIGS:
         target_name = "{} - {}".format(level.Name, config["suffix"])
         if target_name not in existing_names:
@@ -89,14 +79,21 @@ def check_level_status(level):
     return True
 
 def ensure_subcategories_visible(view, parent_category_id):
-    """Forces 'Interior Fill' and 'Reference' to be visible."""
+    """
+    Robustly turns on 'Interior Fill', 'Reference', etc.
+    We skip 'CanCategoryBeHidden' check which can sometimes be false for system subcats.
+    """
     try:
         parent_cat = doc.Settings.Categories.get_Item(ElementId(parent_category_id))
         if parent_cat and parent_cat.SubCategories:
             for sub_cat in parent_cat.SubCategories:
-                if view.CanCategoryBeHidden(sub_cat.Id):
+                try:
+                    # Force Un-hide
                     if view.GetCategoryHidden(sub_cat.Id):
                         view.SetCategoryHidden(sub_cat.Id, False)
+                except:
+                    # Some subcats are strictly controlled, ignore failures
+                    pass
     except Exception:
         pass 
 
@@ -124,7 +121,7 @@ def configure_visibility(view, target_category_id, all_model_cat_ids):
         except:
             continue
             
-    # 3. Subcategories
+    # 3. Force Subcategories (Rooms/Spaces internals)
     ensure_subcategories_visible(view, target_category_id.IntegerValue)
 
 def create_or_get_view(level, view_type_id, view_suffix, target_category_enum, all_model_cat_ids):
@@ -152,37 +149,39 @@ def create_or_get_view(level, view_type_id, view_suffix, target_category_enum, a
     
     return target_view, is_new
 
-def print_green_header(title, subtitle):
-    html = """
-    <div style="background-color:#27ae60; padding:15px; margin-bottom:15px; border-radius:4px; box-shadow:0 2px 5px rgba(0,0,0,0.2);">
-        <h2 style="color:white; margin:0; font-family:Segoe UI;">{}</h2>
-        <p style="color:white; margin:5px 0 0 0; opacity:0.9;">{}</p>
-    </div>
-    """.format(title, subtitle)
-    output.print_html(html)
+def apply_zoom_to_fit(views):
+    """
+    Finds the UI window for each view and applies ZoomToFit.
+    """
+    # Get all open UI Views
+    uiviews = uidoc.GetOpenUIViews()
+    view_ids = [v.Id.IntegerValue for v in views]
+    
+    for uiv in uiviews:
+        if uiv.ViewId.IntegerValue in view_ids:
+            try:
+                uiv.ZoomToFit()
+            except:
+                pass
 
 # --- Main ---
 
 def main():
-    # 1. Collect Levels
+    # 1. UI Setup
     all_levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
     all_levels = sorted(all_levels, key=lambda x: x.Elevation)
     
     if not all_levels:
         forms.alert("No levels found.", exitscript=True)
 
-    # 2. Build List with Custom UI Item
     ui_items = []
     for lvl in all_levels:
         is_complete = check_level_status(lvl)
-        # Create our custom wrapper object
         ui_items.append(LevelUIItem(lvl, is_complete))
 
-    # 3. Show Dialog
-    # SelectFromList returns a list of the LevelUIItem objects we created
     selected_items = forms.SelectFromList.show(
         ui_items,
-        title="Select Levels for Energy Analysis",
+        title="Energy Analysis | Select Levels",
         multiselect=True,
         button_name="Process Views"
     )
@@ -190,7 +189,7 @@ def main():
     if not selected_items:
         return
 
-    # 4. Process
+    # 2. Processing
     view_type_id = get_floor_plan_type()
     if not view_type_id:
         forms.alert("No Floor Plan Type found.", exitscript=True)
@@ -201,9 +200,7 @@ def main():
 
     with revit.Transaction("Process Energy Views"):
         for item in selected_items:
-            # Unwrap the level from our custom item
             level = item.element
-            
             for config in VIEW_CONFIGS:
                 try:
                     view, is_new = create_or_get_view(
@@ -220,19 +217,31 @@ def main():
                 except Exception as e:
                     logger.error("Error on {}: {}".format(level.Name, e))
 
-    # 5. Open Views
+    # 3. View Activation & Zoom
     if views_to_open:
         views_to_open.sort(key=lambda x: x.Name)
         
+        # Open them
         for v in views_to_open:
             try:
                 uidoc.RequestViewChange(v)
             except:
                 pass
         
-        print_green_header("Energy Analysis Views", "Process Complete")
-        print("Total Views Active: {}".format(len(views_to_open)))
-        print("New Views Created: {}".format(created_count))
+        # Apply Zoom (Must be done after they are opened)
+        apply_zoom_to_fit(views_to_open)
+        
+        # 4. Final MODAL Dialog
+        result_message = "Process Complete.\n\nTotal Views Active: {}\nNew Views Created: {}".format(
+            len(views_to_open), 
+            created_count
+        )
+        
+        forms.alert(
+            result_message, 
+            title="Energy Analysis Manager", 
+            warn_icon=False
+        )
 
 if __name__ == '__main__':
     main()
