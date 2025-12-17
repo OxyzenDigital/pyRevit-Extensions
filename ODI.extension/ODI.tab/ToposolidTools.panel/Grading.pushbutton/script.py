@@ -15,7 +15,8 @@ clr.AddReference('PresentationFramework')
 from System.Collections.Generic import List
 from Autodesk.Revit.DB import (
     XYZ, Transaction, TransactionGroup, ElementId, BuiltInParameter,
-    ReferenceIntersector, FindReferenceTarget, Options, Solid, ViewType, Edge
+    ReferenceIntersector, FindReferenceTarget, Options, Solid, ViewType, Edge,
+    ElementTransformUtils
 )
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
 from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, AccessLevel
@@ -31,7 +32,9 @@ uidoc = revit.uidoc
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "grading_settings.json")
 RECIPE_SCHEMA_GUID = Guid("A4B9C8D2-1234-4567-8901-ABCDEF123456")
 
-MIN_DIST_TOLERANCE = 0.25 
+# Tolerances
+MIN_DIST_TOLERANCE = 0.25      # Prevent "Too Thin" errors
+BOUNDARY_TOLERANCE = 0.1       # Definition of "On Boundary"
 
 def get_id_val(element):
     if not element: return -1
@@ -107,8 +110,7 @@ class GradingState(object):
 
     @property
     def ready(self):
-        if self.mode == "slope":
-            return bool(self.start_stake and self.grading_line)
+        # Always require both stakes + line for consistency
         return bool(self.start_stake and self.end_stake and self.grading_line)
 
 class GradingWindow(forms.WPFWindow):
@@ -195,10 +197,21 @@ class UniversalFilter(ISelectionFilter):
 def flatten(pt): return XYZ(pt.X, pt.Y, 0)
 def lerp(a, b, t): return a + t * (b - a)
 
-def is_point_on_solid(intersector, pt):
+def get_toposolid_max_z(toposolid):
+    """Safely gets the bounding box Max Z to ensure Ray Trace starts above it."""
+    bb = toposolid.get_BoundingBox(None)
+    if bb: return bb.Max.Z
+    return 1000.0 # Fallback
+
+def is_point_on_solid(intersector, pt, start_z):
+    """
+    Checks if a point 'pt' (ignoring its Z) hits the solid
+    when a ray is cast from 'start_z' downwards.
+    """
     if not intersector: return True 
-    origin = XYZ(pt.X, pt.Y, pt.Z + 1000.0) 
+    origin = XYZ(pt.X, pt.Y, start_z + 10.0) 
     try:
+        # Shoot down (0,0,-1)
         if intersector.FindNearest(origin, XYZ(0, 0, -1)): return True
     except: pass
     return False
@@ -209,14 +222,26 @@ def is_too_close(candidate_pt, occupied_points, tolerance=MIN_DIST_TOLERANCE):
         if cand_flat.DistanceTo(flatten(existing)) < tolerance: return True
     return False
 
-def get_surface_z(intersector, pt):
+def get_surface_z(intersector, pt, start_z):
     if not intersector: return None
-    origin = XYZ(pt.X, pt.Y, pt.Z + 2000.0) 
+    origin = XYZ(pt.X, pt.Y, start_z + 10.0) 
     try:
         context = intersector.FindNearest(origin, XYZ(0, 0, -1))
         if context: return context.GetReference().GlobalPoint.Z
     except: pass
     return None
+
+def get_boundary_curves(toposolid):
+    opt = Options(); opt.ComputeReferences = True
+    geom = toposolid.get_Geometry(opt)
+    curves = []
+    if not geom: return []
+    for obj in geom:
+        if isinstance(obj, Solid):
+            for edge in obj.Edges:
+                c = edge.AsCurve()
+                if c: curves.append(c)
+    return curves
 
 def get_z_from_curve_param(curve, projected_result, z_start, z_end):
     p_min, p_max = curve.GetEndParameter(0), curve.GetEndParameter(1)
@@ -227,12 +252,17 @@ def get_z_from_curve_param(curve, projected_result, z_start, z_end):
 def get_line_ends(curve):
     return curve.GetEndPoint(0), curve.GetEndPoint(1)
 
-def calculate_slope_params(state):
+# ==========================================
+# 4. MATH & STAKE ADJUSTMENT
+# ==========================================
+def calculate_and_adjust_stakes(state):
     curve = state.grading_line.GeometryCurve
     l_start, l_end = get_line_ends(curve)
+    
     u_start_pt = state.start_stake.Location.Point
     z_start = u_start_pt.Z
     
+    # Check alignment relative to curve direction
     dist_start = u_start_pt.DistanceTo(l_start)
     dist_end = u_start_pt.DistanceTo(l_end)
     is_flipped = dist_end < dist_start 
@@ -243,23 +273,39 @@ def calculate_slope_params(state):
     if state.mode == "slope":
         try:
             pct = float(state.slope_val) / 100.0
+            # Calculate Height Difference
             z_end = z_start + (length * pct)
+            
+            # VISUAL UPDATE: Move the End Stake (if present)
             if state.end_stake:
-                t_move = Transaction(doc, "Adj Stake")
+                t_move = Transaction(doc, "Adjust Stake Height")
                 t_move.Start()
                 try:
-                    p = state.end_stake.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
-                    if p and not p.IsReadOnly: p.Set(z_end)
-                    else: state.end_stake.Location.Point = XYZ(state.end_stake.Location.Point.X, state.end_stake.Location.Point.Y, z_end)
-                except: pass
+                    current_pt = state.end_stake.Location.Point
+                    diff_z = z_end - current_pt.Z
+                    if abs(diff_z) > 0.001:
+                        vec = XYZ(0, 0, diff_z)
+                        # Try MoveElement (Works for Hosted/Unhosted)
+                        ElementTransformUtils.MoveElement(doc, state.end_stake.Id, vec)
+                except: 
+                    # Fallback for strict hosts
+                    try:
+                        p = state.end_stake.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
+                        if p and not p.IsReadOnly: p.Set(z_end)
+                    except: pass
                 t_move.Commit()
-        except: z_end = z_start
+        except: 
+            z_end = z_start
     else:
+        # Match Stake Mode
         z_end = state.end_stake.Location.Point.Z
-    return (z_end, z_start) if is_flipped else (z_start, z_end)
+
+    # Return ordered tuple (StartParamZ, EndParamZ)
+    if is_flipped: return z_end, z_start
+    else: return z_start, z_end
 
 # ==========================================
-# 4. ACTIONS
+# 5. EXECUTION
 # ==========================================
 def perform_load_recipe(state):
     try:
@@ -279,36 +325,34 @@ def perform_load_recipe(state):
 def perform_manual_stitch(state):
     try:
         g = float(state.grid)
-        # Select Edge
-        ref_edge = uidoc.Selection.PickObject(ObjectType.Edge, "Select Toposolid Boundary Edge to Stitch")
+        ref_edge = uidoc.Selection.PickObject(ObjectType.Edge, "Select Boundary Edge to Stitch")
         edge_elem = doc.GetElement(ref_edge)
-        
-        # Get actual Curve geometry from the Reference
         edge_geom = edge_elem.GetGeometryObjectFromReference(ref_edge)
-        if not isinstance(edge_geom, Edge):
-            print("Selection was not an Edge.")
-            return
+        if not isinstance(edge_geom, Edge): return
         
-        # This is the single curve we will walk
         b_curve = edge_geom.AsCurve() 
-        toposolid = edge_elem # The element IS the toposolid (or floor)
+        toposolid = edge_elem 
+        bounds = get_boundary_curves(toposolid)
 
-        tg = TransactionGroup(doc, "Stitch Edge")
-        tg.Start()
+        tg = TransactionGroup(doc, "Stitch Edge"); tg.Start()
+        t = Transaction(doc, "Stitch"); t.Start()
         
-        t = Transaction(doc, "Stitch")
-        t.Start()
-        
-        editor = toposolid.GetSlabShapeEditor()
-        editor.Enable()
-        
+        editor = toposolid.GetSlabShapeEditor(); editor.Enable()
         all_verts = [v.Position for v in editor.SlabShapeVertices]
+        
+        # Pre-filter internal points
+        internal_verts = []
+        for v in all_verts:
+            is_on_boundary = False
+            for bc in bounds:
+                res = bc.Project(v)
+                if res and flatten(res.XYZPoint).DistanceTo(flatten(v)) < BOUNDARY_TOLERANCE:
+                    is_on_boundary = True; break
+            if not is_on_boundary: internal_verts.append(v)
+
         points_to_add = []
-        
-        # Search radius is Grid Resolution (the typical gap size)
-        search_dist = g
+        search_dist = g * 1.5 
         step_size = g * 0.5 
-        
         length = b_curve.Length
         steps = int(length / step_size)
         if steps < 2: steps = 2
@@ -317,27 +361,19 @@ def perform_manual_stitch(state):
             t_val = float(i) / float(steps)
             b_pt = b_curve.Evaluate(t_val, True)
             
-            # 1. Find Nearest Neighbor (2D Search)
             nearest_dist = 9999.0
             nearest_z = 0.0
-            nearest_pt_ref = None
+            found_neighbor = False
             
-            for v in all_verts:
-                # 2D Distance
+            for v in internal_verts:
                 d = flatten(b_pt).DistanceTo(flatten(v))
                 if d < nearest_dist:
                     nearest_dist = d
                     nearest_z = v.Z
-                    nearest_pt_ref = v
+                    found_neighbor = True
             
-            # 2. Logic: Is gap valid?
-            # Must be closer than Grid (so it's a neighbor)
-            # Must be further than Tolerance (so it's not already ON the boundary)
-            if nearest_dist < search_dist and nearest_dist > MIN_DIST_TOLERANCE:
-                
-                # Check duplication in queue
+            if found_neighbor and nearest_dist < search_dist:
                 if not is_too_close(b_pt, points_to_add, MIN_DIST_TOLERANCE):
-                    # ADD: X/Y from Boundary, Z from Neighbor
                     points_to_add.append(XYZ(b_pt.X, b_pt.Y, nearest_z))
 
         count = 0
@@ -345,10 +381,8 @@ def perform_manual_stitch(state):
             try: editor.AddPoint(p); count += 1
             except: pass
             
-        t.Commit()
-        tg.Assimilate()
-        print("Manual Stitch: Added {} points on selected edge.".format(count))
-
+        t.Commit(); tg.Assimilate()
+        print("Manual Stitch: Added {} points.".format(count))
     except Exception as e:
         print("Stitch Cancelled: {}".format(e))
 
@@ -368,44 +402,57 @@ def perform_sculpt(state):
         t_rec = Transaction(doc, "Save Recipe"); t_rec.Start()
         GradingRecipe.save_recipe(toposolid, rec); t_rec.Commit()
 
+        # Math Params
         z_s, z_e = calculate_and_adjust_stakes(state)
+        
+        # Ray Trace Setup (Calculated from Toposolid Height to ensure hits)
         ids = List[ElementId]([toposolid.Id])
         intersector = None
+        ray_start_z = get_toposolid_max_z(toposolid)
+        
         if doc.ActiveView.ViewType == ViewType.ThreeD:
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
 
         curve = state.grading_line.GeometryCurve
         core_rad = w / 2.0; total_rad = core_rad + f
         
+        # 1. DENSIFY
         t1 = Transaction(doc, "Densify"); t1.Start()
         editor = toposolid.GetSlabShapeEditor(); editor.Enable()
         occupied_points = [v.Position for v in editor.SlabShapeVertices]
         bb = state.grading_line.get_BoundingBox(None)
-        buffer = total_rad + g 
-        start_x = math.floor((bb.Min.X - buffer) / g) * g
-        end_x   = math.ceil((bb.Max.X + buffer) / g) * g
-        start_y = math.floor((bb.Min.Y - buffer) / g) * g
-        end_y   = math.ceil((bb.Max.Y + buffer) / g) * g
+        
+        start_x = math.floor((bb.Min.X - total_rad - g) / g) * g
+        end_x   = math.ceil((bb.Max.X + total_rad + g) / g) * g
+        start_y = math.floor((bb.Min.Y - total_rad - g) / g) * g
+        end_y   = math.ceil((bb.Max.Y + total_rad + g) / g) * g
 
         grid_pts = []
         x = start_x
         while x <= end_x:
             y = start_y
             while y <= end_y:
-                t_pt = XYZ(x, y, z_s)
+                t_pt = XYZ(x, y, 0) # Z ignored for flat distance check
                 res = curve.Project(t_pt)
                 if res and flatten(t_pt).DistanceTo(flatten(res.XYZPoint)) < (total_rad + g):
-                    if is_point_on_solid(intersector, t_pt):
-                        rz = get_surface_z(intersector, t_pt)
+                    # Robust Ray Trace
+                    if is_point_on_solid(intersector, t_pt, ray_start_z):
+                        rz = get_surface_z(intersector, t_pt, ray_start_z)
                         if rz: grid_pts.append(XYZ(x, y, rz))
                 y += g
             x += g
+            
+        points_added = 0
         for p in grid_pts:
             if not is_too_close(p, occupied_points):
-                try: editor.AddPoint(p); occupied_points.append(p)
+                try: editor.AddPoint(p); occupied_points.append(p); points_added += 1
                 except: pass
         t1.Commit()
         
+        if points_added == 0:
+            print("Warning: Densification added 0 points. Check if Guide Line is over Toposolid.")
+        
+        # 2. SCULPT
         t2 = Transaction(doc, "Sculpt"); t2.Start()
         updates = []
         for v in editor.SlabShapeVertices:
@@ -413,19 +460,23 @@ def perform_sculpt(state):
             if not res: continue
             d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
             if d > total_rad: continue
+            
             target_z = get_z_from_curve_param(curve, res, z_s, z_e)
             new_z = v.Position.Z
+            
             if d <= core_rad: new_z = target_z
             else:
                 t_val = (d - core_rad) / f; t_val = 1.0 if t_val > 1.0 else t_val
                 smooth_t = t_val * t_val * (3 - 2 * t_val)
                 new_z = lerp(target_z, new_z, smooth_t)
+            
             if abs(new_z - v.Position.Z) > 0.005:
                 updates.append(XYZ(v.Position.X, v.Position.Y, new_z))
         for p in updates:
             try: editor.AddPoint(p)
             except: pass
         t2.Commit()
+        
         tg.Assimilate()
     except Exception as e:
         tg.RollBack(); print("Error: {}".format(e))
@@ -442,6 +493,8 @@ def perform_edging(state):
         z_s, z_e = calculate_and_adjust_stakes(state)
         ids = List[ElementId]([toposolid.Id])
         intersector = None
+        ray_start_z = get_toposolid_max_z(toposolid)
+        
         if doc.ActiveView.ViewType == ViewType.ThreeD:
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
         
@@ -451,7 +504,7 @@ def perform_edging(state):
         to_move, to_add = [], []
         all_verts = [v for v in editor.SlabShapeVertices]
         
-        for v in all_verts: # Snap
+        for v in all_verts: 
             res = curve.Project(v.Position)
             if res and abs(flatten(v.Position).DistanceTo(flatten(res.XYZPoint)) - edge_offset) < 1.0:
                 vec = (flatten(v.Position) - flatten(res.XYZPoint)).Normalize()
@@ -471,7 +524,7 @@ def perform_edging(state):
                 offset_vec = normal * (side * edge_offset)
                 final_pt = center_pt + offset_vec
                 final_pt = XYZ(final_pt.X, final_pt.Y, road_z)
-                if is_point_on_solid(intersector, final_pt): to_add.append(final_pt)
+                if is_point_on_solid(intersector, final_pt, ray_start_z): to_add.append(final_pt)
             t_val += step_t
 
         t = Transaction(doc, "Apply Edging"); t.Start()
@@ -484,11 +537,12 @@ def perform_edging(state):
                 try: editor.AddPoint(pt); occupied_points.append(pt)
                 except: pass 
         t.Commit(); tg.Assimilate()
+        print("Edging: Snapped {} | Added {}".format(len(to_move), len(to_add)))
     except Exception as e:
         tg.RollBack(); print("Error: {}".format(e))
 
 # ==========================================
-# 7. LOOP
+# 6. LOOP
 # ==========================================
 if __name__ == '__main__':
     state = GradingState()

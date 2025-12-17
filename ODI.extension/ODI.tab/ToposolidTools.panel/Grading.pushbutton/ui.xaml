@@ -1,7 +1,8 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Toposolid Grading Tool" Height="680" Width="400"
-        WindowStartupLocation="CenterScreen" ResizeMode="CanResize"
+        WindowStartupLocation="Manual" Left="250" Top="100"
+        ResizeMode="CanResize"
         Background="#F0F0F0">
     <Grid Margin="15">
         <Grid.RowDefinitions>
