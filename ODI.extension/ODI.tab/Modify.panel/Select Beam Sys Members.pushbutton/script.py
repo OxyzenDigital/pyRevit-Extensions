@@ -1,4 +1,8 @@
 # Import necessary Revit API modules and CLR for .NET interop
+
+__title__ = "Select Framing \n in Beam System"
+__author__ = "ODI"
+
 import clr
 clr.AddReference('System')
 from System.Collections.Generic import List as NETList  # .NET List for ICollection

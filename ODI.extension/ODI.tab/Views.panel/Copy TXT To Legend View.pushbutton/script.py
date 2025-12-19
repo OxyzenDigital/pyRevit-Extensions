@@ -4,7 +4,7 @@ This script creates a new legend view in Revit and populates it with text from a
 user-selected text file.
 """
 
-__title__ = "Create Text\nColumns"
+__title__ = "Copy TXT \nto Legend View"
 __author__ = "ODI"
 
 import os
