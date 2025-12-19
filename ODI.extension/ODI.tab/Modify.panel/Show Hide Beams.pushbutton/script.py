@@ -1,4 +1,8 @@
 # Import necessary Revit API modules and CLR for .NET interop
+
+__title__ = "Show Hide \nBeam System Framing"
+__author__ = "ODI"
+
 import clr
 clr.AddReference('System')
 from System.Collections.Generic import List as NETList  # .NET List for ICollection
