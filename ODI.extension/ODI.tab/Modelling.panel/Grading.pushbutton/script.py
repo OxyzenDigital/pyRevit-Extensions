@@ -27,14 +27,14 @@ doc = revit.doc
 uidoc = revit.uidoc
 
 # ==========================================
-# 1. SETTINGS & SCHEMA
+# 1. SETTINGS (PARAMETERS ONLY)
 # ==========================================
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "grading_settings.json")
 RECIPE_SCHEMA_GUID = Guid("A4B9C8D2-1234-4567-8901-ABCDEF123456")
 
 # Tolerances
-MIN_DIST_TOLERANCE = 0.25      # Prevent "Too Thin" errors
-BOUNDARY_TOLERANCE = 0.1       # Definition of "On Boundary"
+MIN_DIST_TOLERANCE = 0.25 
+BOUNDARY_TOLERANCE = 0.1 
 
 def get_id_val(element):
     if not element: return -1
@@ -75,17 +75,28 @@ class GradingRecipe:
         except: pass
         return None
 
-def load_settings():
-    defaults = {"width": "6.0", "falloff": "10.0", "grid": "3.0", "slope": "2.0", "mode": "stakes"}
+def load_settings_from_disk():
+    # Only store numbers/text. No Element IDs.
+    defaults = {
+        "width": "6.0", "falloff": "10.0", "grid": "3.0", "slope": "2.0", "mode": "stakes"
+    }
     try:
         if os.path.exists(SETTINGS_FILE):
             with open(SETTINGS_FILE, 'r') as f:
-                defaults.update(json.load(f))
+                data = json.load(f)
+                if data: defaults.update(data)
     except: pass
     return defaults
 
-def save_settings(width, falloff, grid, slope, mode):
-    data = {"width": str(width), "falloff": str(falloff), "grid": str(grid), "slope": str(slope), "mode": mode}
+def save_state_to_disk(state):
+    """Saves only the numeric parameters to disk."""
+    data = {
+        "width": state.width, 
+        "falloff": state.falloff, 
+        "grid": state.grid, 
+        "slope": state.slope_val, 
+        "mode": state.mode
+    }
     try:
         with open(SETTINGS_FILE, 'w') as f:
             json.dump(data, f)
@@ -96,21 +107,26 @@ def save_settings(width, falloff, grid, slope, mode):
 # ==========================================
 class GradingState(object):
     def __init__(self):
+        sets = load_settings_from_disk()
+        
+        # Load Parameters
+        self.width = sets.get("width", "6.0")
+        self.falloff = sets.get("falloff", "10.0")
+        self.grid = sets.get("grid", "3.0")
+        self.slope_val = sets.get("slope", "2.0")
+        self.mode = sets.get("mode", "stakes")
+        
+        # Reset Selection (Reliable Fallback)
         self.start_stake = None
         self.end_stake = None
         self.grading_line = None
         
-        sets = load_settings()
-        self.width = sets["width"]
-        self.falloff = sets["falloff"]
-        self.grid = sets["grid"]
-        self.slope_val = sets["slope"]
-        self.mode = sets["mode"] 
         self.next_action = None
 
     @property
     def ready(self):
-        # Always require both stakes + line for consistency
+        if self.mode == "slope":
+            return bool(self.start_stake and self.grading_line)
         return bool(self.start_stake and self.end_stake and self.grading_line)
 
 class GradingWindow(forms.WPFWindow):
@@ -125,25 +141,29 @@ class GradingWindow(forms.WPFWindow):
         green = Media.Brushes.Green; red = Media.Brushes.Red
         def fmt(e): return "{} [{}]".format(e.Name, get_id_val(e)) if e else "[None]"
 
+        # Mode
         if self.state.mode == "slope":
-            self.Rb_UseSlope.IsChecked = True
-            self.Tb_Slope.IsEnabled = True
+            self.Rb_UseSlope.IsChecked = True; self.Tb_Slope.IsEnabled = True
         else:
-            self.Rb_MatchStakes.IsChecked = True
-            self.Tb_Slope.IsEnabled = False
+            self.Rb_MatchStakes.IsChecked = True; self.Tb_Slope.IsEnabled = False
 
+        # Labels
         self.Lb_StartStake.Text = "Start: {}".format(fmt(self.state.start_stake))
         self.Lb_StartStake.Foreground = green if self.state.start_stake else red
+        
         self.Lb_EndStake.Text = "End: {}".format(fmt(self.state.end_stake))
         self.Lb_EndStake.Foreground = green if self.state.end_stake else red
+        
         self.Lb_Line.Text = "Line: {}".format(fmt(self.state.grading_line))
         self.Lb_Line.Foreground = green if self.state.grading_line else red
 
-        self.Tb_Width.Text = self.state.width
-        self.Tb_Falloff.Text = self.state.falloff
-        self.Tb_Grid.Text = self.state.grid
-        self.Tb_Slope.Text = self.state.slope_val
+        # Textboxes (Loaded from Memory/Disk)
+        self.Tb_Width.Text = str(self.state.width)
+        self.Tb_Falloff.Text = str(self.state.falloff)
+        self.Tb_Grid.Text = str(self.state.grid)
+        self.Tb_Slope.Text = str(self.state.slope_val)
 
+        # Buttons
         self.Btn_Run.IsEnabled = self.state.ready
         self.Btn_Edging.IsEnabled = self.state.ready
         self.Btn_Swap.IsEnabled = bool(self.state.start_stake and self.state.end_stake)
@@ -165,6 +185,28 @@ class GradingWindow(forms.WPFWindow):
         self.Btn_ReadRecipe.Click += self.a_load
         self.Rb_MatchStakes.Checked += self.mode_changed
         self.Rb_UseSlope.Checked += self.mode_changed
+        
+        # Hover (Optional UX - Only works if objects selected in current session)
+        self.Btn_SelectStakes.MouseEnter += self.h_stakes_on
+        self.Btn_SelectStakes.MouseLeave += self.h_off
+        self.Btn_SelectLine.MouseEnter += self.h_line_on
+        self.Btn_SelectLine.MouseLeave += self.h_off
+
+    def set_selection(self, elements):
+        try:
+            ids = List[ElementId]()
+            for e in elements:
+                if e and e.IsValidObject: ids.Add(e.Id)
+            if ids.Count > 0:
+                uidoc.Selection.SetElementIds(ids)
+                uidoc.RefreshActiveView()
+        except: pass
+
+    def h_stakes_on(self, s, a): self.set_selection([self.state.start_stake, self.state.end_stake])
+    def h_line_on(self, s, a): self.set_selection([self.state.grading_line])
+    def h_off(self, s, a):
+        uidoc.Selection.SetElementIds(List[ElementId]())
+        uidoc.RefreshActiveView()
 
     def mode_changed(self, sender, args):
         self.state.mode = "slope" if self.Rb_UseSlope.IsChecked else "stakes"
@@ -172,20 +214,20 @@ class GradingWindow(forms.WPFWindow):
         self.Btn_Run.IsEnabled = self.state.ready
         self.Btn_Edging.IsEnabled = self.state.ready
 
-    def save(self):
+    def update_state_from_ui(self):
+        """Pushes UI values to Memory."""
         self.state.width = self.Tb_Width.Text
         self.state.falloff = self.Tb_Falloff.Text
         self.state.grid = self.Tb_Grid.Text
         self.state.slope_val = self.Tb_Slope.Text
-        save_settings(self.state.width, self.state.falloff, self.state.grid, self.state.slope_val, self.state.mode)
 
-    def a_stakes(self, s, a): self.save(); self.state.next_action = "select_stakes"; self.Close()
-    def a_line(self, s, a): self.save(); self.state.next_action = "select_line"; self.Close()
-    def a_swap(self, s, a): self.save(); self.state.next_action = "swap"; self.Close()
-    def a_run(self, s, a): self.save(); self.state.next_action = "sculpt"; self.Close()
-    def a_edge(self, s, a): self.save(); self.state.next_action = "edge"; self.Close()
-    def a_stitch(self, s, a): self.save(); self.state.next_action = "stitch"; self.Close()
-    def a_load(self, s, a): self.save(); self.state.next_action = "load_recipe"; self.Close()
+    def a_stakes(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_stakes"; self.Close()
+    def a_line(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_line"; self.Close()
+    def a_swap(self, s, a): self.update_state_from_ui(); self.state.next_action = "swap"; self.Close()
+    def a_run(self, s, a): self.update_state_from_ui(); self.state.next_action = "sculpt"; self.Close()
+    def a_edge(self, s, a): self.update_state_from_ui(); self.state.next_action = "edge"; self.Close()
+    def a_stitch(self, s, a): self.update_state_from_ui(); self.state.next_action = "stitch"; self.Close()
+    def a_load(self, s, a): self.update_state_from_ui(); self.state.next_action = "load_recipe"; self.Close()
 
 # ==========================================
 # 3. HELPERS
@@ -198,20 +240,14 @@ def flatten(pt): return XYZ(pt.X, pt.Y, 0)
 def lerp(a, b, t): return a + t * (b - a)
 
 def get_toposolid_max_z(toposolid):
-    """Safely gets the bounding box Max Z to ensure Ray Trace starts above it."""
     bb = toposolid.get_BoundingBox(None)
     if bb: return bb.Max.Z
-    return 1000.0 # Fallback
+    return 1000.0 
 
 def is_point_on_solid(intersector, pt, start_z):
-    """
-    Checks if a point 'pt' (ignoring its Z) hits the solid
-    when a ray is cast from 'start_z' downwards.
-    """
     if not intersector: return True 
     origin = XYZ(pt.X, pt.Y, start_z + 10.0) 
     try:
-        # Shoot down (0,0,-1)
         if intersector.FindNearest(origin, XYZ(0, 0, -1)): return True
     except: pass
     return False
@@ -252,31 +288,20 @@ def get_z_from_curve_param(curve, projected_result, z_start, z_end):
 def get_line_ends(curve):
     return curve.GetEndPoint(0), curve.GetEndPoint(1)
 
-# ==========================================
-# 4. MATH & STAKE ADJUSTMENT
-# ==========================================
 def calculate_and_adjust_stakes(state):
     curve = state.grading_line.GeometryCurve
     l_start, l_end = get_line_ends(curve)
-    
     u_start_pt = state.start_stake.Location.Point
     z_start = u_start_pt.Z
-    
-    # Check alignment relative to curve direction
     dist_start = u_start_pt.DistanceTo(l_start)
     dist_end = u_start_pt.DistanceTo(l_end)
     is_flipped = dist_end < dist_start 
-    
     length = curve.Length
     z_end = 0.0
-    
     if state.mode == "slope":
         try:
             pct = float(state.slope_val) / 100.0
-            # Calculate Height Difference
             z_end = z_start + (length * pct)
-            
-            # VISUAL UPDATE: Move the End Stake (if present)
             if state.end_stake:
                 t_move = Transaction(doc, "Adjust Stake Height")
                 t_move.Start()
@@ -285,24 +310,17 @@ def calculate_and_adjust_stakes(state):
                     diff_z = z_end - current_pt.Z
                     if abs(diff_z) > 0.001:
                         vec = XYZ(0, 0, diff_z)
-                        # Try MoveElement (Works for Hosted/Unhosted)
                         ElementTransformUtils.MoveElement(doc, state.end_stake.Id, vec)
                 except: 
-                    # Fallback for strict hosts
                     try:
                         p = state.end_stake.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
                         if p and not p.IsReadOnly: p.Set(z_end)
                     except: pass
                 t_move.Commit()
-        except: 
-            z_end = z_start
+        except: z_end = z_start
     else:
-        # Match Stake Mode
         z_end = state.end_stake.Location.Point.Z
-
-    # Return ordered tuple (StartParamZ, EndParamZ)
-    if is_flipped: return z_end, z_start
-    else: return z_start, z_end
+    return (z_end, z_start) if is_flipped else (z_start, z_end)
 
 # ==========================================
 # 5. EXECUTION
@@ -315,11 +333,6 @@ def perform_load_recipe(state):
             state.width = str(data.get("width", "6.0"))
             state.falloff = str(data.get("falloff", "10.0"))
             state.grid = str(data.get("grid", "3.0"))
-            try:
-                state.grading_line = doc.GetElement(ElementId(data["line_id"]))
-                state.start_stake = doc.GetElement(ElementId(data["start_id"]))
-                state.end_stake = doc.GetElement(ElementId(data["end_id"]))
-            except: pass
     except: pass
 
 def perform_manual_stitch(state):
@@ -329,18 +342,10 @@ def perform_manual_stitch(state):
         edge_elem = doc.GetElement(ref_edge)
         edge_geom = edge_elem.GetGeometryObjectFromReference(ref_edge)
         if not isinstance(edge_geom, Edge): return
-        
-        b_curve = edge_geom.AsCurve() 
-        toposolid = edge_elem 
-        bounds = get_boundary_curves(toposolid)
-
-        tg = TransactionGroup(doc, "Stitch Edge"); tg.Start()
-        t = Transaction(doc, "Stitch"); t.Start()
-        
+        b_curve = edge_geom.AsCurve(); toposolid = edge_elem; bounds = get_boundary_curves(toposolid)
+        tg = TransactionGroup(doc, "Stitch Edge"); tg.Start(); t = Transaction(doc, "Stitch"); t.Start()
         editor = toposolid.GetSlabShapeEditor(); editor.Enable()
         all_verts = [v.Position for v in editor.SlabShapeVertices]
-        
-        # Pre-filter internal points
         internal_verts = []
         for v in all_verts:
             is_on_boundary = False
@@ -349,42 +354,27 @@ def perform_manual_stitch(state):
                 if res and flatten(res.XYZPoint).DistanceTo(flatten(v)) < BOUNDARY_TOLERANCE:
                     is_on_boundary = True; break
             if not is_on_boundary: internal_verts.append(v)
-
         points_to_add = []
-        search_dist = g * 1.5 
-        step_size = g * 0.5 
-        length = b_curve.Length
-        steps = int(length / step_size)
-        if steps < 2: steps = 2
-        
+        search_dist = g * 1.5; step_size = g * 0.5; length = b_curve.Length
+        steps = int(length / step_size); steps = 2 if steps < 2 else steps
         for i in range(steps + 1):
             t_val = float(i) / float(steps)
             b_pt = b_curve.Evaluate(t_val, True)
-            
-            nearest_dist = 9999.0
-            nearest_z = 0.0
-            found_neighbor = False
-            
+            nearest_dist = 9999.0; nearest_z = 0.0; found_neighbor = False
             for v in internal_verts:
                 d = flatten(b_pt).DistanceTo(flatten(v))
                 if d < nearest_dist:
-                    nearest_dist = d
-                    nearest_z = v.Z
-                    found_neighbor = True
-            
+                    nearest_dist = d; nearest_z = v.Z; found_neighbor = True
             if found_neighbor and nearest_dist < search_dist:
                 if not is_too_close(b_pt, points_to_add, MIN_DIST_TOLERANCE):
                     points_to_add.append(XYZ(b_pt.X, b_pt.Y, nearest_z))
-
         count = 0
         for p in points_to_add:
             try: editor.AddPoint(p); count += 1
             except: pass
-            
         t.Commit(); tg.Assimilate()
         print("Manual Stitch: Added {} points.".format(count))
-    except Exception as e:
-        print("Stitch Cancelled: {}".format(e))
+    except Exception as e: print("Stitch Cancelled.")
 
 def perform_swap(state):
     state.start_stake, state.end_stake = state.end_stake, state.start_stake
@@ -398,61 +388,47 @@ def perform_sculpt(state):
 
     tg = TransactionGroup(doc, "Sculpt Terrain"); tg.Start()
     try:
-        rec = {"width": w, "falloff": f, "grid": g, "line_id": get_id_val(state.grading_line), "start_id": get_id_val(state.start_stake), "end_id": get_id_val(state.end_stake)}
+        rec = {"width": w, "falloff": f, "grid": g}
         t_rec = Transaction(doc, "Save Recipe"); t_rec.Start()
         GradingRecipe.save_recipe(toposolid, rec); t_rec.Commit()
 
-        # Math Params
         z_s, z_e = calculate_and_adjust_stakes(state)
-        
-        # Ray Trace Setup (Calculated from Toposolid Height to ensure hits)
         ids = List[ElementId]([toposolid.Id])
         intersector = None
         ray_start_z = get_toposolid_max_z(toposolid)
-        
         if doc.ActiveView.ViewType == ViewType.ThreeD:
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
 
         curve = state.grading_line.GeometryCurve
         core_rad = w / 2.0; total_rad = core_rad + f
         
-        # 1. DENSIFY
         t1 = Transaction(doc, "Densify"); t1.Start()
         editor = toposolid.GetSlabShapeEditor(); editor.Enable()
         occupied_points = [v.Position for v in editor.SlabShapeVertices]
         bb = state.grading_line.get_BoundingBox(None)
-        
         start_x = math.floor((bb.Min.X - total_rad - g) / g) * g
         end_x   = math.ceil((bb.Max.X + total_rad + g) / g) * g
         start_y = math.floor((bb.Min.Y - total_rad - g) / g) * g
         end_y   = math.ceil((bb.Max.Y + total_rad + g) / g) * g
-
         grid_pts = []
         x = start_x
         while x <= end_x:
             y = start_y
             while y <= end_y:
-                t_pt = XYZ(x, y, 0) # Z ignored for flat distance check
+                t_pt = XYZ(x, y, 0)
                 res = curve.Project(t_pt)
                 if res and flatten(t_pt).DistanceTo(flatten(res.XYZPoint)) < (total_rad + g):
-                    # Robust Ray Trace
                     if is_point_on_solid(intersector, t_pt, ray_start_z):
                         rz = get_surface_z(intersector, t_pt, ray_start_z)
                         if rz: grid_pts.append(XYZ(x, y, rz))
                 y += g
             x += g
-            
-        points_added = 0
         for p in grid_pts:
             if not is_too_close(p, occupied_points):
-                try: editor.AddPoint(p); occupied_points.append(p); points_added += 1
+                try: editor.AddPoint(p); occupied_points.append(p)
                 except: pass
         t1.Commit()
         
-        if points_added == 0:
-            print("Warning: Densification added 0 points. Check if Guide Line is over Toposolid.")
-        
-        # 2. SCULPT
         t2 = Transaction(doc, "Sculpt"); t2.Start()
         updates = []
         for v in editor.SlabShapeVertices:
@@ -460,24 +436,19 @@ def perform_sculpt(state):
             if not res: continue
             d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
             if d > total_rad: continue
-            
             target_z = get_z_from_curve_param(curve, res, z_s, z_e)
             new_z = v.Position.Z
-            
             if d <= core_rad: new_z = target_z
             else:
                 t_val = (d - core_rad) / f; t_val = 1.0 if t_val > 1.0 else t_val
                 smooth_t = t_val * t_val * (3 - 2 * t_val)
                 new_z = lerp(target_z, new_z, smooth_t)
-            
             if abs(new_z - v.Position.Z) > 0.005:
                 updates.append(XYZ(v.Position.X, v.Position.Y, new_z))
         for p in updates:
             try: editor.AddPoint(p)
             except: pass
-        t2.Commit()
-        
-        tg.Assimilate()
+        t2.Commit(); tg.Assimilate()
     except Exception as e:
         tg.RollBack(); print("Error: {}".format(e))
 
@@ -494,16 +465,13 @@ def perform_edging(state):
         ids = List[ElementId]([toposolid.Id])
         intersector = None
         ray_start_z = get_toposolid_max_z(toposolid)
-        
         if doc.ActiveView.ViewType == ViewType.ThreeD:
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
-        
         edge_offset = w / 2.0; edge_res = g * 0.5 
         curve = state.grading_line.GeometryCurve
         editor = toposolid.GetSlabShapeEditor(); editor.Enable()
         to_move, to_add = [], []
         all_verts = [v for v in editor.SlabShapeVertices]
-        
         for v in all_verts: 
             res = curve.Project(v.Position)
             if res and abs(flatten(v.Position).DistanceTo(flatten(res.XYZPoint)) - edge_offset) < 1.0:
@@ -511,7 +479,6 @@ def perform_edging(state):
                 exact_xy = flatten(res.XYZPoint) + (vec * edge_offset)
                 exact_z = get_z_from_curve_param(curve, res, z_s, z_e)
                 to_move.append((v, XYZ(exact_xy.X, exact_xy.Y, exact_z)))
-
         step_t = edge_res / curve.Length; step_t = 0.05 if step_t > 0.05 else step_t
         t_val = 0.0
         while t_val <= 1.001:
@@ -526,7 +493,6 @@ def perform_edging(state):
                 final_pt = XYZ(final_pt.X, final_pt.Y, road_z)
                 if is_point_on_solid(intersector, final_pt, ray_start_z): to_add.append(final_pt)
             t_val += step_t
-
         t = Transaction(doc, "Apply Edging"); t.Start()
         occupied_points = [v.Position for v in all_verts]
         for item in to_move:
@@ -551,17 +517,23 @@ if __name__ == '__main__':
         win.ShowDialog()
         action = state.next_action
         state.next_action = None 
-        if not action: break 
+        if not action:
+            # SAVE PARAMETERS ONLY BEFORE EXIT
+            save_state_to_disk(state)
+            break 
         elif action == "select_stakes":
             try:
                 state.start_stake = doc.GetElement(uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Start Stake"))
                 state.end_stake = doc.GetElement(uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "End Stake"))
+                save_state_to_disk(state)
             except: pass
         elif action == "select_line":
-            try: state.grading_line = doc.GetElement(uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Guide Line"))
+            try: 
+                state.grading_line = doc.GetElement(uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Guide Line"))
+                save_state_to_disk(state)
             except: pass
-        elif action == "swap": perform_swap(state)
-        elif action == "sculpt": perform_sculpt(state); break 
-        elif action == "edge": perform_edging(state); break
+        elif action == "swap": perform_swap(state); save_state_to_disk(state)
+        elif action == "sculpt": perform_sculpt(state); save_state_to_disk(state)
+        elif action == "edge": perform_edging(state); save_state_to_disk(state)
         elif action == "stitch": perform_manual_stitch(state)
-        elif action == "load_recipe": perform_load_recipe(state)
+        elif action == "load_recipe": perform_load_recipe(state); save_state_to_disk(state)
