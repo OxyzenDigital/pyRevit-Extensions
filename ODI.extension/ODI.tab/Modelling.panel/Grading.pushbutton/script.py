@@ -373,7 +373,8 @@ def get_line_ends(curve):
     return curve.GetEndPoint(0), curve.GetEndPoint(1)
 
 def validate_input(state, log):
-    """Failsafe check for basic inputs before processing."""
+    """Failsafe check for basic inputs and parameter logic before processing."""
+    # 1. Check Elements
     if not state.start_stake:
         log.error("Start Stake is missing.")
         return False
@@ -381,7 +382,6 @@ def validate_input(state, log):
         log.error("Grading Line is missing.")
         return False
     
-    # Check if elements still exist in doc
     try:
         if not state.start_stake.IsValidObject:
             log.error("Start Stake element is no longer valid.")
@@ -391,6 +391,48 @@ def validate_input(state, log):
             return False
     except:
         log.error("Invalid element reference.")
+        return False
+
+    # 2. Check Parameters (Logic)
+    try:
+        w = float(state.width)
+        f = float(state.falloff)
+        g = float(state.grid)
+        
+        # A. Basic Bounds
+        if w <= 0:
+            log.error("Path Width must be greater than 0.")
+            return False
+        if f < 0:
+            log.error("Falloff cannot be negative.")
+            return False
+        if g <= 0.01:
+            log.error("Grid resolution must be greater than 0.")
+            return False
+            
+        # B. Performance Safety
+        if g < 0.1: # 0.1 ft ~= 30mm
+            log.error("Grid resolution is dangerously small ({:.3f} ft).".format(g), 
+                      "This will likely freeze or crash Revit. Please use a value >= 0.25 ft.")
+            return False
+            
+        # C. Geometric Logic
+        # If the grid is bigger than the width, we might skip the whole path!
+        if g > w:
+            log.error("Grid resolution ({:.2f}) is larger than Path Width ({:.2f}).".format(g, w), 
+                      "The grading points might jump over your path completely. Reduce Grid or increase Width.")
+            return False
+            
+        # If grid is bigger than falloff, smoothing will look jagged or do nothing
+        if f > 0 and g > f:
+            log.error("Grid resolution ({:.2f}) is larger than Falloff ({:.2f}).".format(g, f),
+                      "Smoothing will be ineffective. Reduce Grid size.")
+            # We allow this but warn, or strictly block if desired. 
+            # Blocking is safer for "useless" results.
+            return False
+            
+    except ValueError:
+        log.error("One or more parameters (Width, Falloff, Grid) are not valid numbers.")
         return False
 
     return True
@@ -893,10 +935,17 @@ def perform_sculpt(state):
                 except: pass
         t1.Commit()
         
+        log.info("Points Added: {}".format(added_count))
+        
         # Phase 2: Sculpt
         log.info("--- PHASE 2: SCULPT ---")
         t2 = Transaction(doc, "Sculpt")
         t2.Start()
+        
+        # RE-ACQUIRE Editor to ensure we see the new points from Phase 1
+        editor = toposolid.GetSlabShapeEditor()
+        editor.Enable()
+        
         updates = []
         
         # Refresh vertices after densify
