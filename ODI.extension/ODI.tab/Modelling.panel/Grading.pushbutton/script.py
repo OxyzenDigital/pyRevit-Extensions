@@ -4,6 +4,7 @@ import os
 import json
 import math
 import clr
+import traceback
 
 # --- ASSEMBLIES ---
 clr.AddReference('RevitAPI')
@@ -16,7 +17,7 @@ from System.Collections.Generic import List
 from Autodesk.Revit.DB import (
     XYZ, Transaction, TransactionGroup, ElementId, BuiltInParameter,
     ReferenceIntersector, FindReferenceTarget, Options, Solid, ViewType, Edge,
-    ElementTransformUtils
+    ElementTransformUtils, FamilyInstance, CurveElement
 )
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
 from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, AccessLevel
@@ -27,7 +28,7 @@ doc = revit.doc
 uidoc = revit.uidoc
 
 # ==========================================
-# 1. SETTINGS (PARAMETERS ONLY)
+# 1. SETTINGS & LOGGING
 # ==========================================
 SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "grading_settings.json")
 RECIPE_SCHEMA_GUID = Guid("A4B9C8D2-1234-4567-8901-ABCDEF123456")
@@ -35,6 +36,36 @@ RECIPE_SCHEMA_GUID = Guid("A4B9C8D2-1234-4567-8901-ABCDEF123456")
 # Tolerances
 MIN_DIST_TOLERANCE = 0.25 
 BOUNDARY_TOLERANCE = 0.1 
+
+class BatchLogger(object):
+    """Accumulates messages to display in a single dialog."""
+    def __init__(self):
+        self._errors = []
+        self._infos = []
+    
+    def error(self, msg, detail=None):
+        self._errors.append(str(msg))
+        if detail:
+            self._errors.append("Details: " + str(detail))
+    
+    def info(self, msg):
+        self._infos.append(str(msg))
+
+    def show(self, title="Grading Report"):
+        if not self._errors and not self._infos:
+            return
+
+        out = script.get_output()
+        if self._errors:
+            out.print_html('<strong>--- ERRORS ---</strong>')
+            for e in self._errors:
+                out.print_html('<div style="color:red;">{}</div>'.format(e))
+            out.print_html('<br>')
+        
+        if self._infos:
+            out.print_html('<strong>--- INFO ---</strong>')
+            for i in self._infos:
+                out.print_html('<div style="color:gray;">{}</div>'.format(i))
 
 def get_id_val(element):
     if not element: return -1
@@ -76,7 +107,6 @@ class GradingRecipe:
         return None
 
 def load_settings_from_disk():
-    # Only store numbers/text. No Element IDs.
     defaults = {
         "width": "6.0", "falloff": "10.0", "grid": "3.0", "slope": "2.0", "mode": "stakes"
     }
@@ -89,7 +119,6 @@ def load_settings_from_disk():
     return defaults
 
 def save_state_to_disk(state):
-    """Saves only the numeric parameters to disk."""
     data = {
         "width": state.width, 
         "falloff": state.falloff, 
@@ -109,14 +138,12 @@ class GradingState(object):
     def __init__(self):
         sets = load_settings_from_disk()
         
-        # Load Parameters
         self.width = sets.get("width", "6.0")
         self.falloff = sets.get("falloff", "10.0")
         self.grid = sets.get("grid", "3.0")
         self.slope_val = sets.get("slope", "2.0")
         self.mode = sets.get("mode", "stakes")
         
-        # Reset Selection (Reliable Fallback)
         self.start_stake = None
         self.end_stake = None
         self.grading_line = None
@@ -125,9 +152,16 @@ class GradingState(object):
 
     @property
     def ready(self):
+        # Basic ready check: must have start stake and line.
+        # End stake is needed if mode is NOT slope.
+        has_start = self.start_stake is not None
+        has_line = self.grading_line is not None
+        has_end = self.end_stake is not None
+        
         if self.mode == "slope":
-            return bool(self.start_stake and self.grading_line)
-        return bool(self.start_stake and self.end_stake and self.grading_line)
+            return has_start and has_line
+        else:
+            return has_start and has_end and has_line
 
 class GradingWindow(forms.WPFWindow):
     def __init__(self, state):
@@ -141,13 +175,11 @@ class GradingWindow(forms.WPFWindow):
         green = Media.Brushes.Green; red = Media.Brushes.Red
         def fmt(e): return "{} [{}]".format(e.Name, get_id_val(e)) if e else "[None]"
 
-        # Mode
         if self.state.mode == "slope":
             self.Rb_UseSlope.IsChecked = True; self.Tb_Slope.IsEnabled = True
         else:
             self.Rb_MatchStakes.IsChecked = True; self.Tb_Slope.IsEnabled = False
 
-        # Labels
         self.Lb_StartStake.Text = "Start: {}".format(fmt(self.state.start_stake))
         self.Lb_StartStake.Foreground = green if self.state.start_stake else red
         
@@ -157,13 +189,11 @@ class GradingWindow(forms.WPFWindow):
         self.Lb_Line.Text = "Line: {}".format(fmt(self.state.grading_line))
         self.Lb_Line.Foreground = green if self.state.grading_line else red
 
-        # Textboxes (Loaded from Memory/Disk)
         self.Tb_Width.Text = str(self.state.width)
         self.Tb_Falloff.Text = str(self.state.falloff)
         self.Tb_Grid.Text = str(self.state.grid)
         self.Tb_Slope.Text = str(self.state.slope_val)
 
-        # Buttons
         self.Btn_Run.IsEnabled = self.state.ready
         self.Btn_Edging.IsEnabled = self.state.ready
         self.Btn_Swap.IsEnabled = bool(self.state.start_stake and self.state.end_stake)
@@ -186,7 +216,6 @@ class GradingWindow(forms.WPFWindow):
         self.Rb_MatchStakes.Checked += self.mode_changed
         self.Rb_UseSlope.Checked += self.mode_changed
         
-        # Hover (Optional UX - Only works if objects selected in current session)
         self.Btn_SelectStakes.MouseEnter += self.h_stakes_on
         self.Btn_SelectStakes.MouseLeave += self.h_off
         self.Btn_SelectLine.MouseEnter += self.h_line_on
@@ -215,7 +244,6 @@ class GradingWindow(forms.WPFWindow):
         self.Btn_Edging.IsEnabled = self.state.ready
 
     def update_state_from_ui(self):
-        """Pushes UI values to Memory."""
         self.state.width = self.Tb_Width.Text
         self.state.falloff = self.Tb_Falloff.Text
         self.state.grid = self.Tb_Grid.Text
@@ -288,9 +316,43 @@ def get_z_from_curve_param(curve, projected_result, z_start, z_end):
 def get_line_ends(curve):
     return curve.GetEndPoint(0), curve.GetEndPoint(1)
 
-def calculate_and_adjust_stakes(state):
+def validate_input(state, log):
+    """Failsafe check for basic inputs before processing."""
+    if not state.start_stake:
+        log.error("Start Stake is missing.")
+        return False
+    if not state.grading_line:
+        log.error("Grading Line is missing.")
+        return False
+    
+    # Check if elements still exist in doc
+    try:
+        if not state.start_stake.IsValidObject:
+            log.error("Start Stake element is no longer valid.")
+            return False
+        if not state.grading_line.IsValidObject:
+            log.error("Grading Line element is no longer valid.")
+            return False
+    except:
+        log.error("Invalid element reference.")
+        return False
+
+    return True
+
+def calculate_and_adjust_stakes(state, log):
+    """Calculates Z levels and adjusts end stake if needed."""
+    if not state.grading_line or not isinstance(state.grading_line, CurveElement):
+        log.error("Invalid Grading Line selected.")
+        raise Exception("Invalid Line")
+
     curve = state.grading_line.GeometryCurve
     l_start, l_end = get_line_ends(curve)
+    
+    # Failsafe: Stake might not have a LocationPoint if user picked wrong family
+    if not hasattr(state.start_stake, "Location") or not hasattr(state.start_stake.Location, "Point"):
+        log.error("Start Stake does not have a valid location point.")
+        raise Exception("Invalid Stake")
+
     u_start_pt = state.start_stake.Location.Point
     z_start = u_start_pt.Z
     dist_start = u_start_pt.DistanceTo(l_start)
@@ -298,6 +360,7 @@ def calculate_and_adjust_stakes(state):
     is_flipped = dist_end < dist_start 
     length = curve.Length
     z_end = 0.0
+    
     if state.mode == "slope":
         try:
             pct = float(state.slope_val) / 100.0
@@ -312,104 +375,190 @@ def calculate_and_adjust_stakes(state):
                         vec = XYZ(0, 0, diff_z)
                         ElementTransformUtils.MoveElement(doc, state.end_stake.Id, vec)
                 except: 
+                    # Fallback for families constrained to host
                     try:
                         p = state.end_stake.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
                         if p and not p.IsReadOnly: p.Set(z_end)
                     except: pass
                 t_move.Commit()
-        except: z_end = z_start
+        except Exception as e:
+            log.error("Failed to adjust End Stake slope.", e)
+            z_end = z_start
     else:
+        if not state.end_stake or not hasattr(state.end_stake.Location, "Point"):
+             log.error("End Stake is missing or invalid for 'Match Stakes' mode.")
+             raise Exception("Invalid End Stake")
         z_end = state.end_stake.Location.Point.Z
+        
     return (z_end, z_start) if is_flipped else (z_start, z_end)
 
 # ==========================================
 # 5. EXECUTION
 # ==========================================
 def perform_load_recipe(state):
+    log = BatchLogger()
     try:
         ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid")
+        if not ref: return
         data = GradingRecipe.read_recipe(doc.GetElement(ref))
         if data:
             state.width = str(data.get("width", "6.0"))
-            state.falloff = str(data.get("falloff", "10.0"))
+            state.falloff = str(data.get("falloff", "10.0")),
             state.grid = str(data.get("grid", "3.0"))
-    except: pass
+            log.info("Recipe loaded successfully.")
+        else:
+            log.info("No grading recipe found on this element.")
+    except Exception as e:
+        log.error("Failed to load recipe.", e)
+    finally:
+        log.show()
 
 def perform_manual_stitch(state):
+    log = BatchLogger()
     try:
         g = float(state.grid)
-        ref_edge = uidoc.Selection.PickObject(ObjectType.Edge, "Select Boundary Edge to Stitch")
+        try:
+            ref_edge = uidoc.Selection.PickObject(ObjectType.Edge, "Select Boundary Edge to Stitch")
+        except:
+            # User cancelled
+            return
+            
         edge_elem = doc.GetElement(ref_edge)
         edge_geom = edge_elem.GetGeometryObjectFromReference(ref_edge)
-        if not isinstance(edge_geom, Edge): return
-        b_curve = edge_geom.AsCurve(); toposolid = edge_elem; bounds = get_boundary_curves(toposolid)
-        tg = TransactionGroup(doc, "Stitch Edge"); tg.Start(); t = Transaction(doc, "Stitch"); t.Start()
-        editor = toposolid.GetSlabShapeEditor(); editor.Enable()
-        all_verts = [v.Position for v in editor.SlabShapeVertices]
-        internal_verts = []
-        for v in all_verts:
-            is_on_boundary = False
-            for bc in bounds:
-                res = bc.Project(v)
-                if res and flatten(res.XYZPoint).DistanceTo(flatten(v)) < BOUNDARY_TOLERANCE:
-                    is_on_boundary = True; break
-            if not is_on_boundary: internal_verts.append(v)
-        points_to_add = []
-        search_dist = g * 1.5; step_size = g * 0.5; length = b_curve.Length
-        steps = int(length / step_size); steps = 2 if steps < 2 else steps
-        for i in range(steps + 1):
-            t_val = float(i) / float(steps)
-            b_pt = b_curve.Evaluate(t_val, True)
-            nearest_dist = 9999.0; nearest_z = 0.0; found_neighbor = False
-            for v in internal_verts:
-                d = flatten(b_pt).DistanceTo(flatten(v))
-                if d < nearest_dist:
-                    nearest_dist = d; nearest_z = v.Z; found_neighbor = True
-            if found_neighbor and nearest_dist < search_dist:
-                if not is_too_close(b_pt, points_to_add, MIN_DIST_TOLERANCE):
-                    points_to_add.append(XYZ(b_pt.X, b_pt.Y, nearest_z))
-        count = 0
-        for p in points_to_add:
-            try: editor.AddPoint(p); count += 1
-            except: pass
-        t.Commit(); tg.Assimilate()
-        print("Manual Stitch: Added {} points.".format(count))
-    except Exception as e: print("Stitch Cancelled.")
+        if not isinstance(edge_geom, Edge): 
+            log.error("Selected object is not a valid Edge.")
+            log.show(); return
+
+        b_curve = edge_geom.AsCurve()
+        toposolid = edge_elem
+        bounds = get_boundary_curves(toposolid)
+        
+        tg = TransactionGroup(doc, "Stitch Edge")
+        tg.Start()
+        t = Transaction(doc, "Stitch")
+        t.Start()
+        
+        try:
+            editor = toposolid.GetSlabShapeEditor()
+            editor.Enable()
+            all_verts = [v.Position for v in editor.SlabShapeVertices]
+            internal_verts = []
+            for v in all_verts:
+                is_on_boundary = False
+                for bc in bounds:
+                    res = bc.Project(v)
+                    if res and flatten(res.XYZPoint).DistanceTo(flatten(v)) < BOUNDARY_TOLERANCE:
+                        is_on_boundary = True; break
+                if not is_on_boundary: internal_verts.append(v)
+            
+            points_to_add = []
+            search_dist = g * 1.5
+            step_size = g * 0.5
+            length = b_curve.Length
+            steps = int(length / step_size)
+            steps = 2 if steps < 2 else steps
+            
+            for i in range(steps + 1):
+                t_val = float(i) / float(steps)
+                b_pt = b_curve.Evaluate(t_val, True)
+                nearest_dist = 9999.0
+                nearest_z = 0.0
+                found_neighbor = False
+                
+                for v in internal_verts:
+                    d = flatten(b_pt).DistanceTo(flatten(v))
+                    if d < nearest_dist:
+                        nearest_dist = d; nearest_z = v.Z; found_neighbor = True
+                
+                if found_neighbor and nearest_dist < search_dist:
+                    if not is_too_close(b_pt, points_to_add, MIN_DIST_TOLERANCE):
+                        points_to_add.append(XYZ(b_pt.X, b_pt.Y, nearest_z))
+            
+            count = 0
+            for p in points_to_add:
+                try: editor.AddPoint(p); count += 1
+                except: pass
+            
+            t.Commit()
+            tg.Assimilate()
+            log.info("Manual Stitch: Added {} points.".format(count))
+        except Exception as e:
+            t.RollBack()
+            tg.RollBack()
+            log.error("Stitching process failed.", e)
+            
+    except Exception as e:
+        log.error("Critical error in stitch tool.", e)
+    finally:
+        log.show()
 
 def perform_swap(state):
-    state.start_stake, state.end_stake = state.end_stake, state.start_stake
+    if state.start_stake and state.end_stake:
+        state.start_stake, state.end_stake = state.end_stake, state.start_stake
 
 def perform_sculpt(state):
+    log = BatchLogger()
+    if not validate_input(state, log):
+        log.show()
+        return
+
     try:
         w = float(state.width); f = float(state.falloff); g = float(state.grid)
-        ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid")
-        toposolid = doc.GetElement(ref)
-    except: return
+        try:
+            ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid to Grade")
+            toposolid = doc.GetElement(ref)
+        except:
+            # User cancelled selection
+            return
+            
+        if not toposolid:
+            log.error("Invalid Toposolid selection.")
+            log.show(); return
 
-    tg = TransactionGroup(doc, "Sculpt Terrain"); tg.Start()
+    except Exception as e:
+        log.error("Invalid parameter inputs.", e)
+        log.show(); return
+
+    tg = TransactionGroup(doc, "Sculpt Terrain")
+    tg.Start()
+    
     try:
+        # Save Recipe
         rec = {"width": w, "falloff": f, "grid": g}
-        t_rec = Transaction(doc, "Save Recipe"); t_rec.Start()
-        GradingRecipe.save_recipe(toposolid, rec); t_rec.Commit()
+        t_rec = Transaction(doc, "Save Recipe")
+        t_rec.Start()
+        GradingRecipe.save_recipe(toposolid, rec)
+        t_rec.Commit()
 
-        z_s, z_e = calculate_and_adjust_stakes(state)
+        # Calculation
+        z_s, z_e = calculate_and_adjust_stakes(state, log)
+        
         ids = List[ElementId]([toposolid.Id])
         intersector = None
         ray_start_z = get_toposolid_max_z(toposolid)
+        
         if doc.ActiveView.ViewType == ViewType.ThreeD:
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
+        else:
+            log.info("Warning: Active view is not 3D. Raycasting for new points might be less accurate.")
 
         curve = state.grading_line.GeometryCurve
-        core_rad = w / 2.0; total_rad = core_rad + f
+        core_rad = w / 2.0
+        total_rad = core_rad + f
         
-        t1 = Transaction(doc, "Densify"); t1.Start()
-        editor = toposolid.GetSlabShapeEditor(); editor.Enable()
+        # Phase 1: Densify
+        t1 = Transaction(doc, "Densify")
+        t1.Start()
+        editor = toposolid.GetSlabShapeEditor()
+        editor.Enable()
         occupied_points = [v.Position for v in editor.SlabShapeVertices]
+        
         bb = state.grading_line.get_BoundingBox(None)
         start_x = math.floor((bb.Min.X - total_rad - g) / g) * g
         end_x   = math.ceil((bb.Max.X + total_rad + g) / g) * g
         start_y = math.floor((bb.Min.Y - total_rad - g) / g) * g
         end_y   = math.ceil((bb.Max.Y + total_rad + g) / g) * g
+        
         grid_pts = []
         x = start_x
         while x <= end_x:
@@ -423,55 +572,102 @@ def perform_sculpt(state):
                         if rz: grid_pts.append(XYZ(x, y, rz))
                 y += g
             x += g
+        
+        added_count = 0
         for p in grid_pts:
             if not is_too_close(p, occupied_points):
-                try: editor.AddPoint(p); occupied_points.append(p)
+                try: 
+                    editor.AddPoint(p)
+                    occupied_points.append(p)
+                    added_count += 1
                 except: pass
         t1.Commit()
         
-        t2 = Transaction(doc, "Sculpt"); t2.Start()
+        # Phase 2: Sculpt
+        t2 = Transaction(doc, "Sculpt")
+        t2.Start()
         updates = []
-        for v in editor.SlabShapeVertices:
+        
+        # Refresh vertices after densify
+        current_verts = [v for v in editor.SlabShapeVertices]
+        
+        for v in current_verts:
             res = curve.Project(v.Position)
             if not res: continue
+            
             d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
             if d > total_rad: continue
+            
             target_z = get_z_from_curve_param(curve, res, z_s, z_e)
             new_z = v.Position.Z
-            if d <= core_rad: new_z = target_z
+            
+            if d <= core_rad: 
+                new_z = target_z
             else:
-                t_val = (d - core_rad) / f; t_val = 1.0 if t_val > 1.0 else t_val
+                t_val = (d - core_rad) / f
+                t_val = 1.0 if t_val > 1.0 else t_val
                 smooth_t = t_val * t_val * (3 - 2 * t_val)
                 new_z = lerp(target_z, new_z, smooth_t)
+            
             if abs(new_z - v.Position.Z) > 0.005:
                 updates.append(XYZ(v.Position.X, v.Position.Y, new_z))
+        
+        modified_count = len(updates)
         for p in updates:
             try: editor.AddPoint(p)
             except: pass
-        t2.Commit(); tg.Assimilate()
+        
+        t2.Commit()
+        tg.Assimilate()
+        
+        log.info("Sculpt Complete.\nPoints Added: {}\\nPoints Adjusted: {}".format(added_count, modified_count))
+
     except Exception as e:
-        tg.RollBack(); print("Error: {}".format(e))
+        tg.RollBack()
+        log.error("Sculpting Failed", "{}\n{}".format(e, traceback.format_exc()))
+    
+    finally:
+        log.show()
 
 def perform_edging(state):
+    log = BatchLogger()
+    if not validate_input(state, log):
+        log.show(); return
+
     try:
         w = float(state.width); g = float(state.grid)
-        ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid")
-        toposolid = doc.GetElement(ref)
-    except: return
+        try:
+            ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid for Edging")
+            toposolid = doc.GetElement(ref)
+        except: return
+    except Exception as e:
+        log.error("Invalid inputs for edging.", e)
+        log.show(); return
 
-    tg = TransactionGroup(doc, "Edging"); tg.Start()
+    tg = TransactionGroup(doc, "Edging")
+    tg.Start()
+    
     try:
-        z_s, z_e = calculate_and_adjust_stakes(state)
+        z_s, z_e = calculate_and_adjust_stakes(state, log)
+        
         ids = List[ElementId]([toposolid.Id])
         intersector = None
         ray_start_z = get_toposolid_max_z(toposolid)
         if doc.ActiveView.ViewType == ViewType.ThreeD:
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
-        edge_offset = w / 2.0; edge_res = g * 0.5 
+        
+        edge_offset = w / 2.0
+        edge_res = g * 0.5 
         curve = state.grading_line.GeometryCurve
-        editor = toposolid.GetSlabShapeEditor(); editor.Enable()
-        to_move, to_add = [], []
+        editor = toposolid.GetSlabShapeEditor()
+        editor.Enable()
+        
+        to_move = [] 
+        to_add = []
+        
         all_verts = [v for v in editor.SlabShapeVertices]
+        
+        # 1. Snap existing nearby points to exact edge
         for v in all_verts: 
             res = curve.Project(v.Position)
             if res and abs(flatten(v.Position).DistanceTo(flatten(res.XYZPoint)) - edge_offset) < 1.0:
@@ -479,33 +675,60 @@ def perform_edging(state):
                 exact_xy = flatten(res.XYZPoint) + (vec * edge_offset)
                 exact_z = get_z_from_curve_param(curve, res, z_s, z_e)
                 to_move.append((v, XYZ(exact_xy.X, exact_xy.Y, exact_z)))
-        step_t = edge_res / curve.Length; step_t = 0.05 if step_t > 0.05 else step_t
+        
+        # 2. Add new points along the exact edge
+        step_t = edge_res / curve.Length
+        step_t = 0.05 if step_t > 0.05 else step_t
         t_val = 0.0
+        
         while t_val <= 1.001:
             eval_t = max(0.0, min(1.0, t_val))
             center_pt = curve.Evaluate(eval_t, True)
             tangent = curve.ComputeDerivatives(eval_t, True).BasisX.Normalize()
             normal = tangent.CrossProduct(XYZ.BasisZ)
+            
             road_z = get_z_from_curve_param(curve, curve.Project(center_pt), z_s, z_e)
+            
             for side in [1.0, -1.0]:
                 offset_vec = normal * (side * edge_offset)
                 final_pt = center_pt + offset_vec
                 final_pt = XYZ(final_pt.X, final_pt.Y, road_z)
-                if is_point_on_solid(intersector, final_pt, ray_start_z): to_add.append(final_pt)
+                
+                # Check if this point is actually on the solid's footprint
+                if is_point_on_solid(intersector, final_pt, ray_start_z): 
+                    to_add.append(final_pt)
+            
             t_val += step_t
-        t = Transaction(doc, "Apply Edging"); t.Start()
+            
+        t = Transaction(doc, "Apply Edging")
+        t.Start()
+        
         occupied_points = [v.Position for v in all_verts]
+        
+        # Apply moves
         for item in to_move:
-            try: editor.ModifySlabShapeVertex(item[0], item[1]); occupied_points.append(item[1])
+            try: 
+                editor.ModifySlabShapeVertex(item[0], item[1])
+                occupied_points.append(item[1])
             except: pass
+            
+        # Apply adds
         for pt in to_add:
             if not is_too_close(pt, occupied_points):
-                try: editor.AddPoint(pt); occupied_points.append(pt)
+                try: 
+                    editor.AddPoint(pt)
+                    occupied_points.append(pt)
                 except: pass 
-        t.Commit(); tg.Assimilate()
-        print("Edging: Snapped {} | Added {}".format(len(to_move), len(to_add)))
+                
+        t.Commit()
+        tg.Assimilate()
+        log.info("Edging Complete.\nSnapped: {}\\nAdded: {}".format(len(to_move), len(to_add)))
+        
     except Exception as e:
-        tg.RollBack(); print("Error: {}".format(e))
+        tg.RollBack()
+        log.error("Edging failed.", e)
+    finally:
+        log.show()
 
 # ==========================================
 # 6. LOOP
@@ -517,23 +740,39 @@ if __name__ == '__main__':
         win.ShowDialog()
         action = state.next_action
         state.next_action = None 
+        
         if not action:
-            # SAVE PARAMETERS ONLY BEFORE EXIT
             save_state_to_disk(state)
             break 
+            
         elif action == "select_stakes":
             try:
                 state.start_stake = doc.GetElement(uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Start Stake"))
                 state.end_stake = doc.GetElement(uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "End Stake"))
                 save_state_to_disk(state)
-            except: pass
+            except: pass # Cancelled selection
+            
         elif action == "select_line":
             try: 
                 state.grading_line = doc.GetElement(uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Guide Line"))
                 save_state_to_disk(state)
-            except: pass
-        elif action == "swap": perform_swap(state); save_state_to_disk(state)
-        elif action == "sculpt": perform_sculpt(state); save_state_to_disk(state)
-        elif action == "edge": perform_edging(state); save_state_to_disk(state)
-        elif action == "stitch": perform_manual_stitch(state)
-        elif action == "load_recipe": perform_load_recipe(state); save_state_to_disk(state)
+            except: pass # Cancelled selection
+            
+        elif action == "swap": 
+            perform_swap(state)
+            save_state_to_disk(state)
+            
+        elif action == "sculpt": 
+            perform_sculpt(state)
+            save_state_to_disk(state)
+            
+        elif action == "edge": 
+            perform_edging(state)
+            save_state_to_disk(state)
+            
+        elif action == "stitch": 
+            perform_manual_stitch(state)
+            
+        elif action == "load_recipe": 
+            perform_load_recipe(state)
+            save_state_to_disk(state)
