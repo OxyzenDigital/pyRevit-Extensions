@@ -1,4 +1,8 @@
 # -*- coding: utf-8 -*-
+# Grading Assistant v1.0
+# Developed by Oxyzen Digital
+# Description: Advanced Toposolid grading tool with sculpting, edging, and auto-triangulation features.
+
 import sys
 import os
 import json
@@ -920,232 +924,555 @@ def perform_swap(state):
         state.start_stake, state.end_stake = state.end_stake, state.start_stake
 
 def perform_sculpt(state):
+
     log = BatchLogger()
+
     if not validate_input(state, log):
+
         log.show()
+
         return
 
+
+
+    # Safety Check
+
+    if doc.IsModifiable:
+
+        log.error("Another transaction is currently active.", "Please finish or cancel the active command before running this tool.")
+
+        log.show()
+
+        return
+
+
+
     try:
+
         # 1. Parse Inputs & Log
+
         w_int = float(state.width)
+
         f_int = float(state.falloff)
+
         g_int = float(state.grid)
+
         
+
         log.info("--- SCULPT STARTED ---")
+
         log.info("Parameters (Internal Ft): Width={:.2f}, Falloff={:.2f}, Grid={:.2f}".format(w_int, f_int, g_int))
-        log.info("Parameters (Display): Width={:.2f}, Falloff={:.2f}, Grid={:.2f}".format(
-            UnitHelper.from_internal(w_int), 
-            UnitHelper.from_internal(f_int), 
-            UnitHelper.from_internal(g_int)
-        ))
+
+        
 
         try:
+
             ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid to Grade")
+
             toposolid = doc.GetElement(ref)
+
             log.info("Selected Toposolid ID: {}".format(toposolid.Id))
+
         except:
+
             return # Cancelled
+
             
+
         if not toposolid:
+
             log.error("Invalid Toposolid selection.")
+
             log.show(); return
 
+
+
     except Exception as e:
+
         log.error("Invalid parameter inputs.", e)
+
         log.show(); return
 
+
+
     tg = TransactionGroup(doc, "Sculpt Terrain")
+
     tg.Start()
+
     
+
     try:
+
         # Save Recipe
+
         rec = {
+
             "width": state.width, 
+
             "falloff": state.falloff, 
+
             "grid": state.grid,
+
             "slope": state.slope_val,
+
             "mode": state.mode
+
         }
+
+        
+
         t_rec = Transaction(doc, "Save Recipe")
+
         t_rec.Start()
-        GradingRecipe.save_recipe(toposolid, rec)
-        t_rec.Commit()
+
+        try:
+
+            GradingRecipe.save_recipe(toposolid, rec)
+
+            t_rec.Commit()
+
+        except: t_rec.RollBack()
+
+
 
         # Calculation
+
         z_s, z_e = calculate_and_adjust_stakes(state, log)
+
         log.info("Stake Elevations: Start={:.2f}, End={:.2f}".format(z_s, z_e))
+
         
+
         ids = List[ElementId]([toposolid.Id])
+
         intersector = None
+
         ray_start_z = get_toposolid_max_z(toposolid)
+
         
+
         if doc.ActiveView.ViewType == ViewType.ThreeD:
+
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
+
         else:
+
             log.info("Warning: Active view is not 3D. Raycasting for new points might be less accurate.")
 
+
+
         curve = state.grading_line.GeometryCurve
+
         log.info("Guide Line Length: {:.2f}".format(curve.Length))
 
+
+
         core_rad = w_int / 2.0
+
         total_rad = core_rad + f_int
+
         
+
         # Phase 0: Reset (Optional)
+
         if state.reset_mode:
+
             log.info("--- PHASE 0: RESET POINTS ---")
+
             t0 = Transaction(doc, "Reset Points")
+
             t0.Start()
+
             try:
+
                 editor = toposolid.GetSlabShapeEditor()
+
                 editor.Enable()
+
                 
+
                 # Identify points to remove
+
                 to_delete = []
+
                 for v in editor.SlabShapeVertices:
-                    # Quick bounding box check or direct project?
-                    # Project is safer
+
                     res = curve.Project(v.Position)
+
                     if res:
+
                         d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
-                        # Remove everything within the grading zone so we can rebuild the grid
+
                         if d < (total_rad + g_int):
+
                             to_delete.append(v)
+
                 
+
                 if to_delete:
+
                     count_del = 0
+
                     for v_del in to_delete:
+
                         try:
+
                             editor.DeletePoint(v_del)
+
                             count_del += 1
+
                         except: pass
+
                     log.info("Removed {} old points to clear resolution.".format(count_del))
+
                 else:
+
                     log.info("No points found within grading zone to remove.")
+
                     
+
                 t0.Commit()
+
             except Exception as e:
+
                 t0.RollBack()
+
                 log.error("Failed to reset points.", e)
 
+
+
         # Phase 1: Densify
+
         log.info("--- PHASE 1: DENSIFY ---")
+
         t1 = Transaction(doc, "Densify")
+
         t1.Start()
-        editor = toposolid.GetSlabShapeEditor()
-        editor.Enable()
-        occupied_points = [v.Position for v in editor.SlabShapeVertices]
-        log.info("Initial Vertex Count: {}".format(len(occupied_points)))
-        
-        bb = state.grading_line.get_BoundingBox(None)
-        start_x = math.floor((bb.Min.X - total_rad - g_int) / g_int) * g_int
-        end_x   = math.ceil((bb.Max.X + total_rad + g_int) / g_int) * g_int
-        start_y = math.floor((bb.Min.Y - total_rad - g_int) / g_int) * g_int
-        end_y   = math.ceil((bb.Max.Y + total_rad + g_int) / g_int) * g_int
-        
-        log.info("Grid Search Bounds: X[{:.1f}, {:.1f}] Y[{:.1f}, {:.1f}]".format(start_x, end_x, start_y, end_y))
-        
-        grid_pts = []
-        candidates_checked = 0
-        x = start_x
-        while x <= end_x:
-            y = start_y
-            while y <= end_y:
-                candidates_checked += 1
-                t_pt = XYZ(x, y, 0)
-                res = curve.Project(t_pt)
+
+        try:
+
+            editor = toposolid.GetSlabShapeEditor()
+
+            editor.Enable()
+
+            occupied_points = [v.Position for v in editor.SlabShapeVertices]
+
+            log.info("Initial Vertex Count: {}".format(len(occupied_points)))
+
+            
+
+            bb = state.grading_line.get_BoundingBox(None)
+
+            start_x = math.floor((bb.Min.X - total_rad - g_int) / g_int) * g_int
+
+            end_x   = math.ceil((bb.Max.X + total_rad + g_int) / g_int) * g_int
+
+            start_y = math.floor((bb.Min.Y - total_rad - g_int) / g_int) * g_int
+
+            end_y   = math.ceil((bb.Max.Y + total_rad + g_int) / g_int) * g_int
+
+            
+
+            log.info("Grid Search Bounds: X[{:.1f}, {:.1f}] Y[{:.1f}, {:.1f}]".format(start_x, end_x, start_y, end_y))
+
+            
+
+            grid_pts = []
+
+            candidates_checked = 0
+
+            x = start_x
+
+            while x <= end_x:
+
+                y = start_y
+
+                while y <= end_y:
+
+                    candidates_checked += 1
+
+                    t_pt = XYZ(x, y, 0)
+
+                    res = curve.Project(t_pt)
+
+                    
+
+                    if res and flatten(t_pt).DistanceTo(flatten(res.XYZPoint)) < (total_rad + g_int):
+
+                        if is_point_on_solid(intersector, t_pt, ray_start_z):
+
+                            rz = get_surface_z(intersector, t_pt, ray_start_z)
+
+                            if rz is not None: 
+
+                                grid_pts.append(XYZ(x, y, rz))
+
+                    y += g_int
+
+                x += g_int
+
                 
-                # Check 2D distance to curve
-                if res and flatten(t_pt).DistanceTo(flatten(res.XYZPoint)) < (total_rad + g_int):
-                    if is_point_on_solid(intersector, t_pt, ray_start_z):
-                        rz = get_surface_z(intersector, t_pt, ray_start_z)
-                        if rz is not None: 
-                            grid_pts.append(XYZ(x, y, rz))
-                y += g_int
-            x += g_int
+
+            log.info("Grid Points Found on Solid: {} (out of {} checked)".format(len(grid_pts), candidates_checked))
+
             
-        log.info("Grid Points Found on Solid: {} (out of {} checked)".format(len(grid_pts), candidates_checked))
-        
-        added_count = 0
-        for p in grid_pts:
-            if not is_too_close(p, occupied_points):
-                try: 
-                    editor.AddPoint(p)
-                    occupied_points.append(p)
-                    added_count += 1
-                except: pass
-        t1.Commit()
-        
-        log.info("Points Added: {}".format(added_count))
-        
+
+            added_count = 0
+
+            for p in grid_pts:
+
+                if not is_too_close(p, occupied_points):
+
+                    try: 
+
+                        editor.AddPoint(p)
+
+                        occupied_points.append(p)
+
+                        added_count += 1
+
+                    except: pass
+
+            t1.Commit()
+
+            log.info("Points Added: {}".format(added_count))
+
+        except:
+
+            t1.RollBack()
+
+            raise
+
+
+
         # Phase 2: Sculpt
+
         log.info("--- PHASE 2: SCULPT ---")
+
         t2 = Transaction(doc, "Sculpt")
+
         t2.Start()
-        
-        # RE-ACQUIRE Editor to ensure we see the new points from Phase 1
-        editor = toposolid.GetSlabShapeEditor()
-        editor.Enable()
-        
-        updates = []
-        
-        # Refresh vertices after densify
-        current_verts = [v for v in editor.SlabShapeVertices]
-        log.info("Total Vertices to Process: {}".format(len(current_verts)))
-        
-        sample_log = []
-        
-        for v in current_verts:
-            res = curve.Project(v.Position)
-            if not res: continue
+
+        modified_count = 0
+
+        try:
+
+            editor = toposolid.GetSlabShapeEditor()
+
+            editor.Enable()
+
             
-            d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
-            if d > total_rad: continue
+
+            updates = []
+
+            current_verts = [v for v in editor.SlabShapeVertices]
+
+            log.info("Total Vertices to Process: {}".format(len(current_verts)))
+
             
-            target_z = get_z_from_curve_param(curve, res, z_s, z_e)
-            new_z = v.Position.Z
+
+            sample_log = []
+
             
-            # Logic check
-            is_core = d <= core_rad
+
+            for v in current_verts:
+
+                res = curve.Project(v.Position)
+
+                if not res: continue
+
+                
+
+                d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
+
+                if d > total_rad: continue
+
+                
+
+                target_z = get_z_from_curve_param(curve, res, z_s, z_e)
+
+                new_z = v.Position.Z
+
+                
+
+                is_core = d <= core_rad
+
+                
+
+                if is_core: 
+
+                    new_z = target_z
+
+                else:
+
+                    t_val = (d - core_rad) / f_int
+
+                    t_val = 1.0 if t_val > 1.0 else t_val
+
+                    smooth_t = t_val * t_val * (3 - 2 * t_val)
+
+                    new_z = lerp(target_z, new_z, smooth_t)
+
+                
+
+                if abs(new_z - v.Position.Z) > 0.005:
+
+                    updates.append(XYZ(v.Position.X, v.Position.Y, new_z))
+
+                    if len(sample_log) < 3:
+
+                        sample_log.append("Pt ({:.1f}, {:.1f}): Z {:.2f} -> {:.2f} (Dist={:.2f}, Core={})".format(
+
+                            v.Position.X, v.Position.Y, v.Position.Z, new_z, d, is_core
+
+                        ))
+
             
-            if is_core: 
-                new_z = target_z
-            else:
-                t_val = (d - core_rad) / f_int
-                t_val = 1.0 if t_val > 1.0 else t_val
-                smooth_t = t_val * t_val * (3 - 2 * t_val)
-                new_z = lerp(target_z, new_z, smooth_t)
+
+            modified_count = len(updates)
+
+            log.info("Points Identified for Modification: {}".format(modified_count))
+
+            if sample_log:
+
+                log.info("Sample Changes:\n" + "\n".join(sample_log))
+
             
-            if abs(new_z - v.Position.Z) > 0.005:
-                updates.append(XYZ(v.Position.X, v.Position.Y, new_z))
-                if len(sample_log) < 3:
-                    sample_log.append("Pt ({:.1f}, {:.1f}): Z {:.2f} -> {:.2f} (Dist={:.2f}, Core={})".format(
-                        v.Position.X, v.Position.Y, v.Position.Z, new_z, d, is_core
-                    ))
-        
-        modified_count = len(updates)
-        log.info("Points Identified for Modification: {}".format(modified_count))
-        if sample_log:
-            log.info("Sample Changes:\n" + "\n".join(sample_log))
-        
-        for p in updates:
-            try: editor.AddPoint(p)
-            except: pass
-        
-        t2.Commit()
+
+            for p in updates:
+
+                try: editor.AddPoint(p)
+
+                except: pass
+
+            
+
+            t2.Commit()
+
+        except:
+
+            t2.RollBack()
+
+            raise
+
+
+
+        # Phase 3: Triangulate (Split Lines)
+
+        log.info("--- PHASE 3: TRIANGULATE ---")
+
+        t3 = Transaction(doc, "Triangulate Path")
+
+        t3.Start()
+
+        split_lines_count = 0
+
+        try:
+
+            editor = toposolid.GetSlabShapeEditor() 
+
+            editor.Enable()
+
+            
+
+            all_verts = [v for v in editor.SlabShapeVertices]
+
+            search_tol = g_int * 0.25
+
+            step_len = g_int
+
+            if step_len < 0.1: step_len = 1.0
+
+            
+
+            l_len = curve.Length
+
+            current_len = 0.0
+
+            
+
+            while current_len <= l_len:
+                norm_param = current_len / l_len
+                if norm_param > 1.0: norm_param = 1.0
+                
+                center_pt = curve.Evaluate(norm_param, True)
+                deriv = curve.ComputeDerivatives(norm_param, True)
+                tangent = deriv.BasisX.Normalize()
+                normal = tangent.CrossProduct(XYZ.BasisZ) 
+                
+                p_left = center_pt + (normal * core_rad)
+                p_right = center_pt - (normal * core_rad) 
+                
+                v_left = None
+                v_right = None
+                
+                min_d_l = search_tol
+                min_d_r = search_tol
+                
+                p_l_flat = flatten(p_left)
+                p_r_flat = flatten(p_right)
+                
+                for v in all_verts:
+                    v_flat = flatten(v.Position)
+                    d_l = v_flat.DistanceTo(p_l_flat)
+                    if d_l < min_d_l:
+                        min_d_l = d_l
+                        v_left = v
+                    d_r = v_flat.DistanceTo(p_r_flat)
+                    if d_r < min_d_r:
+                        min_d_r = d_r
+                        v_right = v
+                
+                if v_left and v_right and not v_left.Position.IsAlmostEqualTo(v_right.Position):
+                    dist_real = v_left.Position.DistanceTo(v_right.Position)
+                    if abs(dist_real - w_int) < (w_int * 0.5):
+                        try:
+                            editor.DrawSplitLine(v_left, v_right)
+                            split_lines_count += 1
+                        except: pass
+                
+                current_len += step_len
+
+
+
+            t3.Commit()
+
+            log.info("Triangulation Complete. Split Lines Added: {}".format(split_lines_count))
+
+        except:
+
+            t3.RollBack()
+
+            raise
+
+
+
         tg.Assimilate()
+
         
+
         log.info("Sculpt Transaction Committed.")
-        
+
         log.info("Sculpt Complete.\nPoints Added: {}\\nPoints Adjusted: {}".format(added_count, modified_count))
+
         
+
         # Reset the flag so it's not checked next time
+
         state.reset_mode = False
 
+
+
     except Exception as e:
+
         tg.RollBack()
+
         log.error("Sculpting Failed", "{}\n{}".format(e, traceback.format_exc()))
+
     
+
     finally:
+
         log.show()
 
 def perform_edging(state):
@@ -1254,6 +1581,9 @@ def perform_edging(state):
 # To improve grading quality, we could implement a pass that connects points
 # perpendicular to the guide curve (Left Point <-> Right Point) using Split Lines.
 # This forces the triangulation to align with the path flow, avoiding diagonal artifacts.
+# WARNING: API-created Split Lines are "User Drawn" and appear as visible "Folding Lines".
+# They cannot be individually hidden via API. Users must hide the "Folding Lines" 
+# subcategory in Visibility/Graphics to make them invisible.
 
 # ==========================================
 # 6. LOOP
