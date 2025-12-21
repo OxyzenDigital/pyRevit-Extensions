@@ -153,7 +153,8 @@ class GradingRecipe:
 
 def load_settings_from_disk():
     defaults = {
-        "width": "6.0", "falloff": "10.0", "grid": "3.0", "slope": "2.0", "mode": "stakes"
+        "width": "6.0", "falloff": "10.0", "grid": "3.0", "slope": "2.0", "mode": "stakes",
+        "win_top": "100", "win_left": "100"
     }
     try:
         if os.path.exists(SETTINGS_FILE):
@@ -169,7 +170,9 @@ def save_state_to_disk(state):
         "falloff": state.falloff, 
         "grid": state.grid, 
         "slope": state.slope_val, 
-        "mode": state.mode
+        "mode": state.mode,
+        "win_top": str(state.win_top),
+        "win_left": str(state.win_left)
     }
     try:
         with open(SETTINGS_FILE, 'w') as f:
@@ -188,6 +191,10 @@ class GradingState(object):
         self.grid = sets.get("grid", "3.0")
         self.slope_val = sets.get("slope", "2.0")
         self.mode = sets.get("mode", "stakes")
+        self.reset_mode = False
+        
+        self.win_top = float(sets.get("win_top", "100"))
+        self.win_left = float(sets.get("win_left", "100"))
         
         self.start_stake = None
         self.end_stake = None
@@ -212,53 +219,79 @@ class GradingWindow(forms.WPFWindow):
     def __init__(self, state):
         forms.WPFWindow.__init__(self, 'ui.xaml')
         self.state = state
+        
+        # Restore Position
+        try:
+            if self.state.win_top > 0: self.Top = self.state.win_top
+            if self.state.win_left > 0: self.Left = self.state.win_left
+        except: pass
+        
         self.bind_ui()
         self.setup_events()
 
-    def bind_ui(self):
+    def refresh_ui(self):
         from System.Windows import Media
-        green = Media.Brushes.Green; red = Media.Brushes.Red
-        def fmt(e): return "{} [{}]".format(e.Name, get_id_val(e)) if e else "[None]"
-
-        if self.state.mode == "slope":
-            self.Rb_UseSlope.IsChecked = True; self.Tb_Slope.IsEnabled = True
-        else:
-            self.Rb_MatchStakes.IsChecked = True; self.Tb_Slope.IsEnabled = False
-
-        self.Lb_StartStake.Text = "Start: {}".format(fmt(self.state.start_stake))
-        self.Lb_StartStake.Foreground = green if self.state.start_stake else red
         
-        self.Lb_EndStake.Text = "End: {}".format(fmt(self.state.end_stake))
-        self.Lb_EndStake.Foreground = green if self.state.end_stake else red
-        
-        self.Lb_Line.Text = "Line: {}".format(fmt(self.state.grading_line))
-        self.Lb_Line.Foreground = green if self.state.grading_line else red
-
-        # UNITS: Internal -> Display
-        u_sym = UnitHelper.get_unit_symbol()
-        
-        def disp(val_str):
-            try: return "{:.3f}".format(UnitHelper.from_internal(float(val_str)))
-            except: return val_str
-
-        self.Tb_Width.Text = disp(self.state.width)
-        self.Tb_Falloff.Text = disp(self.state.falloff)
-        self.Tb_Grid.Text = disp(self.state.grid)
+        # 1. Fill TextBoxes (Internal -> Display)
+        try:
+            self.Tb_Width.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.width))
+            self.Tb_Falloff.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.falloff))
+            self.Tb_Grid.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.grid))
+        except: 
+            # Fallback if state has bad strings
+            self.Tb_Width.Text = "6.0"
+            self.Tb_Falloff.Text = "10.0"
+            self.Tb_Grid.Text = "3.0"
+            
         self.Tb_Slope.Text = str(self.state.slope_val)
-
-        # Append unit to Title to inform user
-        self.Title += " [{}]".format(u_sym)
-
-        self.Btn_Run.IsEnabled = self.state.ready
-        self.Btn_Edging.IsEnabled = self.state.ready
-        self.Btn_Swap.IsEnabled = bool(self.state.start_stake and self.state.end_stake)
-
-        if self.state.ready:
-            self.Lb_Status.Content = "Ready."
-            self.Lb_Status.Foreground = green
+        
+        # 2. Mode
+        if self.state.mode == "slope":
+            self.Rb_UseSlope.IsChecked = True
+            self.Tb_Slope.IsEnabled = True
         else:
-            self.Lb_Status.Content = "Incomplete."
-            self.Lb_Status.Foreground = Media.Brushes.Gray
+            self.Rb_MatchStakes.IsChecked = True
+            self.Tb_Slope.IsEnabled = False
+
+        # 3. Selection Labels
+        if self.state.start_stake:
+            self.Lb_StartStake.Text = "Start: ID {}".format(get_id_val(self.state.start_stake))
+            self.Lb_StartStake.Foreground = Media.Brushes.Black
+        else:
+            self.Lb_StartStake.Text = "Start: [None]"
+            self.Lb_StartStake.Foreground = Media.Brushes.Gray
+
+        if self.state.end_stake:
+            self.Lb_EndStake.Text = "End: ID {}".format(get_id_val(self.state.end_stake))
+            self.Lb_EndStake.Foreground = Media.Brushes.Black
+        else:
+            self.Lb_EndStake.Text = "End: [None]"
+            self.Lb_EndStake.Foreground = Media.Brushes.Gray
+
+        if self.state.grading_line:
+            self.Lb_Line.Text = "Line: ID {}".format(get_id_val(self.state.grading_line))
+            self.Lb_Line.Foreground = Media.Brushes.Black
+        else:
+            self.Lb_Line.Text = "Line: [None]"
+            self.Lb_Line.Foreground = Media.Brushes.Gray
+            
+        # 4. Enable/Disable Swap
+        is_swap_ready = (self.state.start_stake is not None and self.state.end_stake is not None)
+        self.Btn_Swap.IsEnabled = is_swap_ready
+        
+        # 5. Reset Mode
+        self.Cb_ResetPoints.IsChecked = self.state.reset_mode
+
+    def bind_ui(self):
+        # Initial Bind
+        self.refresh_ui()
+        
+        # Unit Title
+        u_sym = UnitHelper.get_unit_symbol()
+        self.Title += " [{}]".format(u_sym)
+        
+        # Initial Validation
+        self.validate_ui()
 
     def setup_events(self):
         self.Btn_SelectStakes.Click += self.a_stakes
@@ -275,6 +308,67 @@ class GradingWindow(forms.WPFWindow):
         self.Btn_SelectStakes.MouseLeave += self.h_off
         self.Btn_SelectLine.MouseEnter += self.h_line_on
         self.Btn_SelectLine.MouseLeave += self.h_off
+        
+        # Custom Window Events
+        self.HeaderDrag.MouseLeftButtonDown += self.drag_window
+        self.Btn_WinClose.Click += lambda s, a: self.Close()
+        
+        # Validation Events
+        self.Tb_Width.LostFocus += self.validate_ui
+        self.Tb_Falloff.LostFocus += self.validate_ui
+        self.Tb_Grid.LostFocus += self.validate_ui
+
+    def drag_window(self, sender, args):
+        try: self.DragMove()
+        except: pass
+
+    def validate_ui(self, sender=None, args=None):
+        from System.Windows import Media
+        
+        try:
+            # Parse (Display Units -> Internal Logic Checks)
+            # We don't convert to internal for logic ratio checks if units are consistent, 
+            # but for absolute limits (0.1 ft), we MUST convert inputs to internal or convert limit to display.
+            # Easiest: Convert inputs to Internal Feet.
+            
+            w = UnitHelper.to_internal(self.Tb_Width.Text)
+            f = UnitHelper.to_internal(self.Tb_Falloff.Text)
+            g = UnitHelper.to_internal(self.Tb_Grid.Text)
+            
+            msg = None
+            
+            if w <= 0: msg = "Width must be > 0"
+            elif f < 0: msg = "Falloff cannot be negative"
+            elif g < 0.1: msg = "Grid must be >= 0.1 ft"
+            elif g > w: msg = "Grid > Width (Path skipped!)"
+            elif f > 0 and g > f: msg = "Grid > Falloff (Jagged!)"
+            
+            if msg:
+                self.Lb_Status.Content = msg
+                self.Lb_Status.Foreground = Media.Brushes.Red
+                self.Btn_Run.IsEnabled = False
+                self.Btn_Edging.IsEnabled = False
+                return False
+            else:
+                # Restore 'Ready' state if logic holds
+                if self.state.ready:
+                    self.Lb_Status.Content = "Ready."
+                    self.Lb_Status.Foreground = Media.Brushes.Green
+                    self.Btn_Run.IsEnabled = True
+                    self.Btn_Edging.IsEnabled = True
+                else:
+                    self.Lb_Status.Content = "Incomplete."
+                    self.Lb_Status.Foreground = Media.Brushes.Gray
+                    self.Btn_Run.IsEnabled = False
+                    self.Btn_Edging.IsEnabled = False
+                return True
+                
+        except:
+            self.Lb_Status.Content = "Invalid Number Format"
+            self.Lb_Status.Foreground = Media.Brushes.Red
+            self.Btn_Run.IsEnabled = False
+            self.Btn_Edging.IsEnabled = False
+            return False
 
     def set_selection(self, elements):
         try:
@@ -304,6 +398,7 @@ class GradingWindow(forms.WPFWindow):
         self.state.falloff = str(UnitHelper.to_internal(self.Tb_Falloff.Text))
         self.state.grid = str(UnitHelper.to_internal(self.Tb_Grid.Text))
         self.state.slope_val = self.Tb_Slope.Text
+        self.state.reset_mode = self.Cb_ResetPoints.IsChecked
 
     def a_stakes(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_stakes"; self.Close()
     def a_line(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_line"; self.Close()
@@ -501,8 +596,10 @@ def perform_load_recipe(state):
         data = GradingRecipe.read_recipe(doc.GetElement(ref))
         if data:
             state.width = str(data.get("width", "6.0"))
-            state.falloff = str(data.get("falloff", "10.0")),
+            state.falloff = str(data.get("falloff", "10.0"))
             state.grid = str(data.get("grid", "3.0"))
+            state.slope_val = str(data.get("slope", "2.0"))
+            state.mode = str(data.get("mode", "stakes"))
             log.info("Recipe loaded successfully.")
         else:
             log.info("No grading recipe found on this element.")
@@ -862,7 +959,13 @@ def perform_sculpt(state):
     
     try:
         # Save Recipe
-        rec = {"width": state.width, "falloff": state.falloff, "grid": state.grid}
+        rec = {
+            "width": state.width, 
+            "falloff": state.falloff, 
+            "grid": state.grid,
+            "slope": state.slope_val,
+            "mode": state.mode
+        }
         t_rec = Transaction(doc, "Save Recipe")
         t_rec.Start()
         GradingRecipe.save_recipe(toposolid, rec)
@@ -887,6 +990,43 @@ def perform_sculpt(state):
         core_rad = w_int / 2.0
         total_rad = core_rad + f_int
         
+        # Phase 0: Reset (Optional)
+        if state.reset_mode:
+            log.info("--- PHASE 0: RESET POINTS ---")
+            t0 = Transaction(doc, "Reset Points")
+            t0.Start()
+            try:
+                editor = toposolid.GetSlabShapeEditor()
+                editor.Enable()
+                
+                # Identify points to remove
+                to_delete = []
+                for v in editor.SlabShapeVertices:
+                    # Quick bounding box check or direct project?
+                    # Project is safer
+                    res = curve.Project(v.Position)
+                    if res:
+                        d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
+                        # Remove everything within the grading zone so we can rebuild the grid
+                        if d < (total_rad + g_int):
+                            to_delete.append(v)
+                
+                if to_delete:
+                    count_del = 0
+                    for v_del in to_delete:
+                        try:
+                            editor.DeletePoint(v_del)
+                            count_del += 1
+                        except: pass
+                    log.info("Removed {} old points to clear resolution.".format(count_del))
+                else:
+                    log.info("No points found within grading zone to remove.")
+                    
+                t0.Commit()
+            except Exception as e:
+                t0.RollBack()
+                log.error("Failed to reset points.", e)
+
         # Phase 1: Densify
         log.info("--- PHASE 1: DENSIFY ---")
         t1 = Transaction(doc, "Densify")
@@ -997,6 +1137,9 @@ def perform_sculpt(state):
         log.info("Sculpt Transaction Committed.")
         
         log.info("Sculpt Complete.\nPoints Added: {}\\nPoints Adjusted: {}".format(added_count, modified_count))
+        
+        # Reset the flag so it's not checked next time
+        state.reset_mode = False
 
     except Exception as e:
         tg.RollBack()
@@ -1106,6 +1249,12 @@ def perform_edging(state):
     finally:
         log.show()
 
+# NOTE: Future enhancement for triangulation control
+# The Revit API allows modifying triangulation via SlabShapeEditor.DrawSplitLine(v1, v2).
+# To improve grading quality, we could implement a pass that connects points
+# perpendicular to the guide curve (Left Point <-> Right Point) using Split Lines.
+# This forces the triangulation to align with the path flow, avoiding diagonal artifacts.
+
 # ==========================================
 # 6. LOOP
 # ==========================================
@@ -1114,6 +1263,13 @@ if __name__ == '__main__':
     while True:
         win = GradingWindow(state)
         win.ShowDialog()
+        
+        # Capture Position
+        try:
+            state.win_top = win.Top
+            state.win_left = win.Left
+        except: pass
+        
         action = state.next_action
         state.next_action = None 
         

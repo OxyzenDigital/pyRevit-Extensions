@@ -1,1 +1,1 @@
-{"slope": "2.0", "mode": "stakes", "width": "10.0", "falloff": "20.0", "grid": "3.0"}
+{"win_top": "393.333333333", "slope": "2", "falloff": "20.0", "grid": "5.0", "mode": "slope", "win_left": "257.333333333", "reset_mode": true, "width": "20.0"}
