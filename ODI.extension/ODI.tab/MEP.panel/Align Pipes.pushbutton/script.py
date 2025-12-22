@@ -1,13 +1,39 @@
 # -*- coding: utf-8 -*-
 """
 Align Pipes Tool
+Version: 1.0
+Author: ODI (Generated via Gemini CLI)
 
-Allows the user to align one pipe to another in the XY plane.
-Supports:
-1. Parallel Horizontal Pipes (Collinear Alignment)
-2. Vertical Riser to Vertical Riser (Concentric Alignment)
-3. Vertical Riser to Horizontal Pipe (Intersecting Alignment)
-   - Moves the horizontal pipe so its axis points directly at the vertical riser.
+Description:
+    Allows the user to align multiple pipes to a single reference pipe in the XY plane.
+    Designed to facilitate the joining of pipes by ensuring their centerlines intersect 
+    or are collinear in the Plan View (XY projection).
+
+Usage:
+    1. Run the command.
+    2. Select the 'Reference Pipe' (the stationary pipe).
+    3. Continuously select 'Target Pipes' (the pipes to be moved).
+       - Pipes move immediately upon selection.
+    4. Press ESC to finish the command and view the log report.
+
+Supported Alignment Modes:
+    1. Horizontal/Sloped -> Horizontal/Sloped (Parallel):
+       - Moves the Target pipe laterally so it becomes collinear with the Reference pipe in Plan View.
+    
+    2. Vertical Riser -> Vertical Riser:
+       - Moves the Target pipe so it is concentric (same X,Y) with the Reference pipe.
+    
+    3. Vertical Riser -> Horizontal/Sloped:
+       - Moves the Horizontal pipe laterally so its centerline axis passes through the Vertical Riser in Plan View.
+       - Useful for aligning a branch pipe to hit a main riser.
+
+    4. Horizontal/Sloped -> Vertical Riser:
+       - Moves the Vertical pipe so it sits on the centerline axis of the Horizontal pipe in Plan View.
+
+Limitations:
+    - Alignment is calculated in the XY plane (Plan View) only. Z-elevations are not modified.
+    - Non-parallel horizontal pipes (Skew lines) are not aligned (as they technically already intersect in 2D).
+    - Requires pipes to be straight lines (no arcs/splines).
 """
 
 from Autodesk.Revit.DB import (
@@ -21,7 +47,10 @@ from Autodesk.Revit.DB import (
 from Autodesk.Revit.UI.Selection import ObjectType
 from Autodesk.Revit.Exceptions import OperationCanceledException
 from pyrevit import revit, script, forms
-import math
+
+__title__ = "Align Pipes"
+__doc__ = "Aligns multiple pipes to a reference pipe in the XY plane (Plan View)."
+__version__ = "1.0"
 
 # --- Configuration ---
 TOLERANCE = 0.01 # Tolerance for parallel check (radians)
@@ -45,6 +74,7 @@ def log_vector(name, vector):
         log_buffer.append("- **{}:** None".format(name))
 
 def show_log():
+    if not log_buffer: return
     output = script.get_output()
     output.close_others()
     for msg in log_buffer:
@@ -53,7 +83,7 @@ def show_log():
 # --- Helpers ---
 
 def get_id_value(element_id):
-    """Safely gets the integer value of an ElementId."""
+    """Safely gets the integer value of an ElementId (Revit 2024+ compatible)."""
     if hasattr(element_id, "Value"): # Revit 2024+
         return element_id.Value
     elif hasattr(element_id, "IntegerValue"): # Pre-2024
@@ -81,7 +111,6 @@ def are_parallel(v1, v2, tolerance=TOLERANCE):
 def project_point_to_line_infinite_xy(point, line_origin, line_dir_xy):
     """
     Projects a point onto an infinite line defined by origin and direction in XY plane.
-    line_dir_xy must be normalized and in XY plane.
     """
     v_to_point = point - line_origin
     v_to_point_xy = XYZ(v_to_point.X, v_to_point.Y, 0)
@@ -90,8 +119,6 @@ def project_point_to_line_infinite_xy(point, line_origin, line_dir_xy):
     projected_vector = line_dir_xy.Multiply(dot_prod)
     
     closest_point_xy = XYZ(line_origin.X, line_origin.Y, 0) + projected_vector
-    
-    # Return projected point keeping original Z
     return XYZ(closest_point_xy.X, closest_point_xy.Y, point.Z)
 
 def is_pipe(element):
@@ -110,118 +137,69 @@ def pick_pipe_safely(uidoc, doc, prompt):
         if is_pipe(element):
             return element
         else:
-            forms.alert("Selected element is not a Pipe.", title="Invalid Selection")
-            return None
+            return None 
     except OperationCanceledException:
-        return None
+        return None # Signal to stop loop
 
 def align_pipe_geometry(ref_pipe, target_pipe):
     """
     Calculates the move vector for target_pipe to align with ref_pipe in XY.
     """
-    log_section("Geometry Analysis")
-    
     # 1. Get Location Curves
     loc_ref = ref_pipe.Location
     loc_target = target_pipe.Location
     
     if not isinstance(loc_ref, LocationCurve) or not isinstance(loc_target, LocationCurve):
-        return None, "One of the elements does not have a location curve."
+        return None, "No location curve."
 
     curve_ref = loc_ref.Curve
     curve_target = loc_target.Curve
     
     if not isinstance(curve_ref, Line) or not isinstance(curve_target, Line):
-        return None, "Only straight pipes are supported."
+        return None, "Not straight line."
 
-    # 2. Get Vectors and Points
+    # 2. Get Vectors
     p1 = curve_ref.Origin
     v1 = curve_ref.Direction.Normalize()
-    
     p2 = curve_target.Origin
     v2 = curve_target.Direction.Normalize()
     
-    log_point("Ref Pipe Origin", p1)
-    log_vector("Ref Pipe Direction", v1)
-    log_point("Target Pipe Origin", p2)
-    log_vector("Target Pipe Direction", v2)
-
     ref_is_vert = is_vertical(v1)
     target_is_vert = is_vertical(v2)
-    
-    log_item("Ref Pipe Vertical?", ref_is_vert)
-    log_item("Target Pipe Vertical?", target_is_vert)
 
     # CASE A: Both Vertical (Concentric)
     if ref_is_vert and target_is_vert:
-        log_item("Alignment Mode", "Vertical -> Vertical (Concentric)")
-        # Move Target (P2) to match Ref (P1) in X,Y
         target_pos_xy = XYZ(p1.X, p1.Y, p2.Z)
         move_vector = target_pos_xy - p2
         return move_vector, None
 
     # CASE B: Ref Vertical, Target Horizontal/Sloped
     if ref_is_vert and not target_is_vert:
-        log_item("Alignment Mode", "Vertical Ref -> Horizontal Target (Intersection)")
-        # Ref is a point (P1.X, P1.Y).
-        # Target is a line (P2, V2).
-        # We need to move Target (perpendicularly to V2) so that its line passes through Ref.
-        
-        # 1. Project Ref Point onto Target Line (Current Position)
         v2_xy = get_xy_vector(v2)
-        if not v2_xy: return None, "Target pipe has no XY length."
-        
-        # Where is Ref Point currently relative to Target Line?
+        if not v2_xy: return None, "Target has no XY length."
         ref_projected_on_target = project_point_to_line_infinite_xy(p1, p2, v2_xy)
-        
-        # Vector from Projected Point (on Target Line) to Ref Point (Desired Line)
-        # We want the line to move TO the Ref point.
         move_vector = XYZ(p1.X, p1.Y, 0) - XYZ(ref_projected_on_target.X, ref_projected_on_target.Y, 0)
-        
-        log_point("Ref Point (XY)", p1)
-        log_point("Projected Ref on Target Line", ref_projected_on_target)
-        log_vector("Calculated Move Vector", move_vector)
         return move_vector, None
 
     # CASE C: Ref Horizontal/Sloped, Target Vertical
     if not ref_is_vert and target_is_vert:
-        log_item("Alignment Mode", "Horizontal Ref -> Vertical Target (Intersection)")
-        # Ref is a Line (P1, V1).
-        # Target is a Point (P2.X, P2.Y).
-        # We need to move Target (the point) to lie on Ref Line.
-        
         v1_xy = get_xy_vector(v1)
-        if not v1_xy: return None, "Ref pipe has no XY length."
-        
-        # Project Target Point onto Ref Line
+        if not v1_xy: return None, "Ref has no XY length."
         target_projected_on_ref = project_point_to_line_infinite_xy(p2, p1, v1_xy)
-        
-        # Move Target TO the projected point
         move_vector = XYZ(target_projected_on_ref.X, target_projected_on_ref.Y, 0) - XYZ(p2.X, p2.Y, 0)
-        
-        log_vector("Calculated Move Vector", move_vector)
         return move_vector, None
 
     # CASE D: Both Horizontal/Sloped
-    log_item("Alignment Mode", "Horizontal -> Horizontal")
     v1_xy = get_xy_vector(v1)
     v2_xy = get_xy_vector(v2)
 
     if are_parallel(v1_xy, v2_xy):
-        log_item("Sub-Mode", "Parallel (Collinear)")
-        # Existing logic: Move P2 to line of P1
         target_pos = project_point_to_line_infinite_xy(p2, p1, v1_xy)
         move_vector = target_pos - p2
         move_vector = XYZ(move_vector.X, move_vector.Y, 0)
         return move_vector, None
     else:
-        log_item("Sub-Mode", "Non-Parallel (Skew)")
-        # In this case, non-parallel lines in 2D already intersect. 
-        # "Aligning" them implies we want them to intersect? They do.
-        # Unless user wants to move Target so the Intersection Point aligns with something else?
-        # Given "vector... intersects", we assume infinite lines. They intersect.
-        
-        return XYZ.Zero, "Non-parallel horizontal pipes already intersect in Plan View. No alignment needed."
+        return XYZ.Zero, "Non-parallel horizontal pipes."
 
 # --- Main Execution ---
 
@@ -230,56 +208,72 @@ def main():
     doc = revit.doc
     
     log_section("Initialization")
-    log_item("Tool", "Align Pipes")
+    log_item("Tool", "Align Multiple Pipes (v1.0)")
     log_item("Active View", doc.ActiveView.Name)
 
-    # 1. Select Reference Pipe
+    # 1. Select Reference Pipe (Once)
     ref_pipe = pick_pipe_safely(uidoc, doc, "Select REFERENCE Pipe (Stationary)")
     if not ref_pipe:
-        log_item("Status", "Cancelled or Invalid Ref selection")
-        return
-    log_item("Reference Pipe Selected", get_id_value(ref_pipe.Id))
-
-    # 2. Select Target Pipe
-    target_pipe = pick_pipe_safely(uidoc, doc, "Select TARGET Pipe (To Move)")
-    if not target_pipe:
-        log_item("Status", "Cancelled or Invalid Target selection")
-        return
-    log_item("Target Pipe Selected", get_id_value(target_pipe.Id))
-
-    if ref_pipe.Id == target_pipe.Id:
-        forms.alert("You selected the same pipe twice.", title="Error")
-        show_log()
-        return
-
-    # 3. Calculate Alignment
-    move_vector, error = align_pipe_geometry(ref_pipe, target_pipe)
+        return # Exit if no reference picked
     
-    if error:
-        forms.alert(error, title="Alignment Failed")
-        log_item("Error", error)
-        show_log()
-        return
-        
-    if move_vector.IsZeroLength():
-        forms.alert("Pipes are already aligned.", title="Info")
-        log_item("Result", "Already Aligned")
-        show_log()
-        return
+    ref_id = get_id_value(ref_pipe.Id)
+    log_item("Reference Pipe", ref_id)
 
-    # 4. Execute Move
-    try:
-        log_section("Execution")
-        with Transaction(doc, "Align Pipes") as t:
-            t.Start()
-            ElementTransformUtils.MoveElement(doc, target_pipe.Id, move_vector)
-            t.Commit()
-        log_item("Transaction", "Success")
-        log_item("Result", "Pipe Aligned")
-        
-    except Exception as e:
-        forms.alert("An error occurred: {}".format(str(e)), title="Error")
-        log_item("Transaction Error", str(e))
+    count_success = 0
+    count_fail = 0
+
+    # 2. Loop for Target Pipes
+    while True:
+        try:
+            target_ref = uidoc.Selection.PickObject(
+                ObjectType.Element, 
+                "Select Pipe to ALIGN (ESC to finish)"
+            )
+            target_pipe = doc.GetElement(target_ref)
+            
+            if not is_pipe(target_pipe):
+                continue 
+            
+            t_id = get_id_value(target_pipe.Id)
+            
+            if t_id == ref_id:
+                continue 
+
+            # Calculate
+            move_vector, error = align_pipe_geometry(ref_pipe, target_pipe)
+            
+            if error:
+                log_item("Pipe {}".format(t_id), "Failed: {}".format(error))
+                count_fail += 1
+                continue
+            
+            if move_vector.IsZeroLength():
+                log_item("Pipe {}".format(t_id), "Already Aligned")
+                count_success += 1
+                continue
+
+            # Execute Immediate Move
+            try:
+                with Transaction(doc, "Align Pipe") as t:
+                    t.Start()
+                    ElementTransformUtils.MoveElement(doc, target_pipe.Id, move_vector)
+                    t.Commit()
+                log_item("Pipe {}".format(t_id), "Aligned Success")
+                count_success += 1
+                
+                uidoc.RefreshActiveView() 
+                
+            except Exception as e:
+                log_item("Pipe {}".format(t_id), "Transaction Error: {}".format(str(e)))
+                count_fail += 1
+
+        except OperationCanceledException:
+            # User pressed ESC
+            break
+
+    log_section("Summary")
+    log_item("Total Aligned", count_success)
+    log_item("Total Failed", count_fail)
     
     show_log()
 
