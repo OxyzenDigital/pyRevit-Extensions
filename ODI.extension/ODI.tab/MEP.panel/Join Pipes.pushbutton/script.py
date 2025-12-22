@@ -106,8 +106,8 @@ def get_intersector(doc, view3d, exclude_ids=None):
         DB.BuiltInCategory.OST_PipeCurves,
         DB.BuiltInCategory.OST_PipeFitting,
         # DB.BuiltInCategory.OST_Walls, # Excluded per user request
-        DB.BuiltInCategory.OST_Floors,
-        DB.BuiltInCategory.OST_Ceilings
+        # DB.BuiltInCategory.OST_Floors, # Excluded per user request
+        # DB.BuiltInCategory.OST_Ceilings, # Excluded per user request
     ]
     
     # Collect all elements of these categories in the view
@@ -556,11 +556,10 @@ class PipeJoiner:
             self.logger.error("Split and Tee failed: {}".format(e))
             return False
 
-    def extend_pipe_to_point(self, pipe, target_point, guide_point=None):
+    def extend_pipe_to_point(self, pipe, target_point, guide_point=None, intersector=None):
         """
         Extends/Trims 'pipe' so one end hits 'target_point'.
-        If 'guide_point' is provided, it modifies the end closest to 'guide_point'.
-        Otherwise, it modifies the end closest to 'target_point'.
+        Checks for collisions if 'intersector' is provided.
         """
         lc = pipe.Location.Curve
         p0 = lc.GetEndPoint(0)
@@ -578,14 +577,26 @@ class PipeJoiner:
             dist1 = p1.DistanceTo(target_point)
             move_p0 = dist0 < dist1
         
-        # Check for zero length
         fixed_pt = p1 if move_p0 else p0
+        moving_pt = p0 if move_p0 else p1
+        
         new_len = target_point.DistanceTo(fixed_pt)
         min_len = get_pipe_diameter(pipe) * 0.5 # Minimal tolerance
         
         if new_len < min_len:
             self.logger.error("Extension would result in too-short pipe ({} < {}). Target: {} Fixed: {}".format(new_len, min_len, target_point, fixed_pt))
             return False
+
+        # Collision Check
+        if intersector:
+            # Check if we are actually extending (new len > old len)
+            # If shrinking, we generally don't check collision (safe inside existing pipe volume)
+            old_len = p0.DistanceTo(p1)
+            if new_len > old_len:
+                radius = get_pipe_diameter(pipe) / 2.0
+                if check_clearance(intersector, moving_pt, target_point, radius):
+                    self.logger.info("Extension of Pipe blocked by collision.")
+                    return False
 
         try:
             if move_p0:
@@ -760,13 +771,15 @@ class PipeJoiner:
         min_len = dia * 2.0 
         too_short = bridge_len < min_len
         
-        # Check Collision
-        collision = False
+        # Check Collision (Bridge segment)
         active_view = self.doc.ActiveView
+        intersector = None
         if isinstance(active_view, DB.View3D):
             intersector = get_intersector(self.doc, active_view, exclude_ids=[p1.Id, p2.Id])
-            if check_clearance(intersector, pt1, pt2, radius):
-                collision = True
+            
+        collision = False
+        if intersector and check_clearance(intersector, pt1, pt2, radius):
+            collision = True
 
         if occupied or too_short or collision:
             reason = []
@@ -785,17 +798,17 @@ class PipeJoiner:
         t_transaction.Start()
         
         try:
-            # 1. Extend P1
-            if not self.extend_pipe_to_point(p1, pt1, p1_pick_pt):
+            # 1. Extend P1 (Checking Collision)
+            if not self.extend_pipe_to_point(p1, pt1, p1_pick_pt, intersector):
                 t_transaction.RollBack(); return False
             
-            # 2. Extend/Check P2
+            # 2. Extend/Check P2 (Checking Collision)
             l2_curr = p2.Location.Curve
             u = (pt2 - l2_curr.Origin).DotProduct(l2_curr.Direction)
             is_on_segment = 0.001 < u < (l2_curr.Length - 0.001)
             
             if not is_on_segment:
-                if not self.extend_pipe_to_point(p2, pt2):
+                if not self.extend_pipe_to_point(p2, pt2, intersector=intersector):
                     t_transaction.RollBack(); return False
             
             # 3. Create Bridge
@@ -840,8 +853,6 @@ class PipeJoiner:
             
         dia = get_pipe_diameter(p1)
         radius = dia / 2.0
-        # User Req: "use pipe diameter times 2 as offset distance"
-        # Min 4 inches (0.33 ft) to accommodate fittings for small pipes
         base_offset = max(4.0/12.0, 2.0 * dia)
         l2_dir = p2.Location.Curve.Direction
         
@@ -866,14 +877,14 @@ class PipeJoiner:
                 t_transaction.Start()
                 
                 try:
-                    if not self.extend_pipe_to_point(p1, pt1_orig, p1_pick_pt):
+                    if not self.extend_pipe_to_point(p1, pt1_orig, p1_pick_pt, intersector):
                         t_transaction.RollBack(); continue
 
                     l2_curr = p2.Location.Curve
                     u = (pt2_new - l2_curr.Origin).DotProduct(l2_curr.Direction)
                     is_on_segment = 0.001 < u < (l2_curr.Length - 0.001)
                     if not is_on_segment:
-                        if not self.extend_pipe_to_point(p2, pt2_new):
+                        if not self.extend_pipe_to_point(p2, pt2_new, intersector=intersector):
                              t_transaction.RollBack(); continue
                     
                     offset_pipe = self.create_pipe_segment(p1, pt1_orig, pt1_new)
@@ -923,7 +934,6 @@ class PipeJoiner:
             
         dia = get_pipe_diameter(p1)
         radius = dia / 2.0
-        # User Req: "use pipe diameter times 2 as offset distance"
         base_offset = max(4.0/12.0, 2.0 * dia)
         l2_dir = p2.Location.Curve.Direction
         
@@ -944,7 +954,7 @@ class PipeJoiner:
         jump_dirs.append(("Side A", side_vec))
         jump_dirs.append(("Side B", -side_vec))
         
-        for i in range(1, 10): # Try 9 increments (smaller steps now)
+        for i in range(1, 10): 
             current_offset = base_offset * i
             
             for name, vec in jump_dirs:
@@ -967,7 +977,7 @@ class PipeJoiner:
                 t_transaction.Start()
                 
                 try:
-                    if not self.extend_pipe_to_point(p1, pt1_orig, p1_pick_pt):
+                    if not self.extend_pipe_to_point(p1, pt1_orig, p1_pick_pt, intersector):
                         t_transaction.RollBack(); continue
 
                     # Check P2
@@ -975,7 +985,7 @@ class PipeJoiner:
                     u = (pt2_orig - l2_curr.Origin).DotProduct(l2_curr.Direction)
                     is_on_segment = 0.001 < u < (l2_curr.Length - 0.001)
                     if not is_on_segment:
-                        if not self.extend_pipe_to_point(p2, pt2_orig):
+                        if not self.extend_pipe_to_point(p2, pt2_orig, intersector=intersector):
                              t_transaction.RollBack(); continue
                     
                     riser1 = self.create_pipe_segment(p1, pt1_orig, pt1_jump)
