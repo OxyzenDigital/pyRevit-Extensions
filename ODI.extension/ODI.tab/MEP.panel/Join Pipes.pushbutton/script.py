@@ -98,10 +98,14 @@ def get_intersector(doc, view3d, exclude_ids=None):
         DB.BuiltInCategory.OST_StructuralFraming,
         DB.BuiltInCategory.OST_StructuralColumns,
         DB.BuiltInCategory.OST_DuctCurves,
+        DB.BuiltInCategory.OST_DuctFitting,
         DB.BuiltInCategory.OST_CableTray,
+        DB.BuiltInCategory.OST_CableTrayFitting,
         DB.BuiltInCategory.OST_Conduit,
+        DB.BuiltInCategory.OST_ConduitFitting,
         DB.BuiltInCategory.OST_PipeCurves,
-        DB.BuiltInCategory.OST_Walls,
+        DB.BuiltInCategory.OST_PipeFitting,
+        # DB.BuiltInCategory.OST_Walls, # Excluded per user request
         DB.BuiltInCategory.OST_Floors,
         DB.BuiltInCategory.OST_Ceilings
     ]
@@ -836,7 +840,9 @@ class PipeJoiner:
             
         dia = get_pipe_diameter(p1)
         radius = dia / 2.0
-        base_offset = max(0.5, 4.0 * dia)
+        # User Req: "use pipe diameter times 2 as offset distance"
+        # Min 4 inches (0.33 ft) to accommodate fittings for small pipes
+        base_offset = max(4.0/12.0, 2.0 * dia)
         l2_dir = p2.Location.Curve.Direction
         
         max_attempts = 10
@@ -917,7 +923,8 @@ class PipeJoiner:
             
         dia = get_pipe_diameter(p1)
         radius = dia / 2.0
-        base_offset = max(0.5, 4.0 * dia)
+        # User Req: "use pipe diameter times 2 as offset distance"
+        base_offset = max(4.0/12.0, 2.0 * dia)
         l2_dir = p2.Location.Curve.Direction
         
         # Determine Jump Vectors
@@ -937,7 +944,7 @@ class PipeJoiner:
         jump_dirs.append(("Side A", side_vec))
         jump_dirs.append(("Side B", -side_vec))
         
-        for i in range(1, 6): # Try 5 increments
+        for i in range(1, 10): # Try 9 increments (smaller steps now)
             current_offset = base_offset * i
             
             for name, vec in jump_dirs:
