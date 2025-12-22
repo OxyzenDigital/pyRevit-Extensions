@@ -11,6 +11,9 @@ Select two pipes to join them.
 """
 import math
 import clr
+import System
+from System.Collections.Generic import List
+
 # clr.AddReference('RevitAPI')
 # clr.AddReference('RevitAPIUI')
 
@@ -78,6 +81,97 @@ def get_connector_closest_to(element, point):
             min_dist = dist
             closest_conn = conn
     return closest_conn
+
+def is_point_occupied(pipe, point):
+    """Checks if the connector closest to 'point' on 'pipe' is already connected."""
+    conn = get_connector_closest_to(pipe, point)
+    if conn and conn.IsConnected:
+        return True
+    return False
+
+def get_intersector(doc, view3d, exclude_ids=None):
+    """
+    Creates a ReferenceIntersector targeting obstacles (Structure, MEP) in the 3D view.
+    exclude_ids: List of ElementIds to ignore (e.g., the pipes being modified).
+    """
+    cats = [
+        DB.BuiltInCategory.OST_StructuralFraming,
+        DB.BuiltInCategory.OST_StructuralColumns,
+        DB.BuiltInCategory.OST_DuctCurves,
+        DB.BuiltInCategory.OST_CableTray,
+        DB.BuiltInCategory.OST_Conduit,
+        DB.BuiltInCategory.OST_PipeCurves,
+        DB.BuiltInCategory.OST_Walls,
+        DB.BuiltInCategory.OST_Floors,
+        DB.BuiltInCategory.OST_Ceilings
+    ]
+    
+    # Collect all elements of these categories in the view
+    collector = DB.FilteredElementCollector(doc, view3d.Id)
+    
+    # Use System.Collections.Generic.List
+    cat_list = List[DB.BuiltInCategory](cats)
+    filter_cats = DB.ElementMulticategoryFilter(cat_list)
+    collector.WherePasses(filter_cats)
+    
+    # Exclude specific IDs
+    if exclude_ids:
+        exclude_ids_coll = List[DB.ElementId](exclude_ids)
+        collector.Excluding(exclude_ids_coll)
+        
+    target_ids = collector.ToElementIds()
+    
+    if not target_ids or target_ids.Count == 0:
+        return None
+
+    intersector = DB.ReferenceIntersector(target_ids, DB.FindReferenceTarget.Element, view3d)
+    intersector.FindReferencesInRevitLinks = False 
+    return intersector
+
+def check_clearance(intersector, start_pt, end_pt, radius):
+    """
+    Checks for collisions along the path from start_pt to end_pt.
+    Casts 5 rays: Center + 4 Perimeter rays (Up, Down, Left, Right).
+    Returns True if collision detected.
+    """
+    if not intersector:
+        return False
+        
+    direction = (end_pt - start_pt).Normalize()
+    dist = start_pt.DistanceTo(end_pt)
+    
+    # Basis vectors for offset
+    if is_vertical(direction):
+        vec_u = DB.XYZ.BasisX
+        vec_v = DB.XYZ.BasisY
+    else:
+        vec_u = DB.XYZ.BasisZ
+        vec_v = direction.CrossProduct(vec_u).Normalize()
+        
+    # Offset points to check (Center, Up, Down, Left, Right)
+    # Adding a small tolerance buffer to radius
+    check_radius = radius * 1.1 
+    offsets = [
+        DB.XYZ.Zero,
+        vec_u * check_radius,
+        vec_u * -check_radius,
+        vec_v * check_radius,
+        vec_v * -check_radius
+    ]
+    
+    for off in offsets:
+        s_p = start_pt + off
+        # Offset start slightly to avoid self-intersection
+        s_p_offset = s_p + direction * 0.1
+        
+        context = intersector.FindNearest(s_p_offset, direction)
+        if context:
+            hit_dist = context.Proximity
+            # Check if hit is within segment length
+            if hit_dist < (dist - 0.2):
+                return True
+                
+    return False
 
 def are_lines_parallel(line1, line2):
     return line1.Direction.CrossProduct(line2.Direction).IsZeroLength()
@@ -204,10 +298,12 @@ def get_z_at_xy(line, xy_point):
         
     return p.Z + t * v.Z
 
-def get_closest_points_between_lines(line1, line2):
+def get_closest_points_between_lines(line1, line2, ref_point=None):
     """
     Finds the points on line1 and line2 that are closest to each other (Common Perpendicular).
     Returns (pt1, pt2).
+    If lines are parallel and ref_point is provided, finds closest point on line1 to ref_point, 
+    then projects to line2.
     """
     p1 = line1.Origin
     v1 = line1.Direction
@@ -226,12 +322,20 @@ def get_closest_points_between_lines(line1, line2):
     
     if abs(denom) < 0.0001:
         # Parallel lines
-        # Pick p1 as anchor, project to line2
-        t = 0
+        if ref_point:
+            # Project ref_point onto line1 to get t
+            # p(t) = p1 + t*v1
+            # (ref_point - p1) . v1 = t * (v1 . v1)
+            # t = (ref_point - p1) . v1 / a (assuming normalized v1, a=1)
+            t = (ref_point - p1).DotProduct(v1) / a
+        else:
+            t = 0
+            
         # q2 = p2 + u * v2
-        # (p2 + u*v2 - p1) . v2 = 0
-        # dp . v2 + u * c = 0 => e + u = 0 (if c=1)
-        u = -e / c
+        # (p2 + u*v2 - (p1 + t*v1)) . v2 = 0
+        # (p2 - p1).v2 + u*c - t*v1.v2 = 0
+        # e + u*c - t*b = 0
+        u = (t*b - e) / c
     else:
         # Skew lines
         u = (d*b - a*e) / denom
@@ -241,6 +345,38 @@ def get_closest_points_between_lines(line1, line2):
     pt2 = p2 + u * v2
     
     return pt1, pt2
+
+def connect_connectors_robust(doc, c1, c2, logger):
+    """
+    Attempts to connect two connectors using Union or Elbow.
+    Returns True if successful, False if failed (but suppresses exception).
+    """
+    try:
+        dist = c1.Origin.DistanceTo(c2.Origin)
+        if dist > 0.01:
+            logger.error("Connectors too far apart ({})".format(dist))
+            return False
+
+        angle = c1.CoordinateSystem.BasisZ.AngleTo(c2.CoordinateSystem.BasisZ) * 180 / math.pi
+        logger.info("Connection Angle: {:.2f}".format(angle))
+
+        if abs(angle - 180) < 5.0:
+            logger.info("Creating Union...")
+            doc.Create.NewUnionFitting(c1, c2)
+        else:
+            logger.info("Creating Elbow...")
+            doc.Create.NewElbowFitting(c1, c2)
+        return True
+    except Exception as e:
+        logger.error("Fitting creation failed: {}".format(e))
+        # Check Routing Prefs hint
+        try:
+            pipe_type = c1.Owner.PipeType
+            # accessing routing prefs is complex in python, just hint
+            logger.error("Check Routing Preferences for Pipe Type '{}'.".format(pipe_type.Name))
+        except:
+            pass
+        return False
 
 # --- Main Logic ---
 
@@ -343,23 +479,6 @@ class PipeJoiner:
         # Fallback: Closest Approach
         self.logger.info("Pipes do not intersect in plan. Attempting Shortest Path (Common Perpendicular)...")
         if not self.join_by_closest_points(p1, p2, p1_pick_pt):
-            # RETRY MECHANISM: Offset logic
-            self.logger.info("Direct bridge failed (likely too short). Attempting OFFSET connection (Loop/Dogleg)...")
-            
-            # Shift the connection point on Pipe 2 (Dynamic: 3x Dia or min 6")
-            dia = get_pipe_diameter(p1)
-            offset_dist = max(0.5, 3.0 * dia) 
-            l2_dir = p2.Location.Curve.Direction
-            
-            # Try shifting in positive direction
-            if self.join_by_offset_target(p1, p2, p1_pick_pt, offset_dist):
-                return
-            
-            # Try shifting in negative direction
-            self.logger.info("Positive offset failed. Attempting Negative offset...")
-            if self.join_by_offset_target(p1, p2, p1_pick_pt, -offset_dist):
-                return
-            
             self.logger.error("All connection strategies failed.")
 
     def connect_branch_to_main(self, c_branch, p_main, connect_pt):
@@ -461,7 +580,7 @@ class PipeJoiner:
         min_len = get_pipe_diameter(pipe) * 0.5 # Minimal tolerance
         
         if new_len < min_len:
-            self.logger.error("Extension would result in too-short pipe ({} < {}).".format(new_len, min_len))
+            self.logger.error("Extension would result in too-short pipe ({} < {}). Target: {} Fixed: {}".format(new_len, min_len, target_point, fixed_pt))
             return False
 
         try:
@@ -621,14 +740,42 @@ class PipeJoiner:
         """Attempts to join by shortest path. Returns True if successful, False otherwise."""
         l1 = p1.Location.Curve
         l2 = p2.Location.Curve
-        pt1, pt2 = get_closest_points_between_lines(l1, l2)
+        pt1, pt2 = get_closest_points_between_lines(l1, l2, p1_pick_pt)
         
-        # Validation: Check bridge length
+        self.logger.info("Closest Points - PT1: {} PT2: {}".format(pt1, pt2))
+        
+        dia = get_pipe_diameter(p1)
+        radius = dia / 2.0
+        
+        # Strategy 1: Direct Bridge
+        # Check if target point on Pipe 2 is occupied
+        occupied = is_point_occupied(p2, pt2)
+        
+        # Check bridge length
         bridge_len = pt1.DistanceTo(pt2)
-        min_len = get_pipe_diameter(p1) * 1.5
-        if bridge_len < min_len:
-            self.logger.error("Bridge segment too short ({} < {}).".format(bridge_len, min_len))
-            return False
+        min_len = dia * 2.0 
+        too_short = bridge_len < min_len
+        
+        # Check Collision
+        collision = False
+        active_view = self.doc.ActiveView
+        if isinstance(active_view, DB.View3D):
+            intersector = get_intersector(self.doc, active_view, exclude_ids=[p1.Id, p2.Id])
+            if check_clearance(intersector, pt1, pt2, radius):
+                collision = True
+
+        if occupied or too_short or collision:
+            reason = []
+            if occupied: reason.append("Target Occupied")
+            if too_short: reason.append("Too Short")
+            if collision: reason.append("Collision")
+            self.logger.info("Direct Bridge failed ({}). Attempting Slide Bypass...".format(", ".join(reason)))
+            
+            if self.join_with_slide_bypass(p1, p2, p1_pick_pt, pt1, pt2):
+                return True
+                
+            self.logger.info("Slide Bypass failed. Attempting Goal Post Bypass (XZ/YZ/XY)...")
+            return self.join_with_goalpost_bypass(p1, p2, p1_pick_pt, pt1, pt2)
 
         t_transaction = DB.Transaction(self.doc, "Join Pipes Closest Path")
         t_transaction.Start()
@@ -651,26 +798,24 @@ class PipeJoiner:
             bridge = self.create_pipe_segment(p1, pt1, pt2)
             if not bridge:
                 t_transaction.RollBack(); return False
-            self.logger.info("Created Bridge Pipe (90 deg).")
+            self.logger.info("Created Direct Bridge Pipe.")
+            
+            self.doc.Regenerate() # CRITICAL
             
             # 4. Connect
             c1 = get_connector_closest_to(p1, pt1)
             c_bridge_1 = get_connector_closest_to(bridge, pt1)
-            try: 
-                self.doc.Create.NewElbowFitting(c1, c_bridge_1)
-            except Exception as e: 
-                self.logger.error("Elbow (P1->Bridge) failed: {}".format(e))
-                # Don't fail entire op, maybe just geometry created is fine
+            
+            if not connect_connectors_robust(self.doc, c1, c_bridge_1, self.logger):
+                self.logger.error("Warning: Could not connect Pipe 1 to Bridge. Geometry preserved.")
             
             c_bridge_2 = get_connector_closest_to(bridge, pt2)
             if is_on_segment:
                  self.connect_branch_to_main(c_bridge_2, p2, pt2)
             else:
                  c2 = get_connector_closest_to(p2, pt2)
-                 try: 
-                    self.doc.Create.NewElbowFitting(c_bridge_2, c2)
-                 except Exception as e: 
-                    self.logger.error("Elbow (Bridge->P2) failed: {}".format(e))
+                 if not connect_connectors_robust(self.doc, c_bridge_2, c2, self.logger):
+                     self.logger.error("Warning: Could not connect Bridge to Pipe 2. Geometry preserved.")
                     
             t_transaction.Commit()
             return True
@@ -680,85 +825,195 @@ class PipeJoiner:
             self.logger.error("Closest Path Join Failed: {}".format(e))
             return False
 
-    def join_by_offset_target(self, p1, p2, p1_pick_pt, offset_dist):
+    def join_with_slide_bypass(self, p1, p2, p1_pick_pt, pt1_orig, pt2_orig):
         """
-        Attempts to join P1 to a point shifted along P2 by offset_dist.
-        This creates a 'Dogleg' or skewed connection.
+        Strategy A: Slide/Dogleg along the Reference Pipe axis (Z-shape).
         """
-        l2 = p2.Location.Curve
-        pt1_orig, pt2_orig = get_closest_points_between_lines(p1.Location.Curve, l2)
-        
-        # Calculate new target point on Pipe 2
-        shift_vec = l2.Direction * offset_dist
-        pt2_new = pt2_orig + shift_vec
-        
-        # Now we treat this as a "Skew Join" to this specific point
-        # But wait, skew join logic calculates vertical risers based on XY intersection.
-        # Here we just want to bridge P1_end to pt2_new.
-        
-        # 1. Find point on P1 closest to pt2_new? 
-        # No, we want to extend P1 to be "opposite" pt2_new?
-        # Actually, let's try 'join_by_closest_points' logic but FORCING the target point on P2.
-        
-        t_transaction = DB.Transaction(self.doc, "Join Pipes Offset")
-        t_transaction.Start()
-        
-        try:
-            # We need a point on P1. Let's project pt2_new onto P1's line
-            l1 = p1.Location.Curve
-            # Project pt2_new onto l1
-            # p_proj = origin + (vec . dir) * dir
-            vec = pt2_new - l1.Origin
-            proj_dist = vec.DotProduct(l1.Direction)
-            pt1_new = l1.Origin + l1.Direction * proj_dist
+        active_view = self.doc.ActiveView
+        intersector = None
+        if isinstance(active_view, DB.View3D):
+            intersector = get_intersector(self.doc, active_view, exclude_ids=[p1.Id, p2.Id])
             
-            # Check resulting bridge length
-            bridge_len = pt1_new.DistanceTo(pt2_new)
-            min_len = get_pipe_diameter(p1) * 1.5
-            if bridge_len < min_len:
-                self.logger.error("Offset Bridge too short ({} < {}).".format(bridge_len, min_len))
-                t_transaction.RollBack(); return False
+        dia = get_pipe_diameter(p1)
+        radius = dia / 2.0
+        base_offset = max(0.5, 4.0 * dia)
+        l2_dir = p2.Location.Curve.Direction
+        
+        max_attempts = 10
+        
+        for i in range(1, max_attempts + 1):
+            current_offset = base_offset * i
+            
+            for direction in [1.0, -1.0]:
+                shift_vec = l2_dir * (current_offset * direction)
+                
+                pt1_new = pt1_orig + shift_vec
+                pt2_new = pt2_orig + shift_vec
+                
+                # Check Collisions
+                if check_clearance(intersector, pt1_orig, pt1_new, radius): continue
+                if check_clearance(intersector, pt1_new, pt2_new, radius): continue
 
-            # 1. Extend P1
-            if not self.extend_pipe_to_point(p1, pt1_new, p1_pick_pt):
-                t_transaction.RollBack(); return False
-            
-            # 2. Extend/Check P2
-            # Check if pt2_new is on segment
-            u = (pt2_new - l2.Origin).DotProduct(l2.Direction)
-            is_on_segment = 0.001 < u < (l2.Length - 0.001)
-            
-            if not is_on_segment:
-                if not self.extend_pipe_to_point(p2, pt2_new):
-                    t_transaction.RollBack(); return False
-            
-            # 3. Create Bridge
-            bridge = self.create_pipe_segment(p1, pt1_new, pt2_new)
-            if not bridge:
-                t_transaction.RollBack(); return False
-            self.logger.info("Created Offset Bridge (Offset {}').".format(offset_dist))
+                self.logger.info("Found clear Slide path at Offset {}'.".format(current_offset * direction))
+                
+                t_transaction = DB.Transaction(self.doc, "Join Pipes Slide Bypass")
+                t_transaction.Start()
+                
+                try:
+                    if not self.extend_pipe_to_point(p1, pt1_orig, p1_pick_pt):
+                        t_transaction.RollBack(); continue
 
-            # 4. Connect
-            c1 = get_connector_closest_to(p1, pt1_new)
-            c_bridge_1 = get_connector_closest_to(bridge, pt1_new)
-            try: self.doc.Create.NewElbowFitting(c1, c_bridge_1)
-            except: pass 
+                    l2_curr = p2.Location.Curve
+                    u = (pt2_new - l2_curr.Origin).DotProduct(l2_curr.Direction)
+                    is_on_segment = 0.001 < u < (l2_curr.Length - 0.001)
+                    if not is_on_segment:
+                        if not self.extend_pipe_to_point(p2, pt2_new):
+                             t_transaction.RollBack(); continue
+                    
+                    offset_pipe = self.create_pipe_segment(p1, pt1_orig, pt1_new)
+                    bridge_pipe = self.create_pipe_segment(p1, pt1_new, pt2_new)
+                    if not offset_pipe or not bridge_pipe: 
+                        t_transaction.RollBack(); continue
+
+                    self.logger.info("Created Slide Geometry.")
+                    self.doc.Regenerate() # CRITICAL
+                    
+                    # Connect
+                    c_p1 = get_connector_closest_to(p1, pt1_orig)
+                    c_off_1 = get_connector_closest_to(offset_pipe, pt1_orig)
+                    connect_connectors_robust(self.doc, c_p1, c_off_1, self.logger)
+                    
+                    c_off_2 = get_connector_closest_to(offset_pipe, pt1_new)
+                    c_bridge_1 = get_connector_closest_to(bridge_pipe, pt1_new)
+                    connect_connectors_robust(self.doc, c_off_2, c_bridge_1, self.logger)
+                    
+                    c_bridge_2 = get_connector_closest_to(bridge_pipe, pt2_new)
+                    if is_on_segment:
+                        if not self.connect_branch_to_main(c_bridge_2, p2, pt2_new):
+                            self.logger.error("Warning: Branch connection failed. Geometry preserved.")
+                    else:
+                        c_p2 = get_connector_closest_to(p2, pt2_new)
+                        connect_connectors_robust(self.doc, c_bridge_2, c_p2, self.logger)
+                    
+                    t_transaction.Commit()
+                    return True
+                    
+                except Exception as e:
+                    t_transaction.RollBack()
+                    self.logger.error("Slide Bypass attempt failed: {}".format(e))
+                    continue 
             
-            c_bridge_2 = get_connector_closest_to(bridge, pt2_new)
-            if is_on_segment:
-                 self.connect_branch_to_main(c_bridge_2, p2, pt2_new)
-            else:
-                 c2 = get_connector_closest_to(p2, pt2_new)
-                 try: self.doc.Create.NewElbowFitting(c_bridge_2, c2)
-                 except: pass
+        return False
+
+    def join_with_goalpost_bypass(self, p1, p2, p1_pick_pt, pt1_orig, pt2_orig):
+        """
+        Strategy B: Goal Post Bypass (U-shape) to jump over/around obstacles.
+        Tries Vertical (Up/Down) and Horizontal (Left/Right) jumps.
+        """
+        active_view = self.doc.ActiveView
+        intersector = None
+        if isinstance(active_view, DB.View3D):
+            intersector = get_intersector(self.doc, active_view, exclude_ids=[p1.Id, p2.Id])
             
-            t_transaction.Commit()
-            return True
+        dia = get_pipe_diameter(p1)
+        radius = dia / 2.0
+        base_offset = max(0.5, 4.0 * dia)
+        l2_dir = p2.Location.Curve.Direction
+        
+        # Determine Jump Vectors
+        jump_dirs = []
+        # 1. Vertical (Z)
+        if not is_vertical(l2_dir):
+            jump_dirs.append(("Up", DB.XYZ.BasisZ))
+            jump_dirs.append(("Down", -DB.XYZ.BasisZ))
             
-        except Exception as e:
-            t_transaction.RollBack()
-            self.logger.error("Offset Join Failed: {}".format(e))
-            return False
+        # 2. Horizontal (Cross Product)
+        # Vector perpendicular to Pipe 2 and Up
+        if is_vertical(l2_dir):
+            side_vec = DB.XYZ.BasisX # Arbitrary for vertical pipe
+        else:
+            side_vec = l2_dir.CrossProduct(DB.XYZ.BasisZ).Normalize()
+            
+        jump_dirs.append(("Side A", side_vec))
+        jump_dirs.append(("Side B", -side_vec))
+        
+        for i in range(1, 6): # Try 5 increments
+            current_offset = base_offset * i
+            
+            for name, vec in jump_dirs:
+                jump_vec = vec * current_offset
+                
+                pt1_jump = pt1_orig + jump_vec
+                pt2_jump = pt2_orig + jump_vec
+                
+                # Check Collisions (3 segments)
+                # 1. Riser 1 (pt1 -> pt1_jump)
+                if check_clearance(intersector, pt1_orig, pt1_jump, radius): continue
+                # 2. Bridge (pt1_jump -> pt2_jump)
+                if check_clearance(intersector, pt1_jump, pt2_jump, radius): continue
+                # 3. Riser 2 (pt2_jump -> pt2_orig)
+                if check_clearance(intersector, pt2_jump, pt2_orig, radius): continue
+
+                self.logger.info("Found clear Goal Post path ({}) at Offset {}'.".format(name, current_offset))
+                
+                t_transaction = DB.Transaction(self.doc, "Join Pipes GoalPost")
+                t_transaction.Start()
+                
+                try:
+                    if not self.extend_pipe_to_point(p1, pt1_orig, p1_pick_pt):
+                        t_transaction.RollBack(); continue
+
+                    # Check P2
+                    l2_curr = p2.Location.Curve
+                    u = (pt2_orig - l2_curr.Origin).DotProduct(l2_curr.Direction)
+                    is_on_segment = 0.001 < u < (l2_curr.Length - 0.001)
+                    if not is_on_segment:
+                        if not self.extend_pipe_to_point(p2, pt2_orig):
+                             t_transaction.RollBack(); continue
+                    
+                    riser1 = self.create_pipe_segment(p1, pt1_orig, pt1_jump)
+                    bridge = self.create_pipe_segment(p1, pt1_jump, pt2_jump)
+                    riser2 = self.create_pipe_segment(p1, pt2_jump, pt2_orig)
+                    
+                    if not riser1 or not bridge or not riser2:
+                         t_transaction.RollBack(); continue
+
+                    self.logger.info("Created Goal Post Geometry.")
+                    self.doc.Regenerate() # CRITICAL
+                    
+                    # Connect Riser 1
+                    c_p1 = get_connector_closest_to(p1, pt1_orig)
+                    c_r1_start = get_connector_closest_to(riser1, pt1_orig)
+                    connect_connectors_robust(self.doc, c_p1, c_r1_start, self.logger)
+                    
+                    # Connect Riser 1 to Bridge
+                    c_r1_end = get_connector_closest_to(riser1, pt1_jump)
+                    c_b_start = get_connector_closest_to(bridge, pt1_jump)
+                    connect_connectors_robust(self.doc, c_r1_end, c_b_start, self.logger)
+                    
+                    # Connect Bridge to Riser 2
+                    c_b_end = get_connector_closest_to(bridge, pt2_jump)
+                    c_r2_start = get_connector_closest_to(riser2, pt2_jump)
+                    connect_connectors_robust(self.doc, c_b_end, c_r2_start, self.logger)
+                    
+                    # Connect Riser 2 to P2
+                    c_r2_end = get_connector_closest_to(riser2, pt2_orig)
+                    if is_on_segment:
+                        if not self.connect_branch_to_main(c_r2_end, p2, pt2_orig):
+                             self.logger.error("Warning: Branch connection failed. Geometry preserved.")
+                    else:
+                        c_p2 = get_connector_closest_to(p2, pt2_orig)
+                        connect_connectors_robust(self.doc, c_r2_end, c_p2, self.logger)
+                    
+                    t_transaction.Commit()
+                    return True
+                    
+                except Exception as e:
+                    t_transaction.RollBack()
+                    self.logger.error("Goal Post attempt failed: {}".format(e))
+                    continue
+                    
+        return False
 
     def create_pipe_segment(self, template_pipe, start, end):
         try:
