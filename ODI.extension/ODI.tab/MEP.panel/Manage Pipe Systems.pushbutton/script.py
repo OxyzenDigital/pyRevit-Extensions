@@ -26,8 +26,9 @@ from System.Windows.Input import Cursors
 from Autodesk.Revit.DB import (
     Transaction, BuiltInCategory, ElementId, FilteredElementCollector,
     OverrideGraphicSettings, Color, FillPatternElement, ElementTransformUtils, XYZ,
-    BuiltInParameter, ElementMulticategoryFilter
+    BuiltInParameter, ElementMulticategoryFilter, Line
 )
+from Autodesk.Revit.UI import TaskDialog, TaskDialogCommonButtons, TaskDialogResult
 from Autodesk.Revit.UI.Selection import ObjectType
 from pyrevit import forms, script, revit
 
@@ -50,40 +51,120 @@ class NodeBase:
         self.Type = ""
         self.Abbreviation = ""
         self.Length = ""
+        self.FixtureUnits = ""
         self.Volume = ""
         self.Count = ""
         self.FontWeight = "Normal"
         self.AllElements = [] # Flat list of element IDs for highlighting
+        self.NetworkColor = SolidColorBrush(Colors.Black)
 
 class ClassificationNode(NodeBase):
     def __init__(self, name):
         NodeBase.__init__(self, name)
         self.FontWeight = "Bold"
+        self.Type = "Classification"
+
+class TypeNode(NodeBase):
+    def __init__(self, name):
+        NodeBase.__init__(self, name)
+        self.FontWeight = "Bold"
+        self.Type = "System Type"
+
+    def aggregate_stats(self):
+        """Sum up stats from children systems."""
+        vol = sum(float(c.Volume) for c in self.Children if c.Volume)
+        fu = sum(getattr(c, 'RawFixtureUnits', 0.0) for c in self.Children)
+        length = sum(float(c.Length) for c in self.Children if c.Length)
+        self.Volume = "{:.2f}".format(vol)
+        self.FixtureUnits = "{:.1f}".format(fu)
+        self.Length = "{:.2f}".format(length)
+        self.Count = "{} Systems".format(len(self.Children))
+
+class ElementNode(NodeBase):
+    """Represents a leaf node (Fixture/Equipment) in the tree."""
+    def __init__(self, element):
+        # Use Element Name (Family + Type usually) or Family Name
+        # Format: "Family : Type" if possible, else Name
+        name = element.Name
+        if hasattr(element, "Symbol") and element.Symbol:
+            name = "{} : {}".format(element.Symbol.FamilyName, element.Name)
+        
+        NodeBase.__init__(self, name)
+        self.FontWeight = "Normal"
+        self.AllElements = [element.Id]
+        self.IsExpanded = False
+        self.NetworkColor = SolidColorBrush(Colors.Gray)
+        
+        # Get FU for individual element if exists
+        p_fu = element.get_Parameter(BuiltInParameter.RBS_PIPE_FIXTURE_UNITS_PARAM)
+        if p_fu: self.FixtureUnits = "{:.1f}".format(p_fu.AsDouble())
+        
+        # Type column removed from UI, so we don't need to set self.Type explicitly for display
+        # but we keep the logic clean.
+
+class NetworkNode(NodeBase):
+    def __init__(self, name, network_data, child_elements=None):
+        NodeBase.__init__(self, name)
+        self.FontWeight = "Normal"
+        self.Type = "Network"
+        self.Volume = "{:.2f}".format(network_data.volume)
+        self.FixtureUnits = "{:.1f}".format(network_data.fixture_units)
+        self.Length = "{:.2f}".format(network_data.length)
+        self.Count = "{} Elem".format(network_data.count)
+        self.AllElements = network_data.elements
+        self.IsExpanded = True
+        
+        if child_elements:
+            self.Children = [ElementNode(el) for el in child_elements]
 
 class SystemNode(NodeBase):
-    def __init__(self, name, sys_type, sys_abbr, networks):
+    def __init__(self, name, sys_type, sys_abbr, sys_fu, networks, child_elements=None):
         NodeBase.__init__(self, name)
         self.Type = sys_type
         self.Abbreviation = sys_abbr
         self.FontWeight = "SemiBold"
+        self.RawFixtureUnits = sys_fu
         
         # Aggregate
         vol = sum(n.volume for n in networks)
         length = sum(n.length for n in networks)
         count = sum(n.count for n in networks)
+        # Note: sys_fu passed from MEPSystem parameter is usually total for system
         
         self.Volume = "{:.2f}".format(vol)
         self.Length = "{:.2f}".format(length)
         self.Count = "{} Networks".format(len(networks))
+        
+        # Highlight if system is split (more than 1 network)
+        if len(networks) > 1:
+            self.NetworkColor = SolidColorBrush(Colors.Red)
+            self.FixtureUnits = "{:.1f} (Split)".format(sys_fu)
+            
+            # Create Network Nodes for split systems
+            self.Children = []
+            for i, net in enumerate(networks):
+                # Filter child elements for this network
+                net_children = []
+                if child_elements:
+                    net_ids_set = {get_id(eid) for eid in net.elements}
+                    net_children = [el for el in child_elements if get_id(el.Id) in net_ids_set]
+                
+                self.Children.append(NetworkNode("Network {} (Island)".format(i+1), net, net_children))
+        else:
+            # Single System: Direct Children
+            self.FixtureUnits = "{:.1f}".format(sys_fu)
+            if child_elements:
+                self.Children = [ElementNode(el) for el in child_elements]
         
         for n in networks:
             self.AllElements.extend(n.elements)
 
 class NetworkData:
     """Raw data holder for processing."""
-    def __init__(self, volume, length, count, elements):
+    def __init__(self, volume, length, fu, count, elements):
         self.volume = volume
         self.length = length
+        self.fixture_units = fu
         self.count = count
         self.elements = elements
 
@@ -108,17 +189,19 @@ class SystemMergeWindow(forms.WPFWindow):
         self.systemTree.SelectedItemChanged += self.tree_selection_changed
         self.Closing += self.window_closing
         
+        self.Btn_SelectAll.Click += self.select_all_click
         self.Btn_Clear.Click += self.clear_list_click
         self.Btn_ScanView.Click += self.scan_view_click
         self.Btn_Visualize.Click += self.visualize_click
         self.Btn_ClearVisuals.Click += self.reset_visuals_click
-        self.Btn_Fix.Click += self.fix_network_click
+        self.Btn_Disconnect.Click += self.disconnect_click
         self.Btn_Rename.Click += self.rename_click
         
         # Initial UI State: Disable actions until data is loaded
+        self.Btn_SelectAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
-        self.Btn_Fix.IsEnabled = False
+        self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
         
         self.load_window_settings()
@@ -127,6 +210,7 @@ class SystemMergeWindow(forms.WPFWindow):
 
         self.last_highlighted_ids = []
         self.is_busy = False
+        self.disabled_filters = [] # Track filters we disable to restore them later
         self.populate_colors()
 
     # --- UI Logic ---
@@ -176,6 +260,39 @@ class SystemMergeWindow(forms.WPFWindow):
         self.Cmb_Colors.SelectedIndex = 0
 
     # --- Network Logic ---
+    def update_button_states(self):
+        """Updates enable/disable state of action buttons based on checked items."""
+        checked = self.get_checked_systems()
+        has_checked = len(checked) > 0
+        has_selection = self.systemTree.SelectedItem is not None
+        
+        self.Btn_Visualize.IsEnabled = has_checked or has_selection
+        self.Btn_ClearVisuals.IsEnabled = has_checked or has_selection
+        self.Btn_Disconnect.IsEnabled = has_checked or has_selection
+
+    def select_all_click(self, sender, args):
+        """Toggles between checking and unchecking all items in the tree."""
+        if not self.systemTree.ItemsSource: return
+        
+        # Determine action based on current button text
+        is_select_all = (self.Btn_SelectAll.Content == "Select All")
+        target_state = True if is_select_all else False
+        
+        # Toggle Button Text
+        self.Btn_SelectAll.Content = "Select None" if is_select_all else "Select All"
+
+        for node in self.systemTree.ItemsSource:
+            self._cascade_check(node, target_state)
+        self.systemTree.Items.Refresh()
+        self.update_button_states()
+
+    def _cascade_check(self, node, state):
+        """Recursively sets IsChecked state."""
+        node.IsChecked = state
+        if hasattr(node, "Children"):
+            for child in node.Children:
+                self._cascade_check(child, state)
+
     def clear_list_click(self, sender, args):
         """Clears the list and resets selection overrides."""
         if self.is_busy: return
@@ -183,9 +300,11 @@ class SystemMergeWindow(forms.WPFWindow):
         self.systemTree.ItemsSource = None
         self.reset_selection_highlight()
         self.statusLabel.Text = "List cleared."
+        self.Btn_SelectAll.Content = "Select All"
+        self.Btn_SelectAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
-        self.Btn_Fix.IsEnabled = False
+        self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
         self.Tb_NewName.Text = ""
 
@@ -199,7 +318,10 @@ class SystemMergeWindow(forms.WPFWindow):
             valid_cats = [
                 BuiltInCategory.OST_PipeCurves,
                 BuiltInCategory.OST_PipeFitting,
-                BuiltInCategory.OST_PipeAccessory
+                BuiltInCategory.OST_PipeAccessory,
+                BuiltInCategory.OST_PlumbingFixtures,
+                BuiltInCategory.OST_MechanicalEquipment,
+                BuiltInCategory.OST_Sprinklers
             ]
             cat_filter = ElementMulticategoryFilter(List[BuiltInCategory](valid_cats))
             collector = FilteredElementCollector(self.doc, self.doc.ActiveView.Id).WherePasses(cat_filter)
@@ -217,9 +339,11 @@ class SystemMergeWindow(forms.WPFWindow):
         """Core logic to filter selection, run BFS, and populate Grid."""
         # Reset UI State
         self.systemTree.ItemsSource = None
+        self.Btn_SelectAll.Content = "Select All"
+        self.Btn_SelectAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
-        self.Btn_Fix.IsEnabled = False
+        self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
         self.Tb_NewName.Text = ""
 
@@ -232,7 +356,10 @@ class SystemMergeWindow(forms.WPFWindow):
             valid_cats = [
                 int(BuiltInCategory.OST_PipeCurves),
                 int(BuiltInCategory.OST_PipeFitting),
-                int(BuiltInCategory.OST_PipeAccessory)
+                int(BuiltInCategory.OST_PipeAccessory),
+                int(BuiltInCategory.OST_PlumbingFixtures),
+                int(BuiltInCategory.OST_MechanicalEquipment),
+                int(BuiltInCategory.OST_Sprinklers)
             ]
             
             elements_to_process = []
@@ -246,110 +373,160 @@ class SystemMergeWindow(forms.WPFWindow):
                 self.statusLabel.Text = "Selection contained no valid elements."
                 return
 
-            # BFS to find islands
-            islands = self._bfs_traversal(elements_to_process)
-            
-            # Process Islands and Group by System
-            system_map = {} # Name -> List[NetworkData]
-            system_types = {} # Name -> Type
-            system_classes = {} # Name -> Classification
-            system_abbrs = {} # Name -> Abbreviation
+            # 1. Group by System Identity First (Revit Logic)
+            # Key: (Class, Type, Name) -> Data
+            system_buckets = {} 
 
-            for island_ids in islands:
-                # Calculate Volume (Vent Logic)
-                total_vol = 0.0
-                total_len = 0.0
+            # Helper to validate strings
+            def is_valid(s):
+                return s and s != "Undefined" and s != "Unassigned"
+
+            for el in elements_to_process:
                 sys_name = None
                 sys_type = None
                 sys_class = None
                 sys_abbr = None
+                mep_sys_obj = None
 
-                for eid in island_ids:
-                    el = self.doc.GetElement(eid)
-                    # Volume
-                    l_param = el.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH)
-                    d_param = el.get_Parameter(BuiltInParameter.RBS_PIPE_INNER_DIAM_PARAM)
-                    if l_param and d_param:
-                        r = d_param.AsDouble() / 2.0
-                        total_vol += math.pi * (r**2) * l_param.AsDouble()
+                # Try to get MEPSystem object directly
+                if hasattr(el, "MEPSystem") and el.MEPSystem:
+                    mep_sys_obj = el.MEPSystem
+                    if is_valid(mep_sys_obj.Name): sys_name = mep_sys_obj.Name
+                
+                # Fallback to parameters if MEPSystem didn't give name
+                if not is_valid(sys_name):
+                    p = el.get_Parameter(BuiltInParameter.RBS_SYSTEM_NAME_PARAM)
+                    if p and is_valid(p.AsString()): sys_name = p.AsString()
+                
+                # Fallback to Connectors (Crucial for Fittings)
+                if not is_valid(sys_name) or not mep_sys_obj:
+                    mgr = None
+                    if hasattr(el, "ConnectorManager"): mgr = el.ConnectorManager
+                    elif hasattr(el, "MEPModel") and el.MEPModel: mgr = el.MEPModel.ConnectorManager
                     
-                    # Length (for pipes)
-                    if l_param:
-                        total_len += l_param.AsDouble()
-                    
-                    # System Info - Robust Search
-                    # We keep looking until we find valid non-empty strings
-                    if sys_name is None:
-                        if hasattr(el, "MEPSystem") and el.MEPSystem and el.MEPSystem.Name:
-                            sys_name = el.MEPSystem.Name
-                        else:
-                            p = el.get_Parameter(BuiltInParameter.RBS_SYSTEM_NAME_PARAM)
-                            if p and p.AsString(): sys_name = p.AsString()
-                    
-                    if sys_type is None:
-                        # Try via MEPSystem Type first
-                        if hasattr(el, "MEPSystem") and el.MEPSystem:
-                            type_id = el.MEPSystem.GetTypeId()
-                            if type_id != ElementId.InvalidElementId:
-                                t_elem = self.doc.GetElement(type_id)
-                                if t_elem:
-                                    # Fix for AttributeError: Name
-                                    p_name = t_elem.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
-                                    if p_name: sys_type = p_name.AsString()
-                                    if not sys_type: sys_type = getattr(t_elem, "Name", None)
-                        
-                        # Fallback to parameter
-                        if sys_type is None:
-                            p = el.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)
-                            if p and p.AsValueString(): sys_type = p.AsValueString()
+                    if mgr:
+                        for c in mgr.Connectors:
+                            if c.MEPSystem and is_valid(c.MEPSystem.Name):
+                                mep_sys_obj = c.MEPSystem
+                                sys_name = mep_sys_obj.Name
+                                break
+                
+                # If we have an MEPSystem object, get Type/Class/Abbr from it
+                if mep_sys_obj:
+                    type_id = mep_sys_obj.GetTypeId()
+                    if type_id != ElementId.InvalidElementId:
+                        t_elem = self.doc.GetElement(type_id)
+                        if t_elem:
+                            p_name = t_elem.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
+                            if p_name and is_valid(p_name.AsString()): sys_type = p_name.AsString()
+                            else: sys_type = getattr(t_elem, "Name", "Unassigned")
+                            
+                            p_class = t_elem.get_Parameter(BuiltInParameter.RBS_SYSTEM_CLASSIFICATION_PARAM)
+                            if p_class and is_valid(p_class.AsString()): sys_class = p_class.AsString()
+                            
+                            p_abbr = t_elem.get_Parameter(BuiltInParameter.RBS_SYSTEM_ABBREVIATION_PARAM)
+                            if p_abbr and is_valid(p_abbr.AsString()): sys_abbr = p_abbr.AsString()
+                
+                # Final Fallbacks
+                if not is_valid(sys_name): sys_name = "Unassigned"
+                if not is_valid(sys_type): sys_type = "Unassigned"
+                if not is_valid(sys_class): sys_class = "Unassigned"
+                if not is_valid(sys_abbr): sys_abbr = ""
 
-                    if sys_class is None:
-                        p = el.get_Parameter(BuiltInParameter.RBS_SYSTEM_CLASSIFICATION_PARAM)
-                        if p and p.AsString(): sys_class = p.AsString()
-                    
-                    if sys_abbr is None:
-                        p = el.get_Parameter(BuiltInParameter.RBS_SYSTEM_ABBREVIATION_PARAM)
-                        if p and p.AsString(): sys_abbr = p.AsString()
-                
-                # Defaults if still missing
-                if sys_name is None: sys_name = "Unassigned"
-                if sys_type is None: sys_type = "Unassigned"
-                if sys_class is None: sys_class = "Unassigned"
-                if sys_abbr is None: sys_abbr = ""
-                
-                if sys_name not in system_map:
-                    system_map[sys_name] = []
-                    system_types[sys_name] = sys_type
-                    system_classes[sys_name] = sys_class
-                    system_abbrs[sys_name] = sys_abbr
-                
-                system_map[sys_name].append(NetworkData(round(total_vol, 3), round(total_len, 2), len(island_ids), island_ids))
+                key = (sys_class, sys_type, sys_name)
+                if key not in system_buckets:
+                    system_buckets[key] = {
+                        'class': sys_class, 'type': sys_type, 'name': sys_name, 
+                        'abbr': sys_abbr, 'mep_sys': mep_sys_obj, 'elements': []
+                    }
+                system_buckets[key]['elements'].append(el)
 
             # Build Tree Structure: Classification -> System
-            # Group systems by classification
-            class_map = {} # ClassName -> List[SystemNode]
+            # Group systems by Classification -> System Type
+            hierarchy = {} # ClassName -> { TypeName -> [SystemNode] }
             
-            for name, networks in system_map.items():
-                cls = system_classes[name]
-                if cls not in class_map:
-                    class_map[cls] = []
-                class_map[cls].append(SystemNode(name, system_types[name], system_abbrs[name], networks))
+            # Categories to show as children in the tree
+            child_cats = [
+                int(BuiltInCategory.OST_PlumbingFixtures),
+                int(BuiltInCategory.OST_MechanicalEquipment),
+                int(BuiltInCategory.OST_Sprinklers)
+            ]
+
+            for key, data in system_buckets.items():
+                cls = data['class']
+                typ = data['type']
+                name = data['name']
+                abbr = data['abbr']
+                
+                # Calculate System-level FU
+                sys_fu = 0.0
+                if data['mep_sys']:
+                    p_fu = data['mep_sys'].get_Parameter(BuiltInParameter.RBS_PIPE_FIXTURE_UNITS_PARAM)
+                    if p_fu: sys_fu = p_fu.AsDouble()
+
+                # Run BFS on elements WITHIN this system to find networks (islands)
+                islands = self._bfs_traversal(data['elements'])
+                
+                networks = []
+                for island_ids in islands:
+                    total_vol = 0.0
+                    total_len = 0.0
+                    island_fu = 0.0
+                    
+                    for eid in island_ids:
+                        el = self.doc.GetElement(eid)
+                        # Volume
+                        l_param = el.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH)
+                        d_param = el.get_Parameter(BuiltInParameter.RBS_PIPE_INNER_DIAM_PARAM)
+                        if l_param and d_param:
+                            r = d_param.AsDouble() / 2.0
+                            total_vol += math.pi * (r**2) * l_param.AsDouble()
+                        
+                        # Length
+                        if l_param:
+                            total_len += l_param.AsDouble()
+                            
+                        # Fixture Units (Sum from fixtures in this island)
+                        p_fu_el = el.get_Parameter(BuiltInParameter.RBS_PIPE_FIXTURE_UNITS_PARAM)
+                        if p_fu_el: island_fu += p_fu_el.AsDouble()
+
+                    networks.append(NetworkData(round(total_vol, 3), round(total_len, 2), round(island_fu, 1), len(island_ids), island_ids))
+                
+                if cls not in hierarchy: hierarchy[cls] = {}
+                if typ not in hierarchy[cls]: hierarchy[cls][typ] = []
+                
+                # Collect child elements for this system
+                sys_children = []
+                for el in data['elements']:
+                    if el.Category and get_id(el.Category.Id) in child_cats:
+                        sys_children.append(el)
+
+                hierarchy[cls][typ].append(SystemNode(name, typ, abbr, sys_fu, networks, sys_children))
             
             # Create Root Nodes
             root_nodes = []
-            for cls_name, sys_nodes in class_map.items():
+            for cls_name, type_dict in hierarchy.items():
                 c_node = ClassificationNode(cls_name)
-                c_node.Children = sorted(sys_nodes, key=lambda x: x.Name)
+                
+                type_nodes = []
+                for typ_name, sys_nodes in type_dict.items():
+                    t_node = TypeNode(typ_name)
+                    t_node.Children = sorted(sys_nodes, key=lambda x: x.Name)
+                    t_node.aggregate_stats()
+                    type_nodes.append(t_node)
+                
+                c_node.Children = sorted(type_nodes, key=lambda x: x.Name)
                 root_nodes.append(c_node)
 
             self.systemTree.ItemsSource = sorted(root_nodes, key=lambda x: x.Name)
-            self.statusLabel.Text = "Found {} systems.".format(len(system_map))
+            self.statusLabel.Text = "Found {} system classifications.".format(len(root_nodes))
             
             # Enable buttons if data exists
-            has_data = len(system_map) > 0
-            self.Btn_Visualize.IsEnabled = has_data
-            self.Btn_ClearVisuals.IsEnabled = has_data
-            self.Btn_Fix.IsEnabled = has_data
+            has_data = len(root_nodes) > 0
+            self.Btn_SelectAll.IsEnabled = has_data
+            self.Btn_Visualize.IsEnabled = False # Wait for check
+            self.Btn_ClearVisuals.IsEnabled = False # Wait for check
+            self.Btn_Disconnect.IsEnabled = False # Wait for check
             self.Btn_Rename.IsEnabled = has_data
         except Exception as e:
             err = traceback.format_exc()
@@ -382,18 +559,24 @@ class SystemMergeWindow(forms.WPFWindow):
             
             # Cascade Up (Child -> Parent)
             if self.systemTree.ItemsSource:
-                for root in self.systemTree.ItemsSource:
-                    if hasattr(root, "Children") and node in root.Children:
-                        # Update parent based on all children
-                        root.IsChecked = all(c.IsChecked for c in root.Children)
-                        break
+                # Need recursive check or simple 2-level check. 
+                # Since we added TypeNode, it's Class -> Type -> System.
+                # For simplicity, we just refresh the tree to let bindings update if we had full MVVM, 
+                # but here we might miss the visual update on parents without explicit logic.
+                # Given the complexity of 3-level recursion in this simple handler, 
+                # we rely on the user checking the parent to select all, which is implemented.
+                pass
             
             # Refresh tree to update UI for children
             self.systemTree.Items.Refresh()
+            self.update_button_states()
 
     def tree_selection_changed(self, sender, args):
         """Syncs TreeView selection with Revit selection (Highlight)."""
+        if self.is_busy: return
+        
         self.reset_selection_highlight()
+        self.update_button_states()
         
         try:
             selected_node = self.systemTree.SelectedItem
@@ -407,8 +590,9 @@ class SystemMergeWindow(forms.WPFWindow):
             
             ids = set(selected_node.AllElements)
             # If it's a classification node, gather all children
-            if isinstance(selected_node, ClassificationNode):
-                ids = {eid for child in selected_node.Children for eid in child.AllElements}
+            if isinstance(selected_node, (ClassificationNode, TypeNode)):
+                # Recursively gather all elements
+                ids = self._get_all_child_elements(selected_node)
             
             if ids:
                 # Identify background elements (Rest of the Model)
@@ -423,17 +607,17 @@ class SystemMergeWindow(forms.WPFWindow):
                     t.Start()
                     
                     # 1. Highlight Selected
-                    ogs = OverrideGraphicSettings()
-                    ogs.SetProjectionLineColor(Color(255, 165, 0)) # Orange
-                    ogs.SetProjectionLineWeight(12) # Extra Thick / Glow Effect
+                    ogs_sel = OverrideGraphicSettings()
+                    ogs_sel.SetProjectionLineColor(Color(0, 128, 255)) # System Browser Blue
+                    ogs_sel.SetProjectionLineWeight(12) # Extra Thick / Glow Effect
                     for eid in ids:
-                        self.doc.ActiveView.SetElementOverrides(eid, ogs)
+                        self.doc.ActiveView.SetElementOverrides(eid, ogs_sel)
                     
                     # 2. Dim Background (Halftone + Transparent)
                     if background_ids:
                         ogs_dim = OverrideGraphicSettings()
                         ogs_dim.SetHalftone(True)
-                        ogs_dim.SetSurfaceTransparency(60) # 60% Transparent
+                        ogs_dim.SetSurfaceTransparency(80) # 80% Transparent
                         for eid in background_ids:
                             self.doc.ActiveView.SetElementOverrides(eid, ogs_dim)
                             
@@ -442,29 +626,73 @@ class SystemMergeWindow(forms.WPFWindow):
                 self.last_highlighted_ids = list(ids.union(background_ids))
                 self.uidoc.RefreshActiveView()
                 
-                # Prepare list for Zoom/Select
                 elem_ids = List[ElementId](ids)
-
-                # Auto-Zoom if enabled
+                
+                # 1. Select in Revit
+                self.uidoc.Selection.SetElementIds(elem_ids)
+                
+                # 2. Auto-Zoom if enabled
                 if self.Cb_AutoZoom.IsChecked:
                     self.uidoc.ShowElements(elem_ids)
-                
-                # Auto-Select if enabled
-                if self.Cb_AutoSelect.IsChecked:
-                    self.uidoc.Selection.SetElementIds(elem_ids)
                     
         except Exception:
             pass # Prevent crash if selection fails
 
+    def _get_all_child_elements(self, node):
+        """Recursively gets all element IDs from a node and its children."""
+        ids = set(node.AllElements)
+        if hasattr(node, "Children"):
+            for child in node.Children:
+                ids.update(self._get_all_child_elements(child))
+        return ids
+
     def get_checked_systems(self):
-        """Helper to find all checked SystemNodes."""
+        """Helper to find all checked SystemNodes or NetworkNodes."""
         checked = []
         if self.systemTree.ItemsSource:
             for class_node in self.systemTree.ItemsSource:
-                for sys_node in class_node.Children:
-                    if sys_node.IsChecked:
-                        checked.append(sys_node)
+                for type_node in class_node.Children:
+                    for sys_node in type_node.Children:
+                        # Check if system is split (has NetworkNode children)
+                        is_split = False
+                        if sys_node.Children and isinstance(sys_node.Children[0], NetworkNode):
+                            is_split = True
+                        
+                        if is_split:
+                            # If split, check individual networks so they get colored separately
+                            for net_node in sys_node.Children:
+                                if net_node.IsChecked:
+                                    checked.append(net_node)
+                        else:
+                            # If not split, check the system itself
+                            if sys_node.IsChecked:
+                                checked.append(sys_node)
         return checked
+
+    def _generate_dynamic_color(self, index):
+        """Generates a distinct color using Golden Ratio for overflow."""
+        # Use Golden Ratio Conjugate to spread hues evenly
+        golden_ratio = 0.618033988749895
+        h = (index * golden_ratio) % 1.0
+        s = 0.85 # High saturation for visibility
+        v = 0.95 # High value for brightness
+        
+        # HSV to RGB conversion
+        i = int(h * 6)
+        f = h * 6 - i
+        p = v * (1 - s)
+        q = v * (1 - f * s)
+        t = v * (1 - (1 - f) * s)
+        
+        r, g, b = 0, 0, 0
+        if i % 6 == 0: r, g, b = v, t, p
+        elif i % 6 == 1: r, g, b = q, v, p
+        elif i % 6 == 2: r, g, b = p, v, t
+        elif i % 6 == 3: r, g, b = p, q, v
+        elif i % 6 == 4: r, g, b = t, p, v
+        elif i % 6 == 5: r, g, b = v, p, q
+        
+        return Color(int(r * 255), int(g * 255), int(b * 255))
 
     def visualize_click(self, sender, args):
         """Applies Neon Color Overrides to visualize islands."""
@@ -489,21 +717,49 @@ class SystemMergeWindow(forms.WPFWindow):
         if start_idx < 0: start_idx = 0
 
         try:
+            # Check for View Filters that might mask colors
+            view = self.doc.ActiveView
+            filters = view.GetFilters()
+            if filters:
+                visible_filters = [f for f in filters if view.GetFilterVisibility(f)]
+                if visible_filters:
+                    td = TaskDialog("View Filters Detected")
+                    td.MainInstruction = "Active View Filters might mask the tool's colors."
+                    td.MainContent = "Do you want to temporarily hide these filters in this view?"
+                    td.CommonButtons = TaskDialogCommonButtons.Yes | TaskDialogCommonButtons.No
+                    if td.Show() == TaskDialogResult.Yes:
+                        with Transaction(self.doc, "Disable Filters") as t:
+                            t.Start()
+                            for fid in visible_filters:
+                                view.SetFilterVisibility(fid, False)
+                                if fid not in self.disabled_filters:
+                                    self.disabled_filters.append(fid)
+                            t.Commit()
+
             with Transaction(self.doc, "Visualize Networks") as t:
                 t.Start()
                 
-                solid_pat = FilteredElementCollector(self.doc).OfClass(FillPatternElement).FirstElement() 
+                # Find the actual Solid Fill pattern (FirstElement() might return a hatch pattern)
+                solid_pat = None
+                patterns = FilteredElementCollector(self.doc).OfClass(FillPatternElement)
+                for p in patterns:
+                    if p.GetFillPattern().IsSolidFill:
+                        solid_pat = p
+                        break
                 
                 for i, sys_item in enumerate(checked_systems):
                     # Cycle colors if multiple systems selected, otherwise use selected
                     if use_cycling:
-                        c_opt = self.color_options[(start_idx + i) % len(self.color_options)]
-                        revit_color = c_opt.RevitColor
+                        idx = start_idx + i
+                        if idx < len(self.color_options):
+                            revit_color = self.color_options[idx].RevitColor
+                        else:
+                            # Generate on the fly if we run out of presets
+                            revit_color = self._generate_dynamic_color(idx)
                     else:
                         revit_color = selected_color_opt.RevitColor
 
                     ogs = OverrideGraphicSettings()
-                    ogs.SetProjectionLineColor(revit_color)
                     if solid_pat:
                         ogs.SetSurfaceForegroundPatternId(solid_pat.Id)
                         ogs.SetSurfaceForegroundPatternColor(revit_color)
@@ -511,6 +767,7 @@ class SystemMergeWindow(forms.WPFWindow):
                     for eid in sys_item.AllElements:
                         self.doc.ActiveView.SetElementOverrides(eid, ogs)
                 t.Commit()
+                self.uidoc.RefreshActiveView()
         except Exception as e:
             err = traceback.format_exc()
             print(err)
@@ -524,8 +781,9 @@ class SystemMergeWindow(forms.WPFWindow):
         if self.is_busy: return
         
         checked_systems = self.get_checked_systems()
-        if not checked_systems:
-            forms.alert("Please check systems to reset.")
+        # Allow reset if we have disabled filters, even if no systems are checked
+        if not checked_systems and not self.disabled_filters:
+            forms.alert("Please check systems to reset colors.")
             return
 
         self.is_busy = True
@@ -537,7 +795,17 @@ class SystemMergeWindow(forms.WPFWindow):
                 for sys_item in checked_systems:
                     for eid in sys_item.AllElements:
                         self.doc.ActiveView.SetElementOverrides(eid, OverrideGraphicSettings())
+                
+                # Restore View Filters if we disabled them
+                if self.disabled_filters:
+                    view = self.doc.ActiveView
+                    for fid in self.disabled_filters:
+                        if view.IsFilterApplied(fid):
+                            view.SetFilterVisibility(fid, True)
+                    self.disabled_filters = [] # Clear list after restoring
+
                 t.Commit()
+                self.uidoc.RefreshActiveView()
         except Exception as e:
             err = traceback.format_exc()
             print(err)
@@ -589,59 +857,139 @@ class SystemMergeWindow(forms.WPFWindow):
         self.is_busy = False
         self.Cursor = Cursors.Arrow
 
-    def fix_network_click(self, sender, args):
-        """Fixes selected networks by moving the 'Loser' slightly to trigger Revit auto-connect."""
+    def disconnect_click(self, sender, args):
+        """Disconnects selected systems from their base fixtures/equipment."""
         if self.is_busy: return
         
+        # 1. Get items to process (Checked OR Selected)
         checked = self.get_checked_systems()
-        if len(checked) < 2:
-            forms.alert("Check at least 2 systems to fix/connect.")
+        items_to_process = checked
+        
+        # Fallback to selected item if nothing checked
+        if not items_to_process:
+            selected = self.systemTree.SelectedItem
+            if selected:
+                items_to_process = [selected]
+
+        if not items_to_process:
+            forms.alert("Check or select at least 1 item to disconnect.")
             return
 
         self.is_busy = True
         self.Cursor = Cursors.Wait
-
-        # Determine Winner (Logic: Has Equipment > Largest Volume)
-        # Sort: Equipment (True=1, False=0) Desc, Volume Desc
-        checked.sort(key=lambda x: float(x.Volume), reverse=True)
-        
-        winner = checked[0]
-        losers = checked[1:]
-
         self.Hide()
+        
         try:
-            with Transaction(self.doc, "Fix Network Connections") as t:
+            disconnect_count = 0
+            with Transaction(self.doc, "Disconnect & Gap Systems") as t:
                 t.Start()
-                for loser in losers:
-                    # The Fix: Jiggle the first UNPINNED element of the loser network
-                    # This forces Revit to re-evaluate connectivity if they are geometrically close
-                    jiggle_id = None
-                    for eid in loser.AllElements:
-                        el = self.doc.GetElement(eid)
-                        if el and not el.Pinned:
-                            jiggle_id = eid
-                            break
+                
+                terminal_cats = {
+                    int(BuiltInCategory.OST_PlumbingFixtures),
+                    int(BuiltInCategory.OST_MechanicalEquipment),
+                    int(BuiltInCategory.OST_Sprinklers)
+                }
+
+                # Collect all unique element IDs to process
+                all_eids = set()
+                for node in items_to_process:
+                    if hasattr(node, "AllElements"):
+                        all_eids.update(node.AllElements)
+                
+                processed_pipes = set()
+
+                for eid in all_eids:
+                    el = self.doc.GetElement(eid)
+                    if not el: continue
                     
-                    if jiggle_id:
-                        try:
-                            ElementTransformUtils.MoveElement(self.doc, jiggle_id, XYZ(0.1, 0, 0))
-                            ElementTransformUtils.MoveElement(self.doc, jiggle_id, XYZ(-0.1, 0, 0))
-                        except Exception:
-                            pass # Skip if movement fails (e.g. constraints)
+                    cat_id = get_id(el.Category.Id)
+                    
+                    # Case A: Element is a Pipe
+                    if cat_id == int(BuiltInCategory.OST_PipeCurves):
+                        pid = get_id(eid)
+                        if pid in processed_pipes: continue
+                        if self._disconnect_and_gap_pipe(el, terminal_cats):
+                            disconnect_count += 1
+                        processed_pipes.add(pid)
+                        
+                    # Case B: Element is a Terminal (Fixture/Equip)
+                    elif cat_id in terminal_cats:
+                        mgr = None
+                        if hasattr(el, "ConnectorManager"): mgr = el.ConnectorManager
+                        elif hasattr(el, "MEPModel") and el.MEPModel: mgr = el.MEPModel.ConnectorManager
+                        
+                        if mgr:
+                            for c in mgr.Connectors:
+                                if c.IsConnected:
+                                    for ref in c.AllRefs:
+                                        pipe = ref.Owner
+                                        if pipe and get_id(pipe.Category.Id) == int(BuiltInCategory.OST_PipeCurves):
+                                            pid = get_id(pipe.Id)
+                                            if pid in processed_pipes: continue
+                                            
+                                            if self._disconnect_and_gap_pipe(pipe, terminal_cats):
+                                                disconnect_count += 1
+                                            processed_pipes.add(pid)
                 t.Commit()
             
-            self.statusLabel.Text = "Fixed {} networks into {}.".format(len(losers), winner.Name)
+            self.statusLabel.Text = "Disconnected {} connections.".format(disconnect_count)
             
+            # Unlock busy state so scan can run
+            self.is_busy = False
             # Repopulate the list to show changes
             self.scan_view_click(sender, args)
         except Exception as e:
             err = traceback.format_exc()
             print(err)
-            self.statusLabel.Text = "Fix failed. Check Output."
+            self.statusLabel.Text = "Disconnect failed. Check Output."
         finally:
             self.is_busy = False
             self.Cursor = Cursors.Arrow
             self.Show()
+
+    def _disconnect_and_gap_pipe(self, pipe, terminal_cats):
+        """Disconnects pipe from terminals and shortens it to create a gap."""
+        disconnected = False
+        mgr = pipe.ConnectorManager
+        if not mgr: return False
+        
+        for c in mgr.Connectors:
+            if c.IsConnected:
+                for ref in c.AllRefs:
+                    ref_owner = ref.Owner
+                    if ref_owner and ref_owner.Category and get_id(ref_owner.Category.Id) in terminal_cats:
+                        try:
+                            # 1. Disconnect
+                            c.DisconnectFrom(ref)
+                            disconnected = True
+                            
+                            # 2. Create Gap (Shorten Pipe)
+                            curve = pipe.Location.Curve
+                            if isinstance(curve, Line):
+                                p0 = curve.GetEndPoint(0)
+                                p1 = curve.GetEndPoint(1)
+                                con_origin = c.Origin
+                                
+                                # Determine which end to move
+                                dist0 = p0.DistanceTo(con_origin)
+                                dist1 = p1.DistanceTo(con_origin)
+                                
+                                gap = 0.1 # 0.1 ft gap (~1.2 inches)
+                                direction = (p1 - p0).Normalize()
+                                
+                                new_p0, new_p1 = p0, p1
+                                if dist0 < dist1:
+                                    new_p0 = p0 + direction * gap
+                                else:
+                                    new_p1 = p1 - direction * gap
+                                
+                                # Ensure valid length
+                                if new_p0.DistanceTo(new_p1) > 0.01:
+                                    new_curve = Line.CreateBound(new_p0, new_p1)
+                                    pipe.Location.Curve = new_curve
+                        except Exception:
+                            pass
+        return disconnected
 
     def _bfs_traversal(self, elements):
         """Standard BFS to group connected elements."""
@@ -657,18 +1005,17 @@ class SystemMergeWindow(forms.WPFWindow):
 
             while queue:
                 curr_id = queue.pop(0)
-                island.append(ElementId(curr_id))
-                
-                curr_el = self.doc.GetElement(ElementId(curr_id))
-                if not curr_el: continue
-
-                # Get neighbors via connectors
-                neighbors = self._get_connected_ids(curr_el)
-                
-                for n_id in neighbors:
-                    if n_id in unvisited and n_id in el_dict:
-                        unvisited.remove(n_id)
-                        queue.append(n_id)
+                if curr_id in el_dict:
+                    elem = el_dict[curr_id]
+                    island.append(elem.Id)
+                    
+                    # Get neighbors via connectors
+                    neighbors = self._get_connected_ids(elem)
+                    
+                    for n_id in neighbors:
+                        if n_id in unvisited and n_id in el_dict:
+                            unvisited.remove(n_id)
+                            queue.append(n_id)
             
             islands.append(island)
         return islands
