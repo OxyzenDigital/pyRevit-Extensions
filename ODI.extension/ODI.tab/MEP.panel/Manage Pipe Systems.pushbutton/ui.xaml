@@ -60,7 +60,7 @@
 
                 <Button Name="Btn_WinClose" Grid.Column="1" Content="✕" Width="30" Height="30" 
                         Foreground="White" Background="Transparent" BorderThickness="0" 
-                        FontSize="14" FontWeight="Bold" Cursor="Hand" VerticalAlignment="Top" HorizontalAlignment="Right">
+                        FontSize="14" FontWeight="Bold" Cursor="Hand" VerticalAlignment="Top" HorizontalAlignment="Right" ToolTip="Close Window">
                     <Button.Template>
                         <ControlTemplate TargetType="Button">
                             <Border Background="{TemplateBinding Background}">
@@ -84,10 +84,10 @@
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
             <StackPanel Orientation="Horizontal" Grid.Column="0">
-                <Button Name="Btn_ScanView" Content="Scan Active View" FontWeight="SemiBold" Background="#E6F7FF" BorderBrush="#1890FF" ToolTip="Find all pipe networks in the current view."/>
-                <Button Name="Btn_SelectAll" Content="Select All" Margin="10,0,0,0" ToolTip="Check all systems in the list."/>
-                <Button Name="Btn_Clear" Content="Clear List" ToolTip="Clear the list and reset view." Margin="10,0,0,0"/>
-                <CheckBox Name="Cb_AutoZoom" Content="Auto-Zoom" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="Automatically zoom view to fit selected system."/>
+                <Button Name="Btn_ScanView" Content="Scan Active View" FontWeight="SemiBold" Background="#E6F7FF" BorderBrush="#1890FF" ToolTip="Scans the active view for all pipe networks and lists them below."/>
+                <Button Name="Btn_SelectAll" Content="Select All" Margin="10,0,0,0" ToolTip="Selects or deselects all systems in the list."/>
+                <Button Name="Btn_Clear" Content="Clear List" ToolTip="Clears the list and resets any view overrides." Margin="10,0,0,0"/>
+                <CheckBox Name="Cb_AutoZoom" Content="Auto-Zoom" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="If checked, clicking a system in the list will zoom the view to fit it."/>
             </StackPanel>
         </Grid>
 
@@ -163,7 +163,7 @@
             <!-- Color Selection -->
             <StackPanel Orientation="Horizontal" Grid.Column="0" Margin="0,0,10,0">
                 <TextBlock Text="Color:" VerticalAlignment="Center" Margin="0,0,5,0"/>
-                <ComboBox Name="Cmb_Colors" Width="140" Height="26" VerticalContentAlignment="Center">
+                <ComboBox Name="Cmb_Colors" Width="140" Height="26" VerticalContentAlignment="Center" ToolTip="Choose a color to apply to the checked systems.">
                     <ComboBox.ItemTemplate>
                         <DataTemplate>
                             <StackPanel Orientation="Horizontal">
@@ -177,17 +177,17 @@
 
             <!-- Visualization & Merge -->
             <StackPanel Orientation="Horizontal" Grid.Column="1">
-                <Button Name="Btn_Visualize" Content="🎨 Colorize Checked" ToolTip="Apply selected color to checked systems."/>
-                <Button Name="Btn_ClearVisuals" Content="🚫 Reset Colors" ToolTip="Remove color overrides from checked systems."/>
+                <Button Name="Btn_Visualize" Content="🎨 Colorize Checked" ToolTip="Apply the selected color to all checked systems for visualization."/>
+                <Button Name="Btn_ClearVisuals" Content="🚫 Reset Colors" ToolTip="Remove all color overrides applied to the checked systems."/>
                 <Border Width="1" Background="#DDD" Margin="5,2,10,2"/>
-                <Button Name="Btn_Disconnect" Content="🔌 Disconnect" FontWeight="SemiBold" ToolTip="Disconnect selected systems from fixtures/equipment to allow regrouping."/>
+                <Button Name="Btn_Disconnect" Content="🔌 Disconnect" FontWeight="SemiBold" ToolTip="Disconnects checked systems from equipment/fixtures to allow regrouping (creates a small gap)."/>
             </StackPanel>
 
             <!-- Rename -->
             <StackPanel Orientation="Horizontal" Grid.Column="2">
                 <TextBlock Text="Rename:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="Gray"/>
-                <TextBox Name="Tb_NewName" Width="100" VerticalContentAlignment="Center" Margin="0,0,5,0" Padding="2"/>
-                <Button Name="Btn_Rename" Content="Apply" Background="#F0F0F0"/>
+                <TextBox Name="Tb_NewName" Width="100" VerticalContentAlignment="Center" Margin="0,0,5,0" Padding="2" ToolTip="Enter a new name for the selected system."/>
+                <Button Name="Btn_Rename" Content="Apply" Background="#F0F0F0" ToolTip="Rename the selected Revit System to the text entered."/>
             </StackPanel>
         </Grid>
 

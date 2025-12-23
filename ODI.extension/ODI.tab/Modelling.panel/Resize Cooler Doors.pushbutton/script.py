@@ -7,6 +7,7 @@ __author__ = 'Claude'
 __helpurl__ = ''
 __min_revit_ver__ = 2019
 __max_revit_ver__ = 2024
+__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import TaskDialog

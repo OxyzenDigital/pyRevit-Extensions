@@ -3,6 +3,7 @@
 # Developed by Oxyzen Digital
 # Description: Advanced Toposolid grading tool with sculpting, edging, and auto-triangulation features.
 
+__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 import sys
 import os
 import json

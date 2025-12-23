@@ -34,6 +34,7 @@ from pyrevit import forms, script, revit
 
 __title__ = "System Merger"
 __doc__ = "Modal tool to diagnose and merge disconnected pipe networks."
+__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 
 # Helper for Revit 2024+ compatibility
 def get_id(element_id):
@@ -806,6 +807,7 @@ class SystemMergeWindow(forms.WPFWindow):
 
                 t.Commit()
                 self.uidoc.RefreshActiveView()
+                self.statusLabel.Text = "Visual overrides reset."
         except Exception as e:
             err = traceback.format_exc()
             print(err)
@@ -877,7 +879,6 @@ class SystemMergeWindow(forms.WPFWindow):
 
         self.is_busy = True
         self.Cursor = Cursors.Wait
-        self.Hide()
         
         try:
             disconnect_count = 0
@@ -934,6 +935,7 @@ class SystemMergeWindow(forms.WPFWindow):
             
             self.statusLabel.Text = "Disconnected {} connections.".format(disconnect_count)
             
+            self.uidoc.RefreshActiveView()
             # Unlock busy state so scan can run
             self.is_busy = False
             # Repopulate the list to show changes
@@ -945,7 +947,6 @@ class SystemMergeWindow(forms.WPFWindow):
         finally:
             self.is_busy = False
             self.Cursor = Cursors.Arrow
-            self.Show()
 
     def _disconnect_and_gap_pipe(self, pipe, terminal_cats):
         """Disconnects pipe from terminals and shortens it to create a gap."""

@@ -7,6 +7,7 @@ Version: 1.0
 
 __title__ = "Add Fittings"
 __version__ = "1.0"
+__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 
 import sys
 import clr
