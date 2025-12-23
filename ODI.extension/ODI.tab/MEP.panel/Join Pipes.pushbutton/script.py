@@ -9,6 +9,7 @@ Select two pipes to join them.
     4. Detects if Intersecting at Corner -> Elbow
     5. Detects if Intersecting along Body -> Tap/Takeoff
 """
+__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 import math
 import clr
 import System
