@@ -1,8 +1,11 @@
 title:
-  en_us: Manage Pipe Systems
+  en_us: Manage\n  Pipe Systems
   fr_fr: Gestion des Systèmes de Tuyauterie
 tooltip: 
   en_us: Diagnose disconnected pipe networks, visualize system islands, and merge/fix connections.
   fr_fr: Diagnostiquer les réseaux de tuyauterie déconnectés et fusionner les connexions.
 author: OXYZEN Digital
 highlight: new
+
+engine:
+  clean: false

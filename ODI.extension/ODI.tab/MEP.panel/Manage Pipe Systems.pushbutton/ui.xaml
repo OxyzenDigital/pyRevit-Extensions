@@ -1,0 +1,179 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Pipe System Manager" Height="550" Width="650"
+        WindowStartupLocation="Manual"
+        ResizeMode="CanResize"
+        Topmost="True"
+        WindowStyle="None"
+        BorderBrush="#0080FF"
+        BorderThickness="1"
+        Background="#FAFAFA">
+    
+    <Window.Resources>
+        <Style TargetType="Button">
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="0,0,5,0"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#DDDDDD"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+        </Style>
+        <Style TargetType="GroupBox">
+            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Padding" Value="5"/>
+            <Setter Property="Background" Value="White"/>
+            <Setter Property="BorderBrush" Value="#E0E0E0"/>
+        </Style>
+        <Style TargetType="TreeViewItem">
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/> <!-- Header -->
+            <RowDefinition Height="Auto"/> <!-- Toolbar -->
+            <RowDefinition Height="*"/>    <!-- List -->
+            <RowDefinition Height="Auto"/> <!-- Actions -->
+            <RowDefinition Height="Auto"/> <!-- Status -->
+        </Grid.RowDefinitions>
+
+        <!-- Header (Custom Title Bar) -->
+        <Border Name="HeaderDrag" Grid.Row="0" Background="#0080FF" Padding="15,10" Margin="0,0,0,10">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Pipe System Manager" FontSize="18" FontWeight="Bold" Foreground="White"/>
+                    <TextBlock Text="Visualize, Rename &amp; Merge Networks" FontSize="11" Foreground="#E0E0E0"/>
+                </StackPanel>
+
+                <Button Name="Btn_WinClose" Grid.Column="1" Content="✕" Width="30" Height="30" 
+                        Foreground="White" Background="Transparent" BorderThickness="0" 
+                        FontSize="14" FontWeight="Bold" Cursor="Hand" VerticalAlignment="Top" HorizontalAlignment="Right">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Background="{TemplateBinding Background}">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Foreground" Value="#FFCCCC"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- Toolbar -->
+        <Grid Grid.Row="1" Margin="15,0,15,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Orientation="Horizontal" Grid.Column="0">
+                <Button Name="Btn_ScanView" Content="Scan Active View" FontWeight="SemiBold" Background="#E6F7FF" BorderBrush="#1890FF" ToolTip="Find all pipe networks in the current view."/>
+                <Button Name="Btn_Clear" Content="Clear List" ToolTip="Clear the list and reset view." Margin="10,0,0,0"/>
+                <CheckBox Name="Cb_AutoZoom" Content="Auto-Zoom" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="Automatically zoom view to fit selected system."/>
+                <CheckBox Name="Cb_AutoSelect" Content="Auto-Select" VerticalAlignment="Center" Margin="10,0,0,0" ToolTip="Select elements in Revit when clicking in the list." IsChecked="True"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Tree View Header -->
+        <Grid Grid.Row="2" Margin="15,0,15,0" VerticalAlignment="Top" Height="25" Background="#F5F5F5">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="200"/> <!-- Name -->
+                <ColumnDefinition Width="120"/> <!-- Type -->
+                <ColumnDefinition Width="60"/>  <!-- Abbr -->
+                <ColumnDefinition Width="70"/>  <!-- Length -->
+                <ColumnDefinition Width="70"/>  <!-- Volume -->
+                <ColumnDefinition Width="*"/>   <!-- Count -->
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="  Hierarchy / System Name" FontWeight="Bold" VerticalAlignment="Center" Foreground="#555"/>
+            <TextBlock Grid.Column="1" Text="Type" FontWeight="Bold" VerticalAlignment="Center" Foreground="#555"/>
+            <TextBlock Grid.Column="2" Text="Abbr" FontWeight="Bold" VerticalAlignment="Center" Foreground="#555"/>
+            <TextBlock Grid.Column="3" Text="Length (ft)" FontWeight="Bold" VerticalAlignment="Center" Foreground="#555"/>
+            <TextBlock Grid.Column="4" Text="Vol (ft³)" FontWeight="Bold" VerticalAlignment="Center" Foreground="#555"/>
+            <TextBlock Grid.Column="5" Text="Networks" FontWeight="Bold" VerticalAlignment="Center" Foreground="#555"/>
+        </Grid>
+
+        <!-- Tree View -->
+        <TreeView Name="systemTree" Grid.Row="2" Margin="15,25,15,15" BorderBrush="#DDDDDD" BorderThickness="1">
+            <TreeView.ItemTemplate>
+                <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                    <Grid Margin="0,2">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="200"/>
+                            <ColumnDefinition Width="120"/>
+                            <ColumnDefinition Width="60"/>
+                            <ColumnDefinition Width="70"/>
+                            <ColumnDefinition Width="70"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        
+                        <StackPanel Orientation="Horizontal" Grid.Column="0">
+                            <CheckBox IsChecked="{Binding IsChecked}" VerticalAlignment="Center" Margin="0,0,5,0" Click="on_checkbox_click"/>
+                            <TextBlock Text="{Binding Name}" FontWeight="{Binding FontWeight}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        
+                        <TextBlock Grid.Column="1" Text="{Binding Type}" VerticalAlignment="Center" Foreground="Gray"/>
+                        <TextBlock Grid.Column="2" Text="{Binding Abbreviation}" VerticalAlignment="Center" Foreground="#333"/>
+                        <TextBlock Grid.Column="3" Text="{Binding Length}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="4" Text="{Binding Volume}" VerticalAlignment="Center"/>
+                        <TextBlock Grid.Column="5" Text="{Binding Count}" VerticalAlignment="Center"/>
+                    </Grid>
+                </HierarchicalDataTemplate>
+            </TreeView.ItemTemplate>
+        </TreeView>
+
+        <!-- Actions -->
+        <Grid Grid.Row="3" Margin="15,0,15,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- Color Selection -->
+            <StackPanel Orientation="Horizontal" Grid.Column="0" Margin="0,0,10,0">
+                <TextBlock Text="Color:" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                <ComboBox Name="Cmb_Colors" Width="140" Height="26" VerticalContentAlignment="Center">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Orientation="Horizontal">
+                                <Border Width="12" Height="12" Background="{Binding Brush}" BorderBrush="Gray" BorderThickness="1" Margin="0,0,5,0"/>
+                                <TextBlock Text="{Binding Name}"/>
+                            </StackPanel>
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+            </StackPanel>
+
+            <!-- Visualization & Merge -->
+            <StackPanel Orientation="Horizontal" Grid.Column="1">
+                <Button Name="Btn_Visualize" Content="🎨 Colorize Checked" ToolTip="Apply selected color to checked systems."/>
+                <Button Name="Btn_ClearVisuals" Content="🚫 Reset Checked" ToolTip="Remove color overrides from checked systems."/>
+                <Border Width="1" Background="#DDD" Margin="5,2,10,2"/>
+                <Button Name="Btn_Fix" Content="🔧 Fix Network" FontWeight="SemiBold" ToolTip="Physically connect (jiggle) checked networks to fix split systems."/>
+            </StackPanel>
+
+            <!-- Rename -->
+            <StackPanel Orientation="Horizontal" Grid.Column="2">
+                <TextBlock Text="Rename:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="Gray"/>
+                <TextBox Name="Tb_NewName" Width="100" VerticalContentAlignment="Center" Margin="0,0,5,0" Padding="2"/>
+                <Button Name="Btn_Rename" Content="Apply" Background="#F0F0F0"/>
+            </StackPanel>
+        </Grid>
+
+        <!-- Status Bar -->
+        <Border Grid.Row="4" Background="#F0F0F0" Padding="10,5" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0">
+            <TextBlock Name="statusLabel" Text="Ready. Select pipes to begin." Foreground="#666" FontSize="11"/>
+        </Border>
+    </Grid>
+</Window>
