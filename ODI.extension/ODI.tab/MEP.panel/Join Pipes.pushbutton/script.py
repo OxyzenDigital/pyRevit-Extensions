@@ -96,7 +96,7 @@ def get_intersector(doc, view3d, exclude_ids=None):
     exclude_ids: List of ElementIds to ignore (e.g., the pipes being modified).
     """
     cats = [
-        DB.BuiltInCategory.OST_StructuralFraming,
+        DB.BuiltInCategory.OST_StructuralFraming, # Included: Beams (Check collision)
         DB.BuiltInCategory.OST_StructuralColumns,
         DB.BuiltInCategory.OST_DuctCurves,
         DB.BuiltInCategory.OST_DuctFitting,
@@ -107,7 +107,7 @@ def get_intersector(doc, view3d, exclude_ids=None):
         DB.BuiltInCategory.OST_PipeCurves,
         DB.BuiltInCategory.OST_PipeFitting,
         # DB.BuiltInCategory.OST_Walls, # Excluded per user request
-        # DB.BuiltInCategory.OST_Floors, # Excluded per user request
+        DB.BuiltInCategory.OST_Floors, # Included: Go under
         # DB.BuiltInCategory.OST_Ceilings, # Excluded per user request
     ]
     
@@ -684,22 +684,47 @@ class PipeJoiner:
         # Override for specific categories
         cat_id = get_id_value(obstacle.Category.Id)
         if cat_id == int(DB.BuiltInCategory.OST_StructuralColumns):
-            prefer_vertical = False # Go around columns
+            prefer_vertical = False # Prefer going around columns
+        elif cat_id == int(DB.BuiltInCategory.OST_StructuralFraming):
+            prefer_vertical = True # Go under beams
         elif cat_id in [int(DB.BuiltInCategory.OST_PipeCurves), int(DB.BuiltInCategory.OST_DuctCurves)]:
             prefer_vertical = True # Go over/under pipes/ducts
 
         # Generate Direction List
         candidates = []
+        
+        # Define vectors
+        up = DB.XYZ.BasisZ
+        down = -DB.XYZ.BasisZ
+        left = vec_h
+        right = -vec_h
+        
         if not is_vertical(direction):
             # Horizontal Pipe
-            up = DB.XYZ.BasisZ
-            down = -DB.XYZ.BasisZ
-            left = vec_h
-            right = -vec_h
             
-            if prefer_vertical:
+            if cat_id == int(DB.BuiltInCategory.OST_StructuralColumns):
+                # Columns: Loop around (Left/Right). No Up/Down.
+                candidates = [left, right]
+            elif cat_id == int(DB.BuiltInCategory.OST_StructuralFraming):
+                # Beams: Always under (Down).
+                candidates = [down]
+            elif cat_id == int(DB.BuiltInCategory.OST_Floors):
+                # Floors: Always under (Down).
+                candidates = [down]
+            elif cat_id == int(DB.BuiltInCategory.OST_Ceilings):
+                # Ceiling: Always above (Up).
+                candidates = [up]
+            elif cat_id == int(DB.BuiltInCategory.OST_Roofs):
+                # Roof: Context dependent.
+                if start_pt.Z > hit_pt.Z:
+                    candidates = [up]
+                else:
+                    candidates = [down]
+            elif cat_id in [int(DB.BuiltInCategory.OST_PipeCurves), int(DB.BuiltInCategory.OST_DuctCurves)]:
+                # MEP: Up/Down first
                 candidates = [up, down, left, right]
             else:
+                # Default heuristic
                 candidates = [left, right, up, down]
         else:
             # Vertical Pipe - just try cardinal directions
@@ -736,26 +761,40 @@ class PipeJoiner:
             p3 = p2 - b_dir * offset_dist # Return to axis
             
             # Check remaining distance to target
-            rem_dist = p3.DistanceTo(target_pt)
+            vec_rem = target_pt - p3
+            dist_rem = vec_rem.GetLength()
+            dot = vec_rem.DotProduct(direction)
             
-            # If remaining segment is too short, extend bridge to land ON target
-            if rem_dist < min_seg_len:
-                 vec_to_target = target_pt - p3
-                 if vec_to_target.DotProduct(direction) > 0:
-                     # p3 is before target. Extend bridge to reach target.
-                     bridge_len += rem_dist
+            seg4_needed = True
+            
+            if dot >= -0.001:
+                # Undershot (p3 is before target) or On Target
+                if dist_rem < min_seg_len:
+                     # Too short for a segment. Extend bridge to land ON target.
+                     bridge_len += dist_rem
                      p2 = p1 + direction * bridge_len
-                     p3 = p2 - b_dir * offset_dist # Should now equal target_point
-                 else:
-                     # p3 is past target (Overshot).
-                     continue
+                     p3 = p2 - b_dir * offset_dist # Now p3 == target_pt
+                     seg4_needed = False
+            else:
+                # Overshot (p3 is past target). Loop Back required.
+                # Ensure we have enough space to put a fitting at p3 to turn back
+                if dist_rem < min_seg_len:
+                    # Extend bridge FURTHER to make space for the return fitting
+                    extra = min_seg_len - dist_rem
+                    bridge_len += extra
+                    p2 = p1 + direction * bridge_len
+                    p3 = p2 - b_dir * offset_dist
+                    # Now p3 is min_seg_len away from target
 
             # Check Collisions for Bypass Segments
             c1, _, _ = check_clearance(intersector, p0, p1, radius)
             c2, _, _ = check_clearance(intersector, p1, p2, radius)
             c3, _, _ = check_clearance(intersector, p2, p3, radius)
+            c4 = False
+            if seg4_needed:
+                c4, _, _ = check_clearance(intersector, p3, target_pt, radius)
             
-            if not (c1 or c2 or c3):
+            if not (c1 or c2 or c3 or c4):
                 self.logger.info("Found valid bypass path.")
                 
                 # Execute Geometry
@@ -767,8 +806,11 @@ class PipeJoiner:
                 seg1 = self.create_pipe_segment(pipe, p0, p1)
                 seg2 = self.create_pipe_segment(pipe, p1, p2)
                 seg3 = self.create_pipe_segment(pipe, p2, p3)
+                seg4 = None
+                if seg4_needed:
+                    seg4 = self.create_pipe_segment(pipe, p3, target_pt)
                 
-                if not (seg1 and seg2 and seg3): return None
+                if not (seg1 and seg2 and seg3) or (seg4_needed and not seg4): return None
                 
                 self.doc.Regenerate()
                 
@@ -776,9 +818,12 @@ class PipeJoiner:
                 connect_connectors_robust(self.doc, get_connector_closest_to(pipe, p0), get_connector_closest_to(seg1, p0), self.logger)
                 connect_connectors_robust(self.doc, get_connector_closest_to(seg1, p1), get_connector_closest_to(seg2, p1), self.logger)
                 connect_connectors_robust(self.doc, get_connector_closest_to(seg2, p2), get_connector_closest_to(seg3, p2), self.logger)
-                
-                # Return the last segment of the bypass (the return leg) and the point where it returns to axis
-                return seg3, p3
+                if seg4:
+                    connect_connectors_robust(self.doc, get_connector_closest_to(seg3, p3), get_connector_closest_to(seg4, p3), self.logger)
+                    return seg4, target_pt
+                else:
+                    # Return the last segment of the bypass (the return leg) and the point where it returns to axis
+                    return seg3, p3
         
         self.logger.error("Could not find a clear bypass path.")
         return None
