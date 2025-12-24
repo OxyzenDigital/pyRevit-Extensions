@@ -29,6 +29,14 @@ from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, F
 from System import Guid
 from pyrevit import forms, revit, script
 
+# Try to import UIThemeManager (Revit 2024+)
+try:
+    from Autodesk.Revit.UI import UIThemeManager, UITheme
+    HAS_THEME = True
+except ImportError:
+    HAS_THEME = False
+from System.Windows.Media import Colors, SolidColorBrush, Color as WpfColor
+
 doc = revit.doc
 uidoc = revit.uidoc
 
@@ -233,6 +241,7 @@ class GradingWindow(forms.WPFWindow):
         
         self.bind_ui()
         self.setup_events()
+        self.apply_revit_theme()
 
     def refresh_ui(self):
         from System.Windows import Media
@@ -261,24 +270,24 @@ class GradingWindow(forms.WPFWindow):
         # 3. Selection Labels
         if self.state.start_stake:
             self.Lb_StartStake.Text = "Start: ID {}".format(get_id_val(self.state.start_stake))
-            self.Lb_StartStake.Foreground = Media.Brushes.Black
+            self.Lb_StartStake.Foreground = self.FindResource("TextBrush")
         else:
             self.Lb_StartStake.Text = "Start: [None]"
-            self.Lb_StartStake.Foreground = Media.Brushes.Gray
+            self.Lb_StartStake.Foreground = self.FindResource("TextLightBrush")
 
         if self.state.end_stake:
             self.Lb_EndStake.Text = "End: ID {}".format(get_id_val(self.state.end_stake))
-            self.Lb_EndStake.Foreground = Media.Brushes.Black
+            self.Lb_EndStake.Foreground = self.FindResource("TextBrush")
         else:
             self.Lb_EndStake.Text = "End: [None]"
-            self.Lb_EndStake.Foreground = Media.Brushes.Gray
+            self.Lb_EndStake.Foreground = self.FindResource("TextLightBrush")
 
         if self.state.grading_line:
             self.Lb_Line.Text = "Line: ID {}".format(get_id_val(self.state.grading_line))
-            self.Lb_Line.Foreground = Media.Brushes.Black
+            self.Lb_Line.Foreground = self.FindResource("TextBrush")
         else:
             self.Lb_Line.Text = "Line: [None]"
-            self.Lb_Line.Foreground = Media.Brushes.Gray
+            self.Lb_Line.Foreground = self.FindResource("TextLightBrush")
             
         # 4. Enable/Disable Swap
         is_swap_ready = (self.state.start_stake is not None and self.state.end_stake is not None)
@@ -297,6 +306,34 @@ class GradingWindow(forms.WPFWindow):
         
         # Initial Validation
         self.validate_ui()
+
+    def apply_revit_theme(self):
+        """Detects Revit theme and updates window resources if Dark."""
+        is_dark = False
+        if HAS_THEME:
+            try:
+                if UIThemeManager.CurrentTheme == UITheme.Dark:
+                    is_dark = True
+            except: pass
+        
+        if is_dark:
+            # Define Dark Theme Colors
+            res = self.Resources
+            res["WindowBrush"] = SolidColorBrush(WpfColor.FromRgb(59, 68, 83))      # #3b4453
+            res["ControlBrush"] = SolidColorBrush(WpfColor.FromRgb(40, 46, 56))     # #282e38
+            res["TextBrush"] = SolidColorBrush(WpfColor.FromRgb(245, 245, 245))     # #F5F5F5
+            res["TextLightBrush"] = SolidColorBrush(WpfColor.FromRgb(170, 175, 185))# #AAAFB9
+            res["AccentBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 120, 215))     # #0078D7
+            res["HeaderTextBrush"] = SolidColorBrush(WpfColor.FromRgb(255, 255, 255))
+            res["HeaderSubTextBrush"] = SolidColorBrush(WpfColor.FromRgb(200, 200, 200))
+            res["ExpanderBrush"] = SolidColorBrush(WpfColor.FromRgb(45, 52, 64))    # #2d3440
+            res["ExpanderBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 110))
+            res["BorderBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 110))
+            res["StatusReadyBrush"] = SolidColorBrush(WpfColor.FromRgb(100, 255, 100))
+            res["StatusErrorBrush"] = SolidColorBrush(WpfColor.FromRgb(255, 100, 100))
+            res["ButtonBrush"] = SolidColorBrush(WpfColor.FromRgb(70, 80, 95))
+            res["HoverBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 115))
+            res["PressedBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 90, 170))
 
     def setup_events(self):
         self.Btn_SelectStakes.Click += self.a_stakes
@@ -350,7 +387,7 @@ class GradingWindow(forms.WPFWindow):
             
             if msg:
                 self.Lb_Status.Content = msg
-                self.Lb_Status.Foreground = Media.Brushes.Red
+                self.Lb_Status.Foreground = self.FindResource("StatusErrorBrush")
                 self.Btn_Run.IsEnabled = False
                 self.Btn_Edging.IsEnabled = False
                 return False
@@ -358,19 +395,19 @@ class GradingWindow(forms.WPFWindow):
                 # Restore 'Ready' state if logic holds
                 if self.state.ready:
                     self.Lb_Status.Content = "Ready."
-                    self.Lb_Status.Foreground = Media.Brushes.Green
+                    self.Lb_Status.Foreground = self.FindResource("StatusReadyBrush")
                     self.Btn_Run.IsEnabled = True
                     self.Btn_Edging.IsEnabled = True
                 else:
                     self.Lb_Status.Content = "Incomplete."
-                    self.Lb_Status.Foreground = Media.Brushes.Gray
+                    self.Lb_Status.Foreground = self.FindResource("TextLightBrush")
                     self.Btn_Run.IsEnabled = False
                     self.Btn_Edging.IsEnabled = False
                 return True
                 
         except:
             self.Lb_Status.Content = "Invalid Number Format"
-            self.Lb_Status.Foreground = Media.Brushes.Red
+            self.Lb_Status.Foreground = self.FindResource("StatusErrorBrush")
             self.Btn_Run.IsEnabled = False
             self.Btn_Edging.IsEnabled = False
             return False
