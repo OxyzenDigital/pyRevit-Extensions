@@ -21,14 +21,15 @@ import clr
 clr.AddReference("System")
 clr.AddReference("PresentationCore")
 clr.AddReference("PresentationFramework")
+clr.AddReference("WindowsBase")
 from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
 from System.Collections.Generic import List
 from System.Windows.Media import Colors, SolidColorBrush, Color as WpfColor
-from System.Windows.Input import Cursors
+from System.Windows.Input import Cursors, Key
 from Autodesk.Revit.DB import (
     Transaction, BuiltInCategory, ElementId, FilteredElementCollector,
     OverrideGraphicSettings, Color, FillPatternElement, ElementTransformUtils, XYZ,
-    BuiltInParameter, ElementMulticategoryFilter, Line
+    BuiltInParameter, ElementMulticategoryFilter, Line, StorageType
 )
 from Autodesk.Revit.UI import TaskDialog, TaskDialogCommonButtons, TaskDialogResult
 from Autodesk.Revit.UI.Selection import ObjectType
@@ -41,7 +42,7 @@ try:
 except ImportError:
     HAS_THEME = False
 
-__title__ = "System Merger"
+__title__ = "System Network Browser"
 __doc__ = "Modal tool to diagnose and merge disconnected pipe networks."
 __context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 
@@ -174,9 +175,10 @@ class ElementNode(NodeBase):
         # but we keep the logic clean.
 
 class NetworkNode(NodeBase):
-    def __init__(self, name, network_data, child_elements=None):
+    def __init__(self, name, network_data, system_name="", child_elements=None):
         NodeBase.__init__(self, name)
         self.FontWeight = "Normal"
+        self.SystemName = system_name
         self.Type = "Network"
         self.Volume = "{:.2f}".format(network_data.volume)
         self.FixtureUnits = "{:.1f}".format(network_data.fixture_units)
@@ -220,7 +222,7 @@ class SystemNode(NodeBase):
                     net_ids_set = {get_id(eid) for eid in net.elements}
                     net_children = [el for el in child_elements if get_id(el.Id) in net_ids_set]
                 
-                self.Children.append(NetworkNode("Network {} (Island)".format(i+1), net, net_children))
+                self.Children.append(NetworkNode("Network {} (Island)".format(i+1), net, self.Name, net_children))
         else:
             # Single System: Direct Children
             self.FixtureUnits = "{:.1f}".format(sys_fu)
@@ -239,14 +241,21 @@ class NetworkData:
         self.count = count
         self.elements = elements
 
-class ColorOption:
+class ColorOption(ViewModelBase):
     def __init__(self, name, r, g, b):
+        ViewModelBase.__init__(self)
         self.Name = name
         self.R = r
         self.G = g
         self.B = b
         self.Brush = SolidColorBrush(WpfColor.FromRgb(r, g, b))
         self.RevitColor = Color(r, g, b)
+
+    def __repr__(self):
+        return self.Name
+        
+    def ToString(self):
+        return self.Name
 
 # --- Main Window Class ---
 class SystemMergeWindow(forms.WPFWindow):
@@ -268,6 +277,9 @@ class SystemMergeWindow(forms.WPFWindow):
         self.Btn_ClearVisuals.Click += self.reset_visuals_click
         self.Btn_Disconnect.Click += self.disconnect_click
         self.Btn_Rename.Click += self.rename_click
+        self.Btn_WriteParam.Click += self.write_param_click
+        self.Tb_NewName.TextChanged += self.rename_text_changed
+        self.Tb_NewName.KeyDown += self.rename_text_keydown
         
         # Handle TreeView Selection via ItemContainerStyle Binding
         # We no longer use SelectedItemChanged, but we can listen to property changes if needed.
@@ -278,10 +290,13 @@ class SystemMergeWindow(forms.WPFWindow):
         
         # Initial UI State: Disable actions until data is loaded
         self.Btn_SelectAll.IsEnabled = False
+        self.Btn_ExpandAll.IsEnabled = False
+        self.Btn_CollapseAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
         self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
+        self.Btn_WriteParam.IsEnabled = False
         
         # Default Header
         self.set_default_header()
@@ -321,18 +336,27 @@ class SystemMergeWindow(forms.WPFWindow):
         if is_dark:
             # Define Dark Theme Colors
             res = self.Resources
-            res["WindowBrush"] = SolidColorBrush(WpfColor.FromRgb(45, 45, 45))      # #2D2D2D
-            res["ControlBrush"] = SolidColorBrush(WpfColor.FromRgb(56, 56, 56))     # #383838
-            res["TextBrush"] = SolidColorBrush(WpfColor.FromRgb(240, 240, 240))     # #F0F0F0
-            res["TextLightBrush"] = SolidColorBrush(WpfColor.FromRgb(170, 170, 170))# #AAAAAA
-            res["BorderBrush"] = SolidColorBrush(WpfColor.FromRgb(80, 80, 80))      # #505050
-            res["AccentBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 96, 192))      # #0060C0
-            res["SelectionBrush"] = SolidColorBrush(WpfColor.FromRgb(64, 80, 96))   # #405060
-            res["SelectionBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(80, 112, 144))
-            res["HoverBrush"] = SolidColorBrush(WpfColor.FromRgb(58, 58, 58))       # #3A3A3A
-            res["FooterBrush"] = SolidColorBrush(WpfColor.FromRgb(51, 51, 51))      # #333333
-            res["AltRowBrush"] = SolidColorBrush(WpfColor.FromRgb(66, 66, 66))      # #424242
-            # Keep CardBrush dark (#282a2f) as it fits well in Dark mode too
+            res["WindowBrush"] = SolidColorBrush(WpfColor.FromRgb(59, 68, 83))      # #3b4453 (Main Background)
+            res["ControlBrush"] = SolidColorBrush(WpfColor.FromRgb(40, 46, 56))     # #282e38 (Input/Tree Background)
+            res["ButtonBrush"] = SolidColorBrush(WpfColor.FromRgb(70, 80, 95))      # #46505f (Buttons)
+            res["FooterBrush"] = SolidColorBrush(WpfColor.FromRgb(45, 52, 64))      # #2d3440 (Headers/Status)
+            res["TextBrush"] = SolidColorBrush(WpfColor.FromRgb(245, 245, 245))     # #F5F5F5
+            res["TextLightBrush"] = SolidColorBrush(WpfColor.FromRgb(170, 175, 185))# #AAAFB9
+            res["BorderBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 110))     # #555F6E
+            res["AccentBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 120, 215))     # #0078D7 (Revit Blue)
+            res["SelectionBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 90, 170))   # #005AA9
+            res["SelectionBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(100, 180, 255))
+            res["HoverBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 115))      # #555F73
+            res["AltRowBrush"] = SolidColorBrush(WpfColor.FromRgb(45, 51, 62))      # #2d333e
+            
+            # Invert Dashboard for Dark Theme (Light Card)
+            res["CardBrush"] = SolidColorBrush(WpfColor.FromRgb(125, 125, 125))     # #FAFAFA
+            res["CardBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(200, 200, 200))
+            res["CardTextBrush"] = SolidColorBrush(WpfColor.FromRgb(30, 30, 30))
+            res["CardSubTextBrush"] = SolidColorBrush(WpfColor.FromRgb(100, 100, 100))
+            res["CardLabelBrush"] = SolidColorBrush(WpfColor.FromRgb(80, 80, 80))
+            res["CardValueBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 0, 0))
+            res["CardAccentBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 96, 192))
 
     # --- Persistence Logic ---
     def load_window_settings(self):
@@ -383,6 +407,7 @@ class SystemMergeWindow(forms.WPFWindow):
         self.Btn_Visualize.IsEnabled = has_checked or has_selection
         self.Btn_ClearVisuals.IsEnabled = has_checked or has_selection
         self.Btn_Disconnect.IsEnabled = has_checked or has_selection
+        self.Btn_WriteParam.IsEnabled = has_checked
 
     def expand_all_click(self, sender, args):
         self._set_expansion_state(True)
@@ -434,10 +459,13 @@ class SystemMergeWindow(forms.WPFWindow):
         self.statusLabel.Text = "List cleared."
         self.Btn_SelectAll.Content = "Select All"
         self.Btn_SelectAll.IsEnabled = False
+        self.Btn_ExpandAll.IsEnabled = False
+        self.Btn_CollapseAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
         self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
+        self.Btn_WriteParam.IsEnabled = False
         self.Tb_NewName.Text = ""
         self.set_default_header()
 
@@ -478,6 +506,7 @@ class SystemMergeWindow(forms.WPFWindow):
         self.Btn_ClearVisuals.IsEnabled = False
         self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
+        self.Btn_WriteParam.IsEnabled = False
         self.Tb_NewName.Text = ""
         self.set_default_header()
 
@@ -603,6 +632,18 @@ class SystemMergeWindow(forms.WPFWindow):
                 
                 networks = []
                 for island_ids in islands:
+                    # Filter out single-item networks (noise like stray fittings)
+                    if len(island_ids) == 1:
+                        eid = island_ids[0]
+                        el = self.doc.GetElement(eid)
+                        if el and el.Category:
+                            cid = get_id(el.Category.Id)
+                            # Filter Fittings, Pipes, Accessories
+                            if cid in [int(BuiltInCategory.OST_PipeFitting), 
+                                       int(BuiltInCategory.OST_PipeCurves), 
+                                       int(BuiltInCategory.OST_PipeAccessory)]:
+                                continue
+
                     total_vol = 0.0
                     total_len = 0.0
                     island_fu = 0.0
@@ -626,6 +667,9 @@ class SystemMergeWindow(forms.WPFWindow):
 
                     networks.append(NetworkData(round(total_vol, 3), round(total_len, 2), round(island_fu, 1), len(island_ids), island_ids))
                 
+                if not networks:
+                    continue
+
                 if cls not in hierarchy: hierarchy[cls] = {}
                 if typ not in hierarchy[cls]: hierarchy[cls][typ] = []
                 
@@ -659,10 +703,13 @@ class SystemMergeWindow(forms.WPFWindow):
             # Enable buttons if data exists
             has_data = len(root_nodes) > 0
             self.Btn_SelectAll.IsEnabled = has_data
+            self.Btn_ExpandAll.IsEnabled = has_data
+            self.Btn_CollapseAll.IsEnabled = has_data
             self.Btn_Visualize.IsEnabled = False # Wait for check
             self.Btn_ClearVisuals.IsEnabled = False # Wait for check
             self.Btn_Disconnect.IsEnabled = False # Wait for check
-            self.Btn_Rename.IsEnabled = has_data
+            self.update_rename_button_state()
+            self.Btn_WriteParam.IsEnabled = False
         except Exception as e:
             err = traceback.format_exc()
             print(err)
@@ -960,6 +1007,20 @@ class SystemMergeWindow(forms.WPFWindow):
             self.is_busy = False
             self.Cursor = Cursors.Arrow
 
+    def rename_text_changed(self, sender, args):
+        self.update_rename_button_state()
+
+    def rename_text_keydown(self, sender, args):
+        if args.Key == Key.Enter:
+            if self.Btn_Rename.IsEnabled:
+                self.rename_click(sender, args)
+
+    def update_rename_button_state(self):
+        selected = self.systemTree.SelectedItem
+        has_text = bool(self.Tb_NewName.Text and self.Tb_NewName.Text.strip())
+        is_system = isinstance(selected, SystemNode)
+        self.Btn_Rename.IsEnabled = is_system and has_text
+
     def rename_click(self, sender, args):
         """Renames the Revit System associated with the selected network."""
         if self.is_busy: return
@@ -1002,6 +1063,75 @@ class SystemMergeWindow(forms.WPFWindow):
         
         self.is_busy = False
         self.Cursor = Cursors.Arrow
+
+    def write_param_click(self, sender, args):
+        """Writes the network name to a user-selected parameter on elements."""
+        if self.is_busy: return
+        
+        checked = self.get_checked_systems()
+        if not checked:
+            forms.alert("Please check at least one system/network.")
+            return
+
+        # Get a sample element to list parameters
+        sample_el = None
+        for node in checked:
+            if node.AllElements:
+                sample_el = self.doc.GetElement(node.AllElements[0])
+                break
+        
+        if not sample_el:
+            forms.alert("No elements found in selection.")
+            return
+
+        # Find writable string parameters
+        param_names = set()
+        for p in sample_el.Parameters:
+            if p.StorageType == StorageType.String and not p.IsReadOnly:
+                param_names.add(p.Definition.Name)
+        
+        if not param_names:
+            forms.alert("No writable text parameters found on elements.")
+            return
+
+        selected_param = forms.SelectFromList.show(
+            sorted(list(param_names)),
+            title="Select Parameter to Write Name",
+            button_name="Write Network Names"
+        )
+
+        if not selected_param:
+            return
+
+        self.is_busy = True
+        self.Cursor = Cursors.Wait
+        
+        try:
+            count = 0
+            with Transaction(self.doc, "Write Network Names") as t:
+                t.Start()
+                for node in checked:
+                    # Determine Value
+                    val = node.Name
+                    if isinstance(node, NetworkNode) and node.SystemName:
+                        val = "{} : {}".format(node.SystemName, node.Name)
+                    
+                    for eid in node.AllElements:
+                        el = self.doc.GetElement(eid)
+                        if el:
+                            p = el.LookupParameter(selected_param)
+                            if p and not p.IsReadOnly and p.StorageType == StorageType.String:
+                                p.Set(val)
+                                count += 1
+                t.Commit()
+            self.statusLabel.Text = "Updated {} elements.".format(count)
+        except Exception as e:
+            err = traceback.format_exc()
+            print(err)
+            self.statusLabel.Text = "Write Error. Check Output."
+        finally:
+            self.is_busy = False
+            self.Cursor = Cursors.Arrow
 
     def disconnect_click(self, sender, args):
         """Disconnects selected systems from their base fixtures/equipment."""
