@@ -2,11 +2,11 @@
 """
 Add Fittings Tool
 Description: Adds a selected pipe fitting to the nearest open end of a selected pipe.
-Version: 1.0
+Version: 1.2
 """
 
 __title__ = "Add Fittings"
-__version__ = "1.0"
+__version__ = "1.2"
 __context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 
 import sys
@@ -16,25 +16,56 @@ import math
 # --- ASSEMBLIES ---
 clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
+clr.AddReference('System')
 clr.AddReference('PresentationCore')
 clr.AddReference('PresentationFramework')
+clr.AddReference('WindowsBase')
 clr.AddReference('System.Windows.Forms')
+clr.AddReference('System.Drawing')
 
+import System
 import System.Windows
 from System.Windows import SystemParameters
+from System.Windows.Media import BrushConverter
+from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
+from System.Windows.Input import ICommand
+from System.Collections.Generic import List
+import System.Drawing
+from System.Windows.Interop import Imaging
+from System.Windows import Int32Rect
+from System.Windows.Media.Imaging import BitmapSizeOptions
 
 # --- IMPORTS ---
 import Autodesk.Revit.DB as DB
 from Autodesk.Revit.DB import (
     Transaction, ElementId, BuiltInCategory, FilteredElementCollector,
-    FamilySymbol, Structure, XYZ, ConnectorProfileType, ElementTransformUtils,
-    BuiltInParameter
+    FamilySymbol, XYZ, ConnectorProfileType, ElementTransformUtils,
+    BuiltInParameter, PartType
 )
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
-from pyrevit import forms, revit, script
+from pyrevit import forms, revit, script, HOST_APP
 
 doc = revit.doc
 uidoc = revit.uidoc
+
+# --- Logging Setup ---
+log_buffer = []
+
+def log_section(title):
+    log_buffer.append("\n### {}".format(title))
+
+def log_item(key, value):
+    log_buffer.append("- **{}:** {}".format(key, value))
+
+def log_point(name, point):
+    log_buffer.append("- **{}:** ({:.4f}, {:.4f}, {:.4f})".format(name, point.X, point.Y, point.Z))
+
+def show_log():
+    if not log_buffer: return
+    output = script.get_output()
+    output.close_others()
+    for msg in log_buffer:
+        output.print_md(msg)
 
 # ==========================================
 # 1. HELPERS
@@ -60,51 +91,157 @@ class PipeSelectionFilter(ISelectionFilter):
     def AllowReference(self, r, p):
         return False
 
-class FittingOption(object):
-    """Wrapper for FamilySymbol to provide a nice display name."""
-    def __init__(self, symbol):
-        self.Symbol = symbol
-        
-        # Robust Name Retrieval
-        self.FamilyName = self._get_safe_name(symbol, is_family=True)
-        self.SymbolName = self._get_safe_name(symbol, is_family=False)
-        
-    def _get_safe_name(self, symbol, is_family=False):
-        try:
-            if is_family:
-                return symbol.Family.Name
-            else:
-                return symbol.Name
-        except:
-            # Fallback to Parameters
-            try:
-                param_id = BuiltInParameter.SYMBOL_FAMILY_NAME_PARAM if is_family else BuiltInParameter.SYMBOL_NAME_PARAM
-                p = symbol.get_Parameter(param_id)
-                if p and p.HasValue:
-                    return p.AsString()
-            except:
-                pass
-            return "Unknown"
+def get_image_source(element):
+    """Extracts the preview image from a Revit element and converts to WPF ImageSource."""
+    try:
+        # Get larger preview (128x128) for better quality
+        bitmap = element.GetPreviewImage(System.Drawing.Size(128, 128))
+        if bitmap:
+            return Imaging.CreateBitmapSourceFromHBitmap(
+                bitmap.GetHbitmap(),
+                System.IntPtr.Zero,
+                Int32Rect.Empty,
+                BitmapSizeOptions.FromEmptyOptions()
+            )
+    except:
+        pass
+    return None
+    
+class ViewModelBase(INotifyPropertyChanged):
+    def __init__(self):
+        self._events = []
+    def add_PropertyChanged(self, value):
+        self._events.append(value)
+    def remove_PropertyChanged(self, value):
+        self._events.remove(value)
+    def OnPropertyChanged(self, name):
+        for handler in self._events:
+            handler(self, PropertyChangedEventArgs(name))
 
+class NodeBase(ViewModelBase):
+    def __init__(self, name):
+        ViewModelBase.__init__(self)
+        self.Name = name
+        self.Image = None
+        self.Children = []
+        self._is_expanded = False
+        self.IsSelected = False
+        self.FontWeight = "Normal"
+    
     @property
-    def DisplayName(self):
-        return "{} : {}".format(self.FamilyName, self.SymbolName)
+    def IsExpanded(self):
+        return self._is_expanded
+    
+    @IsExpanded.setter
+    def IsExpanded(self, value):
+        self._is_expanded = value
+        self.OnPropertyChanged("IsExpanded")
 
-def get_all_pipe_fittings(doc):
-    """Returns a sorted list of FittingOption objects for ALL Pipe Fittings."""
+class TypeNode(NodeBase):
+    def __init__(self, symbol, name):
+        NodeBase.__init__(self, name)
+        self.Symbol = symbol
+        self.Image = get_image_source(symbol)
+
+class GroupNode(NodeBase):
+    def __init__(self, name, children, font_weight="SemiBold"):
+        NodeBase.__init__(self, name)
+        self.Children = children
+        self.FontWeight = font_weight
+        self.Image = None
+
+def get_safe_name(element, is_family=False):
+    try:
+        name = element.Family.Name if is_family else element.Name
+        if name: return name
+    except:
+        pass
+    
+    # Fallback to Parameters if property fails
+    try:
+        p_id = BuiltInParameter.SYMBOL_FAMILY_NAME_PARAM if is_family else BuiltInParameter.SYMBOL_NAME_PARAM
+        p = element.get_Parameter(p_id)
+        if p and p.HasValue:
+            return p.AsString()
+    except:
+        pass
+        
+    return "Unknown"
+
+def get_part_type_name(part_type):
+    """Maps Revit PartType enum to a plural display string."""
+    # Use string representation to be safe with IronPython Enum handling
+    s_type = str(part_type)
+    # Handle potential fully qualified names or prefixes
+    if "." in s_type:
+        s_type = s_type.split(".")[-1]
+    mapping = {
+        "Elbow": "Elbows",
+        "Tee": "Tees",
+        "Cross": "Crosses",
+        "Transition": "Transitions",
+        "Union": "Unions",
+        "Cap": "Caps",
+        "Coupling": "Couplings",
+        "ValveBreaks": "Valves",
+        "ValveNormal": "Valves",
+        "PipeFlange": "Flanges",
+        "Wye": "Wyes",
+        "LateralTee": "Lateral Tees",
+        "Undefined": "Undefined"
+    }
+    return mapping.get(s_type, s_type + "s")
+
+def get_grouped_pipe_fittings(doc):
+    """Returns a list of GroupNode objects (PartType -> Family -> Type)."""
     collector = (
         FilteredElementCollector(doc)
         .OfCategory(BuiltInCategory.OST_PipeFitting)
         .OfClass(FamilySymbol)
     )
     
-    fittings = []
+    # Structure: PartType -> FamilyName -> List[TypeNode]
+    grouped = {}
     
     for symbol in collector:
-        fittings.append(FittingOption(symbol))
+        try:
+            # Get Part Type
+            try:
+                # Retrieve Part Type via BuiltInParameter for robustness
+                fam = symbol.Family
+                param = fam.get_Parameter(BuiltInParameter.FAMILY_CONTENT_PART_TYPE)
+                if param and param.HasValue:
+                    # Use System.Enum.ToObject for safer casting in IronPython
+                    p_type = System.Enum.ToObject(PartType, param.AsInteger())
+                    pt_name = get_part_type_name(p_type)
+                else:
+                    pt_name = get_part_type_name(fam.PartType)
+            except:
+                pt_name = "Other"
+
+            fam_name = get_safe_name(symbol, is_family=True)
+            sym_name = get_safe_name(symbol, is_family=False)
             
-    # Sort by Family Name then Symbol Name
-    return sorted(fittings, key=lambda x: (x.FamilyName, x.SymbolName))
+            if pt_name not in grouped:
+                grouped[pt_name] = {}
+            if fam_name not in grouped[pt_name]:
+                grouped[pt_name][fam_name] = []
+            
+            grouped[pt_name][fam_name].append(TypeNode(symbol, sym_name))
+        except:
+            continue
+    
+    # Build Tree Nodes
+    root_nodes = []
+    for pt_name in sorted(grouped.keys()):
+        fam_nodes = []
+        for fam_name in sorted(grouped[pt_name].keys()):
+            type_nodes = sorted(grouped[pt_name][fam_name], key=lambda x: x.Name)
+            fam_nodes.append(GroupNode(fam_name, type_nodes, font_weight="Normal"))
+        
+        root_nodes.append(GroupNode(pt_name, fam_nodes, font_weight="Bold"))
+        
+    return root_nodes
 
 def get_open_connectors(pipe):
     """Returns a list of connectors that are NOT connected."""
@@ -130,12 +267,214 @@ def get_closest_connector(connectors, point):
             best_conn = conn
     return best_conn
 
+def get_uiview():
+    """Returns the UIView for the active document."""
+    for uv in uidoc.GetOpenUIViews():
+        if uv.ViewId == doc.ActiveView.Id:
+            return uv
+    return None
+
 # ==========================================
 # 2. UI CLASS
 # ==========================================
 
+class RelayCommand(ICommand):
+    def __init__(self, execute, can_execute=None):
+        self._execute = execute
+        self._can_execute = can_execute
+        self._events = []
+    def add_CanExecuteChanged(self, value):
+        self._events.append(value)
+    def remove_CanExecuteChanged(self, value):
+        self._events.remove(value)
+    def Execute(self, parameter):
+        self._execute(parameter)
+    def CanExecute(self, parameter):
+        return self._can_execute(parameter) if self._can_execute else True
+    def RaiseCanExecuteChanged(self):
+        for handler in self._events:
+            handler(self, System.EventArgs.Empty)
+
+class AddFittingViewModel(ViewModelBase):
+    def __init__(self, family_nodes, selection_data, view):
+        ViewModelBase.__init__(self)
+        self.family_nodes = family_nodes
+        self.selection_data = selection_data
+        self.view = view
+        
+        self._selected_fitting = None
+        self._rotation_increments = ["15", "30", "45", "90", "180"]
+        self._selected_increment = "90"
+        self._last_placed_ids = []
+        self._status_message = "Ready"
+        self._is_fitting_added = False
+        self._initial_zoom_corners = None
+        self._capture_initial_zoom()
+        
+        # Commands
+        self.MainActionCommand = RelayCommand(self.main_action, self.can_main_action)
+        self.CloseCommand = RelayCommand(self.close_window)
+        self.ExpandAllCommand = RelayCommand(self.expand_all)
+        self.CollapseAllCommand = RelayCommand(self.collapse_all)
+
+    @property
+    def FamilyNodes(self): return self.family_nodes
+
+    @property
+    def SelectedFitting(self): return self._selected_fitting
+    @SelectedFitting.setter
+    def SelectedFitting(self, value):
+        self._selected_fitting = value
+        self.OnPropertyChanged("SelectedFitting")
+        self.MainActionCommand.RaiseCanExecuteChanged()
+
+    @property
+    def RotationIncrements(self): return self._rotation_increments
+
+    @property
+    def SelectedIncrement(self): return self._selected_increment
+    @SelectedIncrement.setter
+    def SelectedIncrement(self, value):
+        self._selected_increment = value
+        self.OnPropertyChanged("SelectedIncrement")
+
+    @property
+    def StatusMessage(self): return self._status_message
+    @StatusMessage.setter
+    def StatusMessage(self, value):
+        self._status_message = value
+        self.OnPropertyChanged("StatusMessage")
+
+    @property
+    def IsSelectionEnabled(self): return not self._is_fitting_added
+
+    @property
+    def IsAdjustmentEnabled(self): return self._is_fitting_added
+
+    @property
+    def MainButtonText(self):
+        return "Rotate" if self._is_fitting_added else "Add Fitting"
+
+    def main_action(self, parameter):
+        if self._is_fitting_added:
+            self.rotate_fitting(parameter)
+        else:
+            self.add_fitting(parameter)
+
+    def can_main_action(self, parameter):
+        if self._is_fitting_added:
+            return self.can_rotate(parameter)
+        else:
+            return self.can_add_fitting(parameter)
+
+    def _capture_initial_zoom(self):
+        uv = get_uiview()
+        if uv:
+            self._initial_zoom_corners = uv.GetZoomCorners()
+
+    def _restore_initial_zoom(self):
+        if self._initial_zoom_corners:
+            uv = get_uiview()
+            if uv:
+                uv.ZoomAndCenterRectangle(self._initial_zoom_corners[0], self._initial_zoom_corners[1])
+
+    def can_add_fitting(self, parameter):
+        return self._selected_fitting is not None
+
+    def can_rotate(self, parameter):
+        return len(self._last_placed_ids) > 0
+
+    def expand_all(self, parameter):
+        for node in self.family_nodes:
+            self._set_expansion(node, True)
+
+    def collapse_all(self, parameter):
+        for node in self.family_nodes:
+            self._set_expansion(node, False)
+
+    def _set_expansion(self, node, expanded):
+        node.IsExpanded = expanded
+        for child in node.Children:
+            # Recursively expand/collapse if children are also GroupNodes
+            self._set_expansion(child, expanded)
+
+    def add_fitting(self, parameter):
+        if not self._selected_fitting: return
+        
+        # Activate Symbol if needed
+        if not self._selected_fitting.Symbol.IsActive:
+            t_act = Transaction(doc, "Activate Symbol")
+            t_act.Start()
+            self._selected_fitting.Symbol.Activate()
+            doc.Regenerate()
+            t_act.Commit()
+
+        try:
+            new_ids = perform_add_fitting(self.selection_data, self._selected_fitting.Symbol)
+            if new_ids:
+                self._last_placed_ids = new_ids
+                self.StatusMessage = "Added {} fitting(s). Ready to adjust.".format(len(new_ids))
+                # Zoom to the new fittings immediately
+                uidoc.ShowElements(List[ElementId](new_ids))
+                
+                # Switch State
+                self._is_fitting_added = True
+                self.OnPropertyChanged("IsSelectionEnabled")
+                self.OnPropertyChanged("IsAdjustmentEnabled")
+                self.OnPropertyChanged("MainButtonText")
+                self.MainActionCommand.RaiseCanExecuteChanged()
+            else:
+                self.StatusMessage = "No fittings added."
+        except Exception as e:
+            forms.alert("Error adding fitting: {}".format(e))
+            self.StatusMessage = "Error occurred."
+
+    def rotate_fitting(self, parameter):
+        if not self._last_placed_ids: return
+        
+        try:
+            inc = float(self._selected_increment)
+        except:
+            inc = 90.0
+        angle_rad = inc * (math.pi / 180.0)
+        
+        t = Transaction(doc, "Rotate Fitting")
+        t.Start()
+        
+        for eid in self._last_placed_ids:
+            el = doc.GetElement(eid)
+            if not el: continue
+            
+            # Find axis based on connection to pipe
+            axis = None
+            mep_model = el.MEPModel
+            if mep_model:
+                conns = mep_model.ConnectorManager.Connectors
+                for c in conns:
+                    if c.IsConnected:
+                        for ref in c.AllRefs:
+                            # Check if connected to a Pipe Curve
+                            if ref.Owner.Id != el.Id and get_id_value(ref.Owner.Category.Id) == int(BuiltInCategory.OST_PipeCurves):
+                                center = c.Origin
+                                axis_dir = c.CoordinateSystem.BasisZ
+                                axis = DB.Line.CreateBound(center, center + axis_dir)
+                                break
+                    if axis: break
+            
+            if axis:
+                ElementTransformUtils.RotateElement(doc, eid, axis, angle_rad)
+        
+        t.Commit()
+        
+        uidoc.ShowElements(List[ElementId](self._last_placed_ids))
+        self.StatusMessage = "Rotated {}° and Zoomed.".format(inc)
+
+    def close_window(self, parameter):
+        self._restore_initial_zoom()
+        self.view.Close()
+
 class AddFittingWindow(forms.WPFWindow):
-    def __init__(self, fittings, selection_data):
+    def __init__(self, family_nodes, selection_data):
         """
         selection_data: dict containing:
             'pipes': list of Pipe Elements
@@ -143,16 +482,12 @@ class AddFittingWindow(forms.WPFWindow):
         """
         forms.WPFWindow.__init__(self, 'ui.xaml')
         
-        self.fittings = fittings
-        self.selection_data = selection_data
-        
-        # Populate Fittings
-        self.Cmb_Fittings.ItemsSource = self.fittings
-        if self.fittings:
-            self.Cmb_Fittings.SelectedIndex = 0
+        # Initialize ViewModel
+        self.viewModel = AddFittingViewModel(family_nodes, selection_data, self)
+        self.DataContext = self.viewModel
             
         # UI State Logic
-        self.has_point = self.selection_data.get('ref_point') is not None
+        self.has_point = selection_data.get('ref_point') is not None
         
         if self.has_point:
              self.Tb_SelectionInfo.Text = "Mode: Smart Insert (Closest End)"
@@ -167,6 +502,15 @@ class AddFittingWindow(forms.WPFWindow):
         self.set_window_position()
 
         self.bind_events()
+        self.apply_revit_theme()
+
+    def on_tree_selection_changed(self, sender, args):
+        """Handle TreeView selection manually since binding SelectedItem is complex."""
+        selected_item = self.FittingTree.SelectedItem
+        if isinstance(selected_item, TypeNode):
+            self.viewModel.SelectedFitting = selected_item
+        else:
+            self.viewModel.SelectedFitting = None
 
     def set_window_position(self):
         try:
@@ -176,39 +520,48 @@ class AddFittingWindow(forms.WPFWindow):
             self.Top = sh * 0.3
         except:
             pass
+            
+    def apply_revit_theme(self):
+        # Simple detection for Dark Theme (Revit 2024+)
+        is_dark = False
+        try:
+            # Check if running in Revit 2024 or later and if UITheme is Dark
+            if int(HOST_APP.version) >= 2024:
+                from Autodesk.Revit.UI import UIThemeManager, UITheme
+                if UIThemeManager.CurrentTheme == UITheme.Dark:
+                    is_dark = True
+        except:
+            pass
+            
+        if is_dark:
+            # Dark Slate Theme (Matching System Browser)
+            self.set_resource_color("WindowBrush", "#282a2f")
+            self.set_resource_color("ControlBrush", "#374151")
+            self.set_resource_color("TextBrush", "#FFFFFF")
+            self.set_resource_color("TextLightBrush", "#9CA3AF")
+            self.set_resource_color("BorderBrush", "#4B5563")
+            self.set_resource_color("ButtonBrush", "#374151")
+            self.set_resource_color("HoverBrush", "#4B5563")
+            self.set_resource_color("SelectionBrush", "#4B5563")
+            self.set_resource_color("SelectionBorderBrush", "#60A5FA")
+            self.set_resource_color("AccentBrush", "#60A5FA")
+
+    def set_resource_color(self, key, hex_color):
+        try:
+            converter = BrushConverter()
+            brush = converter.ConvertFromString(hex_color)
+            self.Resources[key] = brush
+        except:
+            pass
 
     def bind_events(self):
-        self.Btn_Add.Click += self.on_add_click
-        self.Btn_Close.Click += lambda s, e: self.Close()
+        # Only View-specific events (Drag) remain in code-behind
         self.HeaderDrag.MouseLeftButtonDown += self.drag_window
+        self.FittingTree.SelectedItemChanged += self.on_tree_selection_changed
 
     def drag_window(self, sender, args):
         try: self.DragMove()
         except: pass
-
-    def on_add_click(self, sender, args):
-        selected_option = self.Cmb_Fittings.SelectedItem
-        if not selected_option:
-            self.Lb_Status.Text = "Please select a fitting type."
-            return
-
-        selected_fitting = selected_option.Symbol
-
-        # Check if Symbol is active
-        if not selected_fitting.IsActive:
-            t_act = Transaction(doc, "Activate Symbol")
-            t_act.Start()
-            selected_fitting.Activate()
-            doc.Regenerate()
-            t_act.Commit()
-
-        self.Close()
-        
-        # Run Logic
-        try:
-            perform_add_fitting(self.selection_data, selected_fitting)
-        except Exception as e:
-            forms.alert("Error adding fitting: {}".format(e))
 
 # ==========================================
 # 3. LOGIC
@@ -217,11 +570,16 @@ class AddFittingWindow(forms.WPFWindow):
 def perform_add_fitting(data, symbol):
     pipes = data['pipes']
     ref_point = data.get('ref_point')
+
+    log_section("Execution")
+    log_item("Fitting", get_safe_name(symbol))
+    log_item("Pipe Count", len(pipes))
     
     t = Transaction(doc, "Add Pipe Fitting")
     t.Start()
     
-    count = 0
+    count_success = 0
+    created_ids = []
     
     try:
         for pipe in pipes:
@@ -237,6 +595,7 @@ def perform_add_fitting(data, symbol):
             open_conns = get_open_connectors(pipe)
             
             if not open_conns:
+                log_item("Pipe {}".format(pipe.Id), "Skipped: No open connectors")
                 continue
                 
             # 2. Determine which end to use
@@ -255,7 +614,7 @@ def perform_add_fitting(data, symbol):
                     instance = doc.Create.NewFamilyInstance(
                         location_to_place, 
                         symbol, 
-                        Structure.StructuralType.NonStructural
+                        DB.Structure.StructuralType.NonStructural
                     )
                     
                     if instance:
@@ -316,18 +675,26 @@ def perform_add_fitting(data, symbol):
                             try:
                                 c_fit.ConnectTo(connector_to_connect)
                             except Exception as e_conn:
-                                print("Connection warning: {}".format(e_conn))
+                                log_item("Connection Warning", str(e_conn))
                                 pass
                                 
-                    count += 1
+                    count_success += 1
+                    created_ids.append(instance.Id)
+                    log_item("Pipe {}".format(pipe.Id), "Success")
                 except Exception as e:
-                    print("Failed on pipe {}: {}".format(pipe.Id, e))
+                    log_item("Pipe {}".format(pipe.Id), "Failed: {}".format(e))
 
         t.Commit()
         
     except Exception as e:
         t.RollBack()
-        forms.alert("Critical Error: {}".format(e))
+        log_item("Critical Error", str(e))
+
+    log_section("Summary")
+    log_item("Total Added", count_success)
+    
+    show_log()
+    return created_ids
 
 # ==========================================
 # 4. MAIN
@@ -366,6 +733,17 @@ if __name__ == '__main__':
         forms.alert("No pipes selected.")
         sys.exit(0)
 
+    # Check if any selected pipe has open ends
+    has_valid_pipe = False
+    for p in pipes:
+        if get_open_connectors(p):
+            has_valid_pipe = True
+            break
+            
+    if not has_valid_pipe:
+        forms.alert("Selected pipe(s) do not have any open ends.")
+        sys.exit(0)
+
     # 3. Gather Data
     data = {
         'pipes': pipes,
@@ -373,12 +751,12 @@ if __name__ == '__main__':
     }
     
     # 4. Load Fittings
-    fittings = get_all_pipe_fittings(doc)
+    family_nodes = get_grouped_pipe_fittings(doc)
     
-    if not fittings:
+    if not family_nodes:
         forms.alert("No Pipe Fitting families found in project.")
         sys.exit(0)
         
     # 5. Launch UI
-    win = AddFittingWindow(fittings, data)
+    win = AddFittingWindow(family_nodes, data)
     win.ShowDialog()
