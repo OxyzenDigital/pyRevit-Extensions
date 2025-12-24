@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Align Pipes Tool
-Version: 1.0
+Version: 1.3
 Author: ODI (Generated via Gemini CLI)
 
 Description:
@@ -12,16 +12,16 @@ Description:
 Usage:
     1. Run the command.
     2. Select the 'Reference Pipe' (the stationary pipe).
-    3. Continuously select 'Target Pipes' (the pipes to be moved).
-       - Pipes move immediately upon selection.
-    4. Press ESC to finish the command and view the log report.
+    3. Continuously select 'Target Pipes' to align them to the current Reference.
+    4. Press ESC to finish Target selection and pick a NEW Reference Pipe.
+    5. Press ESC during Reference selection to Exit the tool.
 
 Supported Alignment Modes:
-    1. Horizontal/Sloped -> Horizontal/Sloped (Parallel):
-       - Moves the Target pipe laterally so it becomes collinear with the Reference pipe in Plan View.
+    1. Horizontal/Sloped -> Horizontal/Sloped:
+       - Moves the Target pipe vertically (Z-axis) to match the Reference pipe's elevation.
     
     2. Vertical Riser -> Vertical Riser:
-       - Moves the Target pipe so it is concentric (same X,Y) with the Reference pipe.
+       - Moves the Target pipe in X or Y (whichever is shorter) to align with the Reference pipe's grid.
     
     3. Vertical Riser -> Horizontal/Sloped:
        - Moves the Horizontal pipe laterally so its centerline axis passes through the Vertical Riser in Plan View.
@@ -31,8 +31,6 @@ Supported Alignment Modes:
        - Moves the Vertical pipe so it sits on the centerline axis of the Horizontal pipe in Plan View.
 
 Limitations:
-    - Alignment is calculated in the XY plane (Plan View) only. Z-elevations are not modified.
-    - Non-parallel horizontal pipes (Skew lines) are not aligned (as they technically already intersect in 2D).
     - Requires pipes to be straight lines (no arcs/splines).
 """
 
@@ -42,18 +40,27 @@ from Autodesk.Revit.DB import (
     XYZ,
     Line,
     ElementTransformUtils,
-    LocationCurve
+    LocationCurve,
+    GraphicsStyle,
+    PartType,
+    ConnectorType,
+    ElementId,
+    OverrideGraphicSettings,
+    Color
 )
 from Autodesk.Revit.UI.Selection import ObjectType
 from Autodesk.Revit.Exceptions import OperationCanceledException
+from System.Collections.Generic import List
 from pyrevit import revit, script, forms
+
 
 __title__ = "Align Pipes"
 __doc__ = "Aligns multiple pipes to a reference pipe in the XY plane (Plan View)."
-__version__ = "1.0"
+__version__ = "1.3"
 
 # --- Configuration ---
 TOLERANCE = 0.01 # Tolerance for parallel check (radians)
+
 
 # --- Logging Setup ---
 log_buffer = []
@@ -131,15 +138,15 @@ def is_pipe(element):
     return cat_id_val == int(BuiltInCategory.OST_PipeCurves) or cat_id_val == int(BuiltInCategory.OST_PlaceHolderPipes)
 
 def pick_pipe_safely(uidoc, doc, prompt):
-    try:
-        ref = uidoc.Selection.PickObject(ObjectType.Element, prompt)
-        element = doc.GetElement(ref)
-        if is_pipe(element):
-            return element
-        else:
-            return None 
-    except OperationCanceledException:
-        return None # Signal to stop loop
+    while True:
+        try:
+            ref = uidoc.Selection.PickObject(ObjectType.Element, prompt)
+            element = doc.GetElement(ref)
+            if is_pipe(element):
+                return element
+            # If not a pipe, loop continues (effectively ignoring the click)
+        except OperationCanceledException:
+            return None # Signal to stop loop
 
 def align_pipe_geometry(ref_pipe, target_pipe):
     """
@@ -167,11 +174,14 @@ def align_pipe_geometry(ref_pipe, target_pipe):
     ref_is_vert = is_vertical(v1)
     target_is_vert = is_vertical(v2)
 
-    # CASE A: Both Vertical (Concentric)
+    # CASE A: Both Vertical (Orthogonal Alignment)
     if ref_is_vert and target_is_vert:
-        target_pos_xy = XYZ(p1.X, p1.Y, p2.Z)
-        move_vector = target_pos_xy - p2
-        return move_vector, None
+        dx = p1.X - p2.X
+        dy = p1.Y - p2.Y
+        if abs(dx) < abs(dy):
+            return XYZ(dx, 0, 0), None # Align X
+        else:
+            return XYZ(0, dy, 0), None # Align Y
 
     # CASE B: Ref Vertical, Target Horizontal/Sloped
     if ref_is_vert and not target_is_vert:
@@ -189,17 +199,114 @@ def align_pipe_geometry(ref_pipe, target_pipe):
         move_vector = XYZ(target_projected_on_ref.X, target_projected_on_ref.Y, 0) - XYZ(p2.X, p2.Y, 0)
         return move_vector, None
 
-    # CASE D: Both Horizontal/Sloped
-    v1_xy = get_xy_vector(v1)
-    v2_xy = get_xy_vector(v2)
+    # CASE D: Both Horizontal/Sloped (Align Elevation)
+    dz = p1.Z - p2.Z
+    return XYZ(0, 0, dz), None
 
-    if are_parallel(v1_xy, v2_xy):
-        target_pos = project_point_to_line_infinite_xy(p2, p1, v1_xy)
-        move_vector = target_pos - p2
-        move_vector = XYZ(move_vector.X, move_vector.Y, 0)
-        return move_vector, None
-    else:
-        return XYZ.Zero, "Non-parallel horizontal pipes."
+def is_movable_category(category):
+    if not category: return False
+    cid = get_id_value(category.Id)
+    return cid in [
+        int(BuiltInCategory.OST_PipeCurves),
+        int(BuiltInCategory.OST_PlaceHolderPipes),
+        int(BuiltInCategory.OST_PipeFitting),
+        int(BuiltInCategory.OST_PipeAccessory)
+    ]
+
+def smart_move_pipe(doc, pipe, move_vector, ref_id=None):
+    """
+    Moves the pipe and intelligently handles connections:
+    - Moves attached fittings/accessories to maintain connectivity.
+    - Disconnects if connected to Equipment/Fixtures to preserve their location.
+    """
+    ids_to_move = List[ElementId]()
+    ids_to_move.Add(pipe.Id)
+    
+    # We need to check both ends
+    connectors = pipe.ConnectorManager.Connectors
+    
+    for conn in connectors:
+        if not conn.IsConnected:
+            continue
+            
+        neighbor_conn = None
+        for c in conn.AllRefs:
+            if c.Owner.Id != pipe.Id and c.ConnectorType != ConnectorType.Logical:
+                 neighbor_conn = c
+                 break
+        
+        if not neighbor_conn:
+            continue
+            
+        neighbor_elem = neighbor_conn.Owner
+        
+        # Safety: Never move the Reference Pipe
+        if ref_id and get_id_value(neighbor_elem.Id) == ref_id:
+            conn.DisconnectFrom(neighbor_conn)
+            continue
+
+        # Logic: Should we move the neighbor fitting too?
+        should_move_neighbor = False
+        
+        # Check if neighbor is a fitting or accessory
+        if neighbor_elem.Category:
+            cat_id = get_id_value(neighbor_elem.Category.Id)
+            if cat_id in [int(BuiltInCategory.OST_PipeFitting), int(BuiltInCategory.OST_PipeAccessory)]:
+                # Check if this fitting is anchored to something immovable
+                is_anchored = False
+                if hasattr(neighbor_elem, "MEPModel") and neighbor_elem.MEPModel:
+                    try:
+                        fit_conns = neighbor_elem.MEPModel.ConnectorManager.Connectors
+                        for fc in fit_conns:
+                            if not fc.IsConnected: continue
+                            for fcr in fc.AllRefs:
+                                if fcr.ConnectorType == ConnectorType.Logical: continue
+                                other_elem = fcr.Owner
+                                if other_elem.Id == neighbor_elem.Id: continue
+                                if get_id_value(other_elem.Id) == get_id_value(pipe.Id): continue # Back to target
+                                
+                                # Check if connected to Reference Pipe
+                                if ref_id and get_id_value(other_elem.Id) == ref_id:
+                                    is_anchored = True
+                                    break
+                                
+                                # Check if connected to non-movable category
+                                if not is_movable_category(other_elem.Category):
+                                    is_anchored = True
+                                    break
+                            if is_anchored: break
+                    except Exception:
+                        pass
+                
+                if not is_anchored:
+                    should_move_neighbor = True
+
+        if should_move_neighbor:
+            if neighbor_elem.Id not in ids_to_move:
+                ids_to_move.Add(neighbor_elem.Id)
+        else:
+            # Disconnect to preserve the neighbor's position (Equipment, Fixtures, etc.)
+            conn.DisconnectFrom(neighbor_conn)
+            
+    # Execute Move
+    ElementTransformUtils.MoveElements(doc, ids_to_move, move_vector)
+
+def toggle_highlight(doc, element_id, enable=True):
+    """Applies or removes a color override to the element in the active view."""
+    try:
+        with Transaction(doc, "Toggle Highlight") as t:
+            t.Start()
+            if enable:
+                ogs = OverrideGraphicSettings()
+                ogs.SetProjectionLineColor(Color(255, 128, 0)) # Orange
+                ogs.SetProjectionLineWeight(6) # Thick line
+                doc.ActiveView.SetElementOverrides(element_id, ogs)
+            else:
+                doc.ActiveView.SetElementOverrides(element_id, OverrideGraphicSettings())
+            t.Commit()
+        revit.uidoc.RefreshActiveView()
+    except Exception:
+        pass
 
 # --- Main Execution ---
 
@@ -208,47 +315,51 @@ def main():
     doc = revit.doc
     
     log_section("Initialization")
-    log_item("Tool", "Align Multiple Pipes (v1.0)")
+    log_item("Tool", "Align Pipes (Multiple) (v1.3)")
     log_item("Active View", doc.ActiveView.Name)
-
-    # 1. Select Reference Pipe (Once)
-    ref_pipe = pick_pipe_safely(uidoc, doc, "Select REFERENCE Pipe (Stationary)")
-    if not ref_pipe:
-        return # Exit if no reference picked
-    
-    ref_id = get_id_value(ref_pipe.Id)
-    log_item("Reference Pipe", ref_id)
 
     count_success = 0
     count_fail = 0
 
-    # 2. Loop for Target Pipes
+    # Outer Loop: Reference Selection
     while True:
-        try:
-            target_ref = uidoc.Selection.PickObject(
-                ObjectType.Element, 
-                "Select Pipe to ALIGN (ESC to finish)"
-            )
-            target_pipe = doc.GetElement(target_ref)
+        # 1. Select Reference Pipe
+        ref_pipe = pick_pipe_safely(uidoc, doc, "Select REFERENCE Pipe (Stationary) - ESC to Exit")
+        if not ref_pipe:
+            break # Exit tool
+        
+        ref_id = get_id_value(ref_pipe.Id)
+        
+        # Highlight Reference Pipe
+        toggle_highlight(doc, ref_pipe.Id, enable=True)
+
+        # Inner Loop: Target Selection
+        while True:
+            # 2. Select Target Pipe
+            target_pipe = pick_pipe_safely(uidoc, doc, "Select Target Pipe to ALIGN to Ref {} - ESC to New Ref".format(ref_id))
             
-            if not is_pipe(target_pipe):
-                continue 
-            
+            if not target_pipe:
+                break # Break inner loop -> Go to select new Reference
+                
             t_id = get_id_value(target_pipe.Id)
             
             if t_id == ref_id:
                 continue 
 
+            if target_pipe.Pinned:
+                log_item("Pipe {}".format(t_id), "Skipped: Pinned")
+                continue
+
             # Calculate
             move_vector, error = align_pipe_geometry(ref_pipe, target_pipe)
             
             if error:
-                log_item("Pipe {}".format(t_id), "Failed: {}".format(error))
+                log_item("Pair {} -> {}".format(ref_id, t_id), "Failed: {}".format(error))
                 count_fail += 1
                 continue
             
             if move_vector.IsZeroLength():
-                log_item("Pipe {}".format(t_id), "Already Aligned")
+                log_item("Pair {} -> {}".format(ref_id, t_id), "Already Aligned")
                 count_success += 1
                 continue
 
@@ -256,20 +367,21 @@ def main():
             try:
                 with Transaction(doc, "Align Pipe") as t:
                     t.Start()
-                    ElementTransformUtils.MoveElement(doc, target_pipe.Id, move_vector)
+                    smart_move_pipe(doc, target_pipe, move_vector, ref_id)
                     t.Commit()
-                log_item("Pipe {}".format(t_id), "Aligned Success")
+                log_item("Pair {} -> {}".format(ref_id, t_id), "Aligned Success")
                 count_success += 1
                 
-                uidoc.RefreshActiveView() 
+                uidoc.RefreshActiveView()
                 
             except Exception as e:
-                log_item("Pipe {}".format(t_id), "Transaction Error: {}".format(str(e)))
-                count_fail += 1
+                log_item("Pair {} -> {}".format(ref_id, t_id), "Transaction Error: {}".format(str(e)))
 
-        except OperationCanceledException:
-            # User pressed ESC
-            break
+                count_fail += 1
+        
+        # Clear highlight on the current reference before picking a new one
+        toggle_highlight(doc, ref_pipe.Id, enable=False)
+
 
     log_section("Summary")
     log_item("Total Aligned", count_success)
