@@ -18,8 +18,10 @@ import os
 import traceback
 import math
 import clr
+clr.AddReference("System")
 clr.AddReference("PresentationCore")
 clr.AddReference("PresentationFramework")
+from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
 from System.Collections.Generic import List
 from System.Windows.Media import Colors, SolidColorBrush, Color as WpfColor
 from System.Windows.Input import Cursors
@@ -32,6 +34,13 @@ from Autodesk.Revit.UI import TaskDialog, TaskDialogCommonButtons, TaskDialogRes
 from Autodesk.Revit.UI.Selection import ObjectType
 from pyrevit import forms, script, revit
 
+# Try to import UIThemeManager (Revit 2024+)
+try:
+    from Autodesk.Revit.UI import UIThemeManager, UITheme
+    HAS_THEME = True
+except ImportError:
+    HAS_THEME = False
+
 __title__ = "System Merger"
 __doc__ = "Modal tool to diagnose and merge disconnected pipe networks."
 __context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
@@ -43,27 +52,73 @@ def get_id(element_id):
     return element_id.IntegerValue
 
 # --- Data Model ---
-class NodeBase:
+class ViewModelBase(INotifyPropertyChanged):
+    def __init__(self):
+        self._property_changed_handlers = []
+
+    def add_PropertyChanged(self, handler):
+        self._property_changed_handlers.append(handler)
+
+    def remove_PropertyChanged(self, handler):
+        if handler in self._property_changed_handlers:
+            self._property_changed_handlers.remove(handler)
+
+    def OnPropertyChanged(self, property_name):
+        args = PropertyChangedEventArgs(property_name)
+        for handler in self._property_changed_handlers:
+            handler(self, args)
+
+class NodeBase(ViewModelBase):
     def __init__(self, name):
+        ViewModelBase.__init__(self)
         self.Name = name
-        self.IsChecked = False
+        self._is_checked = False
+        self._is_selected = False
         self.IsExpanded = True
         self.Children = []
-        self.Type = ""
+        self.Type = "Item"
         self.Abbreviation = ""
-        self.Length = ""
-        self.FixtureUnits = ""
-        self.Volume = ""
-        self.Count = ""
+        self.Length = "-"
+        self.FixtureUnits = "-"
+        self.Volume = "-"
+        self.Count = "-"
         self.FontWeight = "Normal"
         self.AllElements = [] # Flat list of element IDs for highlighting
         self.NetworkColor = SolidColorBrush(Colors.Black)
+
+    @property
+    def IsChecked(self):
+        return self._is_checked
+
+    @IsChecked.setter
+    def IsChecked(self, value):
+        self._is_checked = value
+        self.OnPropertyChanged("IsChecked")
+
+    @property
+    def IsSelected(self):
+        return self._is_selected
+
+    @IsSelected.setter
+    def IsSelected(self, value):
+        self._is_selected = value
+        self.OnPropertyChanged("IsSelected")
 
 class ClassificationNode(NodeBase):
     def __init__(self, name):
         NodeBase.__init__(self, name)
         self.FontWeight = "Bold"
         self.Type = "Classification"
+        
+    def aggregate_stats(self):
+        """Sum up stats from children Types."""
+        vol = sum(float(c.Volume) for c in self.Children if c.Volume)
+        fu = sum(getattr(c, 'RawFixtureUnits', 0.0) for c in self.Children)
+        length = sum(float(c.Length) for c in self.Children if c.Length)
+        self.Volume = "{:.2f}".format(vol)
+        self.FixtureUnits = "{:.1f}".format(fu)
+        self.Length = "{:.2f}".format(length)
+        self.Count = "{} Types".format(len(self.Children))
 
 class TypeNode(NodeBase):
     def __init__(self, name):
@@ -76,6 +131,7 @@ class TypeNode(NodeBase):
         vol = sum(float(c.Volume) for c in self.Children if c.Volume)
         fu = sum(getattr(c, 'RawFixtureUnits', 0.0) for c in self.Children)
         length = sum(float(c.Length) for c in self.Children if c.Length)
+        self.RawFixtureUnits = fu # Store for parent aggregation
         self.Volume = "{:.2f}".format(vol)
         self.FixtureUnits = "{:.1f}".format(fu)
         self.Length = "{:.2f}".format(length)
@@ -95,10 +151,24 @@ class ElementNode(NodeBase):
         self.AllElements = [element.Id]
         self.IsExpanded = False
         self.NetworkColor = SolidColorBrush(Colors.Gray)
+        self.Type = element.Category.Name if element.Category else "Element"
+        self.Count = "1"
         
         # Get FU for individual element if exists
         p_fu = element.get_Parameter(BuiltInParameter.RBS_PIPE_FIXTURE_UNITS_PARAM)
         if p_fu: self.FixtureUnits = "{:.1f}".format(p_fu.AsDouble())
+
+        # Get Length and Volume for Pipes
+        l_param = element.get_Parameter(BuiltInParameter.CURVE_ELEM_LENGTH)
+        d_param = element.get_Parameter(BuiltInParameter.RBS_PIPE_INNER_DIAM_PARAM)
+        
+        if l_param:
+            len_val = l_param.AsDouble()
+            self.Length = "{:.2f}".format(len_val)
+            if d_param:
+                r = d_param.AsDouble() / 2.0
+                vol = math.pi * (r**2) * len_val
+                self.Volume = "{:.3f}".format(vol)
         
         # Type column removed from UI, so we don't need to set self.Type explicitly for display
         # but we keep the logic clean.
@@ -187,16 +257,24 @@ class SystemMergeWindow(forms.WPFWindow):
         # UI Event Bindings for Custom Title Bar
         self.HeaderDrag.MouseLeftButtonDown += self.drag_window
         self.Btn_WinClose.Click += self.close_window
-        self.systemTree.SelectedItemChanged += self.tree_selection_changed
         self.Closing += self.window_closing
         
         self.Btn_SelectAll.Click += self.select_all_click
         self.Btn_Clear.Click += self.clear_list_click
+        self.Btn_ExpandAll.Click += self.expand_all_click
+        self.Btn_CollapseAll.Click += self.collapse_all_click
         self.Btn_ScanView.Click += self.scan_view_click
         self.Btn_Visualize.Click += self.visualize_click
         self.Btn_ClearVisuals.Click += self.reset_visuals_click
         self.Btn_Disconnect.Click += self.disconnect_click
         self.Btn_Rename.Click += self.rename_click
+        
+        # Handle TreeView Selection via ItemContainerStyle Binding
+        # We no longer use SelectedItemChanged, but we can listen to property changes if needed.
+        # However, for the logic, we can just iterate or bind commands. 
+        # For simplicity in this hybrid approach, we will hook into the TreeView's SelectedItemChanged 
+        # just to trigger the visualization logic, but rely on the ViewModel for state.
+        self.systemTree.SelectedItemChanged += self.tree_selection_changed
         
         # Initial UI State: Disable actions until data is loaded
         self.Btn_SelectAll.IsEnabled = False
@@ -204,6 +282,9 @@ class SystemMergeWindow(forms.WPFWindow):
         self.Btn_ClearVisuals.IsEnabled = False
         self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
+        
+        # Default Header
+        self.set_default_header()
         
         self.load_window_settings()
         self.doc = revit.doc
@@ -214,12 +295,44 @@ class SystemMergeWindow(forms.WPFWindow):
         self.disabled_filters = [] # Track filters we disable to restore them later
         self.populate_colors()
 
+        self.apply_revit_theme()
+
+    def set_default_header(self):
+        default_node = NodeBase("System Network Browser")
+        default_node.Type = "Select an item to view details"
+        self.RightPane.DataContext = default_node
+
     # --- UI Logic ---
     def drag_window(self, sender, args):
         self.DragMove()
 
     def close_window(self, sender, args):
         self.Close()
+
+    def apply_revit_theme(self):
+        """Detects Revit theme and updates window resources if Dark."""
+        is_dark = False
+        if HAS_THEME:
+            try:
+                if UIThemeManager.CurrentTheme == UITheme.Dark:
+                    is_dark = True
+            except: pass
+        
+        if is_dark:
+            # Define Dark Theme Colors
+            res = self.Resources
+            res["WindowBrush"] = SolidColorBrush(WpfColor.FromRgb(45, 45, 45))      # #2D2D2D
+            res["ControlBrush"] = SolidColorBrush(WpfColor.FromRgb(56, 56, 56))     # #383838
+            res["TextBrush"] = SolidColorBrush(WpfColor.FromRgb(240, 240, 240))     # #F0F0F0
+            res["TextLightBrush"] = SolidColorBrush(WpfColor.FromRgb(170, 170, 170))# #AAAAAA
+            res["BorderBrush"] = SolidColorBrush(WpfColor.FromRgb(80, 80, 80))      # #505050
+            res["AccentBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 96, 192))      # #0060C0
+            res["SelectionBrush"] = SolidColorBrush(WpfColor.FromRgb(64, 80, 96))   # #405060
+            res["SelectionBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(80, 112, 144))
+            res["HoverBrush"] = SolidColorBrush(WpfColor.FromRgb(58, 58, 58))       # #3A3A3A
+            res["FooterBrush"] = SolidColorBrush(WpfColor.FromRgb(51, 51, 51))      # #333333
+            res["AltRowBrush"] = SolidColorBrush(WpfColor.FromRgb(66, 66, 66))      # #424242
+            # Keep CardBrush dark (#282a2f) as it fits well in Dark mode too
 
     # --- Persistence Logic ---
     def load_window_settings(self):
@@ -271,6 +384,24 @@ class SystemMergeWindow(forms.WPFWindow):
         self.Btn_ClearVisuals.IsEnabled = has_checked or has_selection
         self.Btn_Disconnect.IsEnabled = has_checked or has_selection
 
+    def expand_all_click(self, sender, args):
+        self._set_expansion_state(True)
+
+    def collapse_all_click(self, sender, args):
+        self._set_expansion_state(False)
+
+    def _set_expansion_state(self, is_expanded):
+        if self.systemTree.ItemsSource:
+            for node in self.systemTree.ItemsSource:
+                self._recursive_expand(node, is_expanded)
+            self.systemTree.Items.Refresh()
+
+    def _recursive_expand(self, node, is_expanded):
+        node.IsExpanded = is_expanded
+        if hasattr(node, "Children"):
+            for child in node.Children:
+                self._recursive_expand(child, is_expanded)
+
     def select_all_click(self, sender, args):
         """Toggles between checking and unchecking all items in the tree."""
         if not self.systemTree.ItemsSource: return
@@ -308,6 +439,7 @@ class SystemMergeWindow(forms.WPFWindow):
         self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
         self.Tb_NewName.Text = ""
+        self.set_default_header()
 
     def scan_view_click(self, sender, args):
         """Scans all pipe elements in the active view."""
@@ -347,6 +479,7 @@ class SystemMergeWindow(forms.WPFWindow):
         self.Btn_Disconnect.IsEnabled = False
         self.Btn_Rename.IsEnabled = False
         self.Tb_NewName.Text = ""
+        self.set_default_header()
 
         try:
             if not element_ids:
@@ -517,6 +650,7 @@ class SystemMergeWindow(forms.WPFWindow):
                     type_nodes.append(t_node)
                 
                 c_node.Children = sorted(type_nodes, key=lambda x: x.Name)
+                c_node.aggregate_stats()
                 root_nodes.append(c_node)
 
             self.systemTree.ItemsSource = sorted(root_nodes, key=lambda x: x.Name)
@@ -549,10 +683,10 @@ class SystemMergeWindow(forms.WPFWindow):
 
     def on_checkbox_click(self, sender, args):
         """Manually syncs CheckBox state to DataContext."""
+        # With MVVM, the binding is TwoWay, so self.IsChecked updates automatically.
+        # We just need to handle the cascading logic.
         node = sender.DataContext
         if node:
-            node.IsChecked = sender.IsChecked
-            
             # Cascade to children (Classification -> Systems)
             if hasattr(node, "Children"):
                 for child in node.Children:
@@ -568,8 +702,6 @@ class SystemMergeWindow(forms.WPFWindow):
                 # we rely on the user checking the parent to select all, which is implemented.
                 pass
             
-            # Refresh tree to update UI for children
-            self.systemTree.Items.Refresh()
             self.update_button_states()
 
     def tree_selection_changed(self, sender, args):
@@ -581,6 +713,9 @@ class SystemMergeWindow(forms.WPFWindow):
         
         try:
             selected_node = self.systemTree.SelectedItem
+            if selected_node:
+                selected_node.IsSelected = True # Ensure ViewModel is in sync
+
             if not selected_node: return
             
             # Populate Rename Box
@@ -635,6 +770,15 @@ class SystemMergeWindow(forms.WPFWindow):
                 # 2. Auto-Zoom if enabled
                 if self.Cb_AutoZoom.IsChecked:
                     self.uidoc.ShowElements(elem_ids)
+            
+            # 3. Update Header Context
+            self.RightPane.DataContext = selected_node
+
+            # 4. Update DataGrid with Children
+            if hasattr(selected_node, "Children") and selected_node.Children:
+                self.sysDataGrid.ItemsSource = selected_node.Children
+            else:
+                self.sysDataGrid.ItemsSource = []
                     
         except Exception:
             pass # Prevent crash if selection fails
