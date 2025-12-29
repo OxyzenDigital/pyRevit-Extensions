@@ -1,9 +1,5 @@
-title:
-  en_us: Join Pipes
-  fr_fr: french title
-  es_es: spanish title
-tooltip: 
-  en_us: english tooltip
-  fr_fr: french tooltip
-  es_es: spanish tooltip
-# highlight: new
+layout:
+  - script.py
+title: Join Pipes
+tooltip: Join two pipe/duct/conduit ends.
+author: OXYZEN
