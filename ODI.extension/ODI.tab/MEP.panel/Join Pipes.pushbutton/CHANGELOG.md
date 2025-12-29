@@ -1,29 +1,52 @@
-# Changelog
+# Changelog - Join Pipes Tool
 
-## [1.0.1] - 2025-12-22
-
-### Changed
-- **Collision Detection:** Removed Floors, Ceilings, and Roofs from collision checks (in addition to Walls). Pipes will now route through all architectural/host elements but will still avoid Structure and MEP services.
-
-## [1.0.0] - 2025-12-22
-
+## [v0.5.0] - 2025-12-29
 ### Added
-- **Multi-Strategy Joining:** 
-    - **Direct Bridge:** Attempts to connect pipes using a straight path (coplanar or skew closest points).
-    - **Slide Bypass (Z-Shape):** Offsets the connection along the reference pipe's axis to avoid obstacles.
-    - **Goal Post Bypass (U-Shape):** Attempts vertical (Up/Down) and horizontal (Side) jumps to route around obstacles.
-- **Robust Collision Avoidance:**
-    - Integrated multi-ray collision detection (Center + Perimeter) for pipe volume simulation.
-    - Checks collision against Structure, Duct, Cable Tray, Conduit, and MEP Fittings.
-    - **Wall Penetration:** Explicitly allows pipes to route through walls (Walls excluded from collision check).
-    - **Extension Safety:** Verifies that extending existing pipes to the connection point does not cause new collisions.
-- **Smart Connection Logic:**
-    - **Auto-Fitting Selection:** Automatically chooses between `Elbow` (for angles) and `Union` (for collinear pipes).
-    - **Fault Tolerance:** If fitting creation fails (e.g., due to missing families or strict routing preferences), the script **preserves the generated geometry** (pipes) instead of rolling back, allowing for manual fix-up.
-    - **Parallel Pipe Handling:** Correctly projects the user's selection point to determine the best bridge location for parallel pipes.
-- **Dynamic Offsets:** Bypass offsets are calculated based on pipe diameter (`max(4", 2.0 * Dia)`) to ensure adequate space for fittings.
+- **MVVM Architecture:** Rebuilt the tool using a robust Model-View-ViewModel pattern similar to the Grading tool.
+  - `data_model.py`: Manages application state (`AppState`) and solution data (`JoinSolution`).
+  - `logic.py`: Pure Python geometric solver for calculating intersection points and rolling offsets.
+  - `revit_service.py`: Handles all Revit API interactions (Selection, Transactions, DirectShapes).
+  - `script.py`: Implements a "Modal Loop" to manage window state and Revit transactions safely.
+- **Robust Selection:**
+  - Implemented `PipeSelectionFilter` that supports `OST_PipeCurves`, `OST_DuctCurves`, `OST_Conduit`, `OST_CableTray`, and importantly **Fabrication Parts**.
+  - Added safe `ElementId` handling (`get_id_val`) to support both Revit 2023 (and older) and Revit 2024+.
+- **Geometric Solving:**
+  - Implemented a vector-math based solver in `logic.py` to find the closest points between two infinite lines.
+  - Detects **Intersections** (coplanar) vs **Skew Lines** (rolling offset).
+- **Preview Visualization:**
+  - Added transient `DirectShape` visualization (using `OST_PipeCurves` category) to show the proposed connection path before committing.
+  - Implemented auto-cleanup of preview elements.
+- **Transaction Handling:**
+  - Implemented `commit_solution` to physically move pipe endpoints and create fittings.
+  - Added `doc.Regenerate()` calls to ensure Connectors are updated before fitting creation.
 
 ### Fixed
-- Fixed "failed to insert elbow" errors causing geometry to disappear by implementing robust error suppression and transaction handling.
-- Fixed "too-short pipe" errors for parallel pipes by using user selection projection.
-- Fixed issue where reference pipes extended through obstacles by adding collision checks to the extension logic.
+- **Revit Crashes:** Resolved "Modifiable Document" and "Transaction" crashes by strictly separating UI logic (window open) from Transaction logic (window closed).
+- **Selection Issues:** Fixed `ISelectionFilter` rejecting elements due to incorrect `BuiltInCategory` mapping and `ElementId.IntegerValue` usage in 2024+.
+- **Fitting Creation:** Fixed silent failures in `NewElbowFitting` by ensuring geometry regeneration and correct connector matching.
+
+---
+
+## Future Development Pointers (Next Steps)
+
+### 1. Multi-Solution Support
+- **Current State:** The solver currently returns only one "best geometry" solution (Direct Connect).
+- **Todo:** Implement alternative routing strategies in `logic.py`:
+  - **45-Degree Solutions:** Calculate paths using two 45-degree elbows instead of 90s.
+  - **90-Degree Routing:** For skew lines, offer a "Square" route (Out -> Up/Down -> In) instead of a direct diagonal rolling offset.
+  - **Smart Routing:** Check for collisions along the proposed path.
+
+### 2. Parallel Pipe Handling
+- **Current State:** Parallel pipes return a "Parallel Offset" solution which is currently invalid/unimplemented.
+- **Todo:** Implement logic to connect parallel pipes (e.g., S-curve or 90-90 offset).
+
+### 3. Fittings for Rolling Offsets
+- **Current State:** The rolling offset logic creates the intermediate pipe but the elbow creation code is wrapped in a generic `try/catch`.
+- **Todo:** Robustify the connector matching for the *newly created* intermediate pipe. Ensure the correct ends are found even if the pipe creation flips the start/end points.
+
+### 4. UI Refinement
+- **Todo:** Add a "Diameter" display to the UI so users verify they are connecting same-size pipes.
+- **Todo:** Add visual feedback (color coding) for "Valid" vs "Invalid" solutions in the preview.
+
+### 5. Settings Persistence
+- **Todo:** Save user preferences (Allow Rolling, Allow Vertical) to `settings.json` so they persist between sessions.

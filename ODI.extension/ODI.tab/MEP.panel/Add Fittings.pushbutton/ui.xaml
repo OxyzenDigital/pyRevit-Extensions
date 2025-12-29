@@ -4,8 +4,7 @@
         WindowStartupLocation="Manual"
         ResizeMode="CanResizeWithGrip"
         WindowStyle="None"
-        AllowsTransparency="True"
-        Background="Transparent">
+        Background="{DynamicResource WindowBrush}">
     
     <Window.Resources>
         <!-- Default Theme Resources (Light) - Matched to System Browser -->
@@ -145,7 +144,7 @@
         </Style>
     </Window.Resources>
 
-    <Border CornerRadius="10" Background="{DynamicResource WindowBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" ClipToBounds="True">
+    <Border Background="{DynamicResource WindowBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -154,7 +153,7 @@
         </Grid.RowDefinitions>
 
         <!-- Header -->
-        <Border Name="HeaderDrag" Grid.Row="0" Background="{DynamicResource AccentBrush}" Padding="15,10" Margin="0,0,0,10" CornerRadius="9,9,0,0">
+        <Border Name="HeaderDrag" Grid.Row="0" Background="{DynamicResource AccentBrush}" Padding="15,10" Margin="0,0,0,10">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -248,7 +247,7 @@
         </Grid>
 
         <!-- Footer / Action -->
-        <Border Grid.Row="2" Padding="15" Background="{DynamicResource WindowBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" CornerRadius="0,0,9,9">
+        <Border Grid.Row="2" Padding="15" Background="{DynamicResource WindowBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
