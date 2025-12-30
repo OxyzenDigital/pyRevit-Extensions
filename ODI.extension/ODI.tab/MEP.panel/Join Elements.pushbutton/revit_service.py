@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from Autodesk.Revit.DB import (
     Transaction, ElementId, XYZ, BuiltInCategory, FilteredElementCollector, BuiltInParameter,
-    DirectShape, Line, Point
+    DirectShape, Line, Point, OverrideGraphicSettings, Color
 )
 from System.Collections.Generic import List
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
@@ -42,6 +42,17 @@ class RevitService(object):
     def pick_element(self, prompt):
         ref = self.uidoc.Selection.PickObject(ObjectType.Element, PipeSelectionFilter(), prompt)
         return self.doc.GetElement(ref)
+        
+    def highlight_elements(self, ids):
+        if ids is None: return
+        try:
+            # Convert integers to ElementIds if necessary
+            elem_ids = List[ElementId]()
+            for i in ids:
+                if isinstance(i, int): elem_ids.Add(ElementId(i))
+                elif isinstance(i, ElementId): elem_ids.Add(i)
+            self.uidoc.Selection.SetElementIds(elem_ids)
+        except: pass
 
     def get_element_data(self, element_id):
         if not element_id: return None
@@ -64,13 +75,30 @@ class RevitService(object):
             else:
                 # Try Duct Width/Height? For now just default 0.0
                 pass
+            
+            # Format Size String
+            size_str = param.AsValueString() if param else "?"
+            
+            # System Name
+            sys_param = el.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM)
+            if not sys_param: sys_param = el.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM)
+            sys_name = sys_param.AsValueString() if sys_param else "Undefined"
+            
+            # Slope
+            slope_param = el.get_Parameter(BuiltInParameter.RBS_PIPE_SLOPE)
+            if not slope_param: slope_param = el.get_Parameter(BuiltInParameter.RBS_DUCT_SLOPE)
+            slope_str = slope_param.AsValueString() if slope_param else "-"
 
             return {
                 "p1": curve.GetEndPoint(0),
                 "p2": curve.GetEndPoint(1),
                 "id": eid_val,
                 "diameter": diam,
-                "level_id": el.LevelId
+                "level_id": el.LevelId,
+                "type_name": el.Name,
+                "system_name": sys_name,
+                "size_str": size_str,
+                "slope_str": slope_str
             }
         except:
             return None
@@ -90,7 +118,7 @@ class RevitService(object):
 
     def visualize_solution(self, solution, app_state):
         """
-        Draws temporary DirectShape lines for the solution.
+        Draws temporary DirectShape lines for the solution with colors.
         """
         self.clear_preview(app_state) # Clear old first
         
@@ -110,9 +138,6 @@ class RevitService(object):
         
         el_a = self.doc.GetElement(ElementId(id_a))
         if el_a:
-            # Find the end farthest from the meeting point to draw the full line?
-            # Or just draw the segment from current closest end to meet point?
-            # Let's draw the FULL proposed centerline for clarity.
             c = el_a.Location.Curve
             d0 = c.GetEndPoint(0).DistanceTo(pt_a)
             d1 = c.GetEndPoint(1).DistanceTo(pt_a)
@@ -132,27 +157,37 @@ class RevitService(object):
         try:
             new_ids = []
             
-            # Helper to create DS
-            def create_ds_line(p1, p2):
+            # Helper to create DS with Color
+            def create_ds_line(p1, p2, color):
                 if p1.DistanceTo(p2) < 0.01: return # Skip short lines
                 try:
                     ds = DirectShape.CreateElement(self.doc, ElementId(BuiltInCategory.OST_PipeCurves))
                     line = Line.CreateBound(p1, p2)
                     ds.SetShape(List[GeometryObject]([line]))
+                    
+                    # Apply Color Override
+                    ogs = OverrideGraphicSettings()
+                    ogs.SetProjectionLineColor(color)
+                    self.doc.ActiveView.SetElementOverrides(ds.Id, ogs)
+                    
                     new_ids.append(ds.Id)
                 except: pass
 
             from Autodesk.Revit.DB import GeometryObject
             
-            # Draw Path A
-            if p_start_a: create_ds_line(p_start_a, pt_a)
+            # Define Colors
+            col_extension = Color(255, 165, 0) # Orange
+            col_bridge = Color(0, 255, 255) # Cyan
             
-            # Draw Path B
-            if p_start_b: create_ds_line(p_start_b, pt_b)
+            # Draw Path A (Extension)
+            if p_start_a: create_ds_line(p_start_a, pt_a, col_extension)
+            
+            # Draw Path B (Extension)
+            if p_start_b: create_ds_line(p_start_b, pt_b, col_extension)
             
             # Draw Bridge (if distinct)
             if pt_a.DistanceTo(pt_b) > 0.01:
-                create_ds_line(pt_a, pt_b)
+                create_ds_line(pt_a, pt_b, col_bridge)
                 
             app_state.preview_ids = new_ids
             self.doc.Regenerate() # Force update
@@ -224,45 +259,6 @@ class RevitService(object):
                         new_line = Line.CreateBound(p0, new_pt)
                         element.Location.Curve = new_line
                     except: pass
-                    
-            if not el_a or not el_b:
-                t.RollBack(); return False
-
-            # Helper to move closest end to target
-            def adjust_end(element, new_pt):
-                c = element.Location.Curve
-                p0 = c.GetEndPoint(0)
-                p1 = c.GetEndPoint(1)
-                
-                # Use SetEndPoint? Only works for some curves.
-                # Safer: Create new curve? Or use LocationCurve.set_Curve?
-                # Simplest for Linear: Determine which end is closer and move it.
-                
-                dist0 = p0.DistanceTo(new_pt)
-                dist1 = p1.DistanceTo(new_pt)
-                
-                # Check if we need to modify
-                if dist0 < 0.01: pass # Already there
-                if dist1 < 0.01: pass
-                
-                # Try extending
-                if dist0 < dist1:
-                    # Move p0 to new_pt
-                    new_c = c.Clone()
-                    # Revit API Line binding...
-                    try:
-                        # For bound lines, we just need to replace the curve
-                        from Autodesk.Revit.DB import Line
-                        new_line = Line.CreateBound(new_pt, p1)
-                        element.Location.Curve = new_line
-                    except: pass
-                else:
-                    # Move p1 to new_pt
-                    try:
-                        from Autodesk.Revit.DB import Line
-                        new_line = Line.CreateBound(p0, new_pt)
-                        element.Location.Curve = new_line
-                    except: pass
             
             def get_conn_at(elem, pt):
                 try:
@@ -273,6 +269,68 @@ class RevitService(object):
                             return c
                 except: pass
                 return None
+            
+            def create_matching_element(doc, source_elem, p1, p2):
+                # Safe ID Retrieval
+                cat_id = -1
+                eid = source_elem.Category.Id
+                if hasattr(eid, "Value"): cat_id = eid.Value
+                elif hasattr(eid, "IntegerValue"): cat_id = eid.IntegerValue
+
+                new_elem = None
+                
+                try:
+                    # PIPE
+                    if cat_id == int(BuiltInCategory.OST_PipeCurves):
+                        from Autodesk.Revit.DB.Plumbing import Pipe
+                        sys_id = source_elem.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM).AsElementId()
+                        type_id = source_elem.GetTypeId()
+                        level_id = source_elem.LevelId
+                        new_elem = Pipe.Create(doc, sys_id, type_id, level_id, p1, p2)
+                        
+                    # DUCT
+                    elif cat_id == int(BuiltInCategory.OST_DuctCurves):
+                        from Autodesk.Revit.DB.Mechanical import Duct
+                        sys_id = source_elem.get_Parameter(BuiltInParameter.RBS_DUCT_SYSTEM_TYPE_PARAM).AsElementId()
+                        type_id = source_elem.GetTypeId()
+                        level_id = source_elem.LevelId
+                        new_elem = Duct.Create(doc, sys_id, type_id, level_id, p1, p2)
+                        
+                    # CONDUIT
+                    elif cat_id == int(BuiltInCategory.OST_Conduit):
+                        from Autodesk.Revit.DB.Electrical import Conduit
+                        type_id = source_elem.GetTypeId()
+                        level_id = source_elem.LevelId
+                        new_elem = Conduit.Create(doc, type_id, p1, p2, level_id)
+                        
+                    # CABLE TRAY
+                    elif cat_id == int(BuiltInCategory.OST_CableTray):
+                        from Autodesk.Revit.DB.Electrical import CableTray
+                        type_id = source_elem.GetTypeId()
+                        level_id = source_elem.LevelId
+                        new_elem = CableTray.Create(doc, type_id, p1, p2, level_id)
+
+                    # Copy Size Parameters
+                    if new_elem:
+                        params_to_copy = [
+                            BuiltInParameter.RBS_PIPE_DIAMETER_PARAM,
+                            BuiltInParameter.RBS_CURVE_DIAMETER_PARAM,
+                            BuiltInParameter.RBS_CURVE_WIDTH_PARAM,
+                            BuiltInParameter.RBS_CURVE_HEIGHT_PARAM,
+                            BuiltInParameter.RBS_CONDUIT_DIAMETER_PARAM,
+                            BuiltInParameter.RBS_CABLETRAY_WIDTH_PARAM,
+                            BuiltInParameter.RBS_CABLETRAY_HEIGHT_PARAM
+                        ]
+                        for bp in params_to_copy:
+                            p_source = source_elem.get_Parameter(bp)
+                            p_target = new_elem.get_Parameter(bp)
+                            if p_source and p_target and not p_target.IsReadOnly:
+                                p_target.Set(p_source.AsDouble())
+                                
+                except Exception as e:
+                    print("Create Element Error: " + str(e))
+                    
+                return new_elem
 
             adjust_end(el_a, pt_a)
             adjust_end(el_b, pt_b)
@@ -304,23 +362,8 @@ class RevitService(object):
                     t.RollBack(); return False
             
             else: # Rolling Offset / Connecting Pipe
-                # Create intermediate pipe
-                # We need SystemTypeId and LevelId and PipeTypeId
-                
-                # Copy properties from el_a
-                sys_id = el_a.get_Parameter(BuiltInParameter.RBS_PIPING_SYSTEM_TYPE_PARAM).AsElementId()
-                type_id = el_a.GetTypeId()
-                level_id = el_a.LevelId
-                
-                new_pipe = None
-                try:
-                    # Create Pipe
-                    # doc.Create.NewPipe(start, end, type_id) # older API
-                    # Pipe.Create(doc, system_type_id, pipe_type_id, level_id, start, end) # 2018+
-                    from Autodesk.Revit.DB.Plumbing import Pipe
-                    new_pipe = Pipe.Create(self.doc, sys_id, type_id, level_id, pt_a, pt_b)
-                except Exception as e:
-                    print("Pipe Create Error: " + str(e))
+                # Create intermediate element (Pipe/Duct/etc)
+                new_pipe = create_matching_element(self.doc, el_a, pt_a, pt_b)
                 
                 if new_pipe:
                     # Connect Elbows

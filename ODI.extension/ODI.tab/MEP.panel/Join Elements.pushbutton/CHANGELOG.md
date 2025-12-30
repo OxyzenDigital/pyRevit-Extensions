@@ -1,4 +1,17 @@
-# Changelog - Join Pipes Tool
+# Changelog - Join Elements Tool
+
+## [v0.6.0] - 2025-12-29
+### Changed
+- **Renamed:** Tool renamed from "Join Pipes" to "Join Elements" to reflect support for multiple MEP categories.
+
+### Added
+- **Multiple Solutions:**
+  - Added "Direct Connection" option (Endpoint-to-Endpoint) alongside the existing "Projected Intersection" logic.
+  - Allows iterating through available solutions in the UI.
+- **Enhanced Visualization:**
+  - **Color Coding:** Preview lines now use color overrides: **Orange** for existing pipe extensions and **Cyan** for the new bridging segment.
+  - **Selection Highlight:** Selected elements are now highlighted (using Revit's native selection) in the model view during the operation.
+- **UI:** The "Commit" button is now disabled if the selected solution is invalid.
 
 ## [v0.5.0] - 2025-12-29
 ### Added
@@ -24,6 +37,10 @@
 - **Revit Crashes:** Resolved "Modifiable Document" and "Transaction" crashes by strictly separating UI logic (window open) from Transaction logic (window closed).
 - **Selection Issues:** Fixed `ISelectionFilter` rejecting elements due to incorrect `BuiltInCategory` mapping and `ElementId.IntegerValue` usage in 2024+.
 - **Fitting Creation:** Fixed silent failures in `NewElbowFitting` by ensuring geometry regeneration and correct connector matching.
+- **Pipe Size Mismatch:** Fixed issue where the connecting element (Pipe/Duct/etc.) did not match the source element's size or type.
+  - Now correctly detects the source category (Pipe, Duct, Conduit, Cable Tray) and uses the appropriate creation method.
+  - Explicitly copies Diameter, Width, and Height parameters from the source to the new segment.
+- **Persistent Highlighting:** Fixed issue where the selected elements remained highlighted (blue) after the command finished or was cancelled.
 
 ---
 

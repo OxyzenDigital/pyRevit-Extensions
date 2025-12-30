@@ -52,15 +52,15 @@ class Solver(object):
             pb = p3 + p43 * mub
             return (pa, pb)
 
-        # 2. Calculate Intersection
+        # 2. Calculate Intersection (Infinite Lines)
         pts = closest_points_lines(p1, p2, p3, p4)
         
+        # Solution A: Infinite Line Intersection / Rolling Offset
         if pts:
             pt_a, pt_b = pts
             dist = pt_a.DistanceTo(pt_b)
             
-            # Case A: Intersection (Coplanar-ish)
-            if dist < 0.1: # 0.1 ft tolerance
+            if dist < 0.1: # Coplanar / Intersection
                 s1 = JoinSolution("Standard Trim/Elbow", "Extend pipes to intersection and add elbow.")
                 s1.is_valid = True
                 s1.context = {
@@ -71,8 +71,7 @@ class Solver(object):
                 }
                 solutions.append(s1)
             else:
-                # Case B: Skew (Rolling Offset)
-                s2 = JoinSolution("Rolling Offset", "Connect skew pipes with intermediate segment.")
+                s2 = JoinSolution("Rolling Offset (Projected)", "Connect at closest point between infinite lines.")
                 s2.is_valid = True
                 s2.context = {
                     "meet_pt_a": pt_a,
@@ -81,11 +80,29 @@ class Solver(object):
                     "id_b": target_data["id"]
                 }
                 solutions.append(s2)
-                
-        else:
-            # Parallel Case
-            s3 = JoinSolution("Parallel Offset", "Pipes are parallel.")
-            s3.is_valid = False # Not implemented yet
-            solutions.append(s3)
+
+        # Solution B: Direct Endpoint Connection
+        # Find closest pair of endpoints among the finite segments
+        # Source Endpoints: p1, p2. Target Endpoints: p3, p4
+        pairs = [
+            (p1, p3), (p1, p4),
+            (p2, p3), (p2, p4)
+        ]
+        # Sort by distance
+        best_pair = min(pairs, key=lambda x: x[0].DistanceTo(x[1]))
+        
+        # Check if this is significantly different from Solution A
+        # (If A is a rolling offset, B might be the same if the closest points ARE the endpoints)
+        # But let's add it as an option regardless for clarity.
+        
+        s_direct = JoinSolution("Direct Connection", "Bridge the gap between closest open ends.")
+        s_direct.is_valid = True
+        s_direct.context = {
+            "meet_pt_a": best_pair[0],
+            "meet_pt_b": best_pair[1],
+            "id_a": source_data["id"],
+            "id_b": target_data["id"]
+        }
+        solutions.append(s_direct)
 
         return solutions
