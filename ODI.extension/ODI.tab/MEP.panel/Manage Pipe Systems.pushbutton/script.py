@@ -334,29 +334,29 @@ class SystemMergeWindow(forms.WPFWindow):
             except: pass
         
         if is_dark:
-            # Define Dark Theme Colors
+            # Define Modern Dark Theme Colors (Slate/Blue Palette)
             res = self.Resources
-            res["WindowBrush"] = SolidColorBrush(WpfColor.FromRgb(59, 68, 83))      # #3b4453 (Main Background)
-            res["ControlBrush"] = SolidColorBrush(WpfColor.FromRgb(40, 46, 56))     # #282e38 (Input/Tree Background)
-            res["ButtonBrush"] = SolidColorBrush(WpfColor.FromRgb(70, 80, 95))      # #46505f (Buttons)
-            res["FooterBrush"] = SolidColorBrush(WpfColor.FromRgb(45, 52, 64))      # #2d3440 (Headers/Status)
-            res["TextBrush"] = SolidColorBrush(WpfColor.FromRgb(245, 245, 245))     # #F5F5F5
-            res["TextLightBrush"] = SolidColorBrush(WpfColor.FromRgb(170, 175, 185))# #AAAFB9
-            res["BorderBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 110))     # #555F6E
-            res["AccentBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 120, 215))     # #0078D7 (Revit Blue)
-            res["SelectionBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 90, 170))   # #005AA9
-            res["SelectionBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(100, 180, 255))
-            res["HoverBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 115))      # #555F73
-            res["AltRowBrush"] = SolidColorBrush(WpfColor.FromRgb(45, 51, 62))      # #2d333e
+            res["WindowBrush"] = SolidColorBrush(WpfColor.FromRgb(31, 41, 55))      # #1F2937 (Gray-800)
+            res["ControlBrush"] = SolidColorBrush(WpfColor.FromRgb(17, 24, 39))     # #111827 (Gray-900)
+            res["ButtonBrush"] = SolidColorBrush(WpfColor.FromRgb(55, 65, 81))      # #374151 (Gray-700)
+            res["FooterBrush"] = SolidColorBrush(WpfColor.FromRgb(17, 24, 39))      # #111827 (Gray-900)
+            res["TextBrush"] = SolidColorBrush(WpfColor.FromRgb(249, 250, 251))     # #F9FAFB (Gray-50)
+            res["TextLightBrush"] = SolidColorBrush(WpfColor.FromRgb(156, 163, 175))# #9CA3AF (Gray-400)
+            res["BorderBrush"] = SolidColorBrush(WpfColor.FromRgb(75, 85, 99))      # #4B5563 (Gray-600)
+            res["AccentBrush"] = SolidColorBrush(WpfColor.FromRgb(59, 130, 246))    # #3B82F6 (Blue-500)
+            res["SelectionBrush"] = SolidColorBrush(WpfColor.FromRgb(30, 58, 138))  # #1E3A8A (Blue-900)
+            res["SelectionBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(59, 130, 246)) # Blue-500
+            res["HoverBrush"] = SolidColorBrush(WpfColor.FromRgb(55, 65, 81))       # #374151 (Gray-700)
+            res["AltRowBrush"] = SolidColorBrush(WpfColor.FromRgb(31, 41, 55))      # #1F2937 (Gray-800)
             
-            # Invert Dashboard for Dark Theme (Light Card)
-            res["CardBrush"] = SolidColorBrush(WpfColor.FromRgb(125, 125, 125))     # #FAFAFA
-            res["CardBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(200, 200, 200))
-            res["CardTextBrush"] = SolidColorBrush(WpfColor.FromRgb(30, 30, 30))
-            res["CardSubTextBrush"] = SolidColorBrush(WpfColor.FromRgb(100, 100, 100))
-            res["CardLabelBrush"] = SolidColorBrush(WpfColor.FromRgb(80, 80, 80))
-            res["CardValueBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 0, 0))
-            res["CardAccentBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 96, 192))
+            # Dashboard Specifics (Dark Card on Dark Background)
+            res["CardBrush"] = SolidColorBrush(WpfColor.FromRgb(55, 65, 81))        # #374151 (Gray-700 - Elevated)
+            res["CardBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(75, 85, 99))  # #4B5563
+            res["CardTextBrush"] = SolidColorBrush(WpfColor.FromRgb(255, 255, 255)) # White
+            res["CardSubTextBrush"] = SolidColorBrush(WpfColor.FromRgb(209, 213, 219)) # #D1D5DB (Gray-300)
+            res["CardLabelBrush"] = SolidColorBrush(WpfColor.FromRgb(156, 163, 175))   # #9CA3AF (Gray-400)
+            res["CardValueBrush"] = SolidColorBrush(WpfColor.FromRgb(255, 255, 255))   # White
+            res["CardAccentBrush"] = SolidColorBrush(WpfColor.FromRgb(96, 165, 250))   # #60A5FA (Blue-400)
 
     # --- Persistence Logic ---
     def load_window_settings(self):
