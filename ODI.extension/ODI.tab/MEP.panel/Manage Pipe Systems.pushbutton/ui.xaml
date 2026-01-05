@@ -10,29 +10,29 @@
         Background="{DynamicResource WindowBrush}">
     
     <Window.Resources>
-        <!-- Default Theme Resources (Light) -->
-        <SolidColorBrush x:Key="WindowBrush" Color="#FAFAFA"/>
-        <SolidColorBrush x:Key="ControlBrush" Color="White"/>
-        <SolidColorBrush x:Key="ButtonBrush" Color="White"/>
-        <SolidColorBrush x:Key="TextBrush" Color="#333333"/>
-        <SolidColorBrush x:Key="TextLightBrush" Color="#666666"/>
-        <SolidColorBrush x:Key="BorderBrush" Color="#DDDDDD"/>
-        <SolidColorBrush x:Key="AccentBrush" Color="#0080FF"/>
-        <SolidColorBrush x:Key="SelectionBrush" Color="#CCE8FF"/>
-        <SolidColorBrush x:Key="SelectionBorderBrush" Color="#99CCFF"/>
-        <SolidColorBrush x:Key="HoverBrush" Color="#E5F3FF"/>
-        <SolidColorBrush x:Key="FooterBrush" Color="#F5F5F5"/>
+        <!-- Modern Light Theme Resources -->
+        <SolidColorBrush x:Key="WindowBrush" Color="#F3F4F6"/> <!-- Gray-100 -->
+        <SolidColorBrush x:Key="ControlBrush" Color="#FFFFFF"/> <!-- White -->
+        <SolidColorBrush x:Key="ButtonBrush" Color="#FFFFFF"/> <!-- White -->
+        <SolidColorBrush x:Key="TextBrush" Color="#1F2937"/> <!-- Gray-900 -->
+        <SolidColorBrush x:Key="TextLightBrush" Color="#6B7280"/> <!-- Gray-500 -->
+        <SolidColorBrush x:Key="BorderBrush" Color="#E5E7EB"/> <!-- Gray-200 -->
+        <SolidColorBrush x:Key="AccentBrush" Color="#2563EB"/> <!-- Blue-600 -->
+        <SolidColorBrush x:Key="SelectionBrush" Color="#EFF6FF"/> <!-- Blue-50 -->
+        <SolidColorBrush x:Key="SelectionBorderBrush" Color="#BFDBFE"/> <!-- Blue-200 -->
+        <SolidColorBrush x:Key="HoverBrush" Color="#F9FAFB"/> <!-- Gray-50 -->
+        <SolidColorBrush x:Key="FooterBrush" Color="#F9FAFB"/> <!-- Gray-50 -->
         
-        <SolidColorBrush x:Key="AltRowBrush" Color="#F9F9F9"/>
+        <SolidColorBrush x:Key="AltRowBrush" Color="#F9FAFB"/> <!-- Gray-50 -->
 
-        <!-- Dashboard Specifics (Dark Slate) -->
-        <SolidColorBrush x:Key="CardBrush" Color="#282a2f"/>
-        <SolidColorBrush x:Key="CardBorderBrush" Color="#374151"/>
-        <SolidColorBrush x:Key="CardTextBrush" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="CardSubTextBrush" Color="#9CA3AF"/>
-        <SolidColorBrush x:Key="CardLabelBrush" Color="#D1D5DB"/>
-        <SolidColorBrush x:Key="CardValueBrush" Color="#FFFFFF"/>
-        <SolidColorBrush x:Key="CardAccentBrush" Color="#60A5FA"/>
+        <!-- Dashboard Specifics (Light Card) -->
+        <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF"/> <!-- White -->
+        <SolidColorBrush x:Key="CardBorderBrush" Color="#E5E7EB"/> <!-- Gray-200 -->
+        <SolidColorBrush x:Key="CardTextBrush" Color="#111827"/> <!-- Gray-900 -->
+        <SolidColorBrush x:Key="CardSubTextBrush" Color="#6B7280"/> <!-- Gray-500 -->
+        <SolidColorBrush x:Key="CardLabelBrush" Color="#9CA3AF"/> <!-- Gray-400 -->
+        <SolidColorBrush x:Key="CardValueBrush" Color="#111827"/> <!-- Gray-900 -->
+        <SolidColorBrush x:Key="CardAccentBrush" Color="#2563EB"/> <!-- Blue-600 -->
 
         <DataTemplate x:Key="ColorComboBoxTemplate">
             <StackPanel Orientation="Horizontal">
