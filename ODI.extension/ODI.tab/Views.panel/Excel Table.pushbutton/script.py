@@ -101,9 +101,6 @@ class FamilyGenerator(object):
             return type_cache[name]
         
         # Base type for duplication (should be passed or found once, but for now find once if needed)
-        # Optimization: We can't easily cache the "base" element across calls unless passed.
-        # But FilteredElementCollector for just FirstElement is fast enough if called rarely (only on new creation).
-        # The main cost was checking *all* types every time.
         
         base = DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).FirstElement()
         if not base: return None
@@ -192,6 +189,44 @@ class FamilyGenerator(object):
         return forms.pick_file(file_ext='rft', title="Select 'Generic Annotation' Template")
 
     @staticmethod
+    def ensure_line_styles(doc):
+        style_map = {}
+        try:
+            # Safe Access to Category
+            cat = None
+            try: cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_GenericAnnotation)
+            except: pass
+            
+            if not cat: return {}
+            
+            styles = {
+                "ODI_Wide": 5,
+                "ODI_Medium": 3,
+                "ODI_Thin": 1
+            }
+            
+            for name, weight in styles.items():
+                subcat = None
+                if cat.SubCategories.Contains(name):
+                    subcat = cat.SubCategories.get_Item(name)
+                else:
+                    try:
+                        subcat = doc.Settings.Categories.NewSubcategory(cat, name)
+                    except: pass
+                
+                if subcat:
+                    try: subcat.LineWeight = weight
+                    except: pass
+                    
+                    # Find GraphicsStyle
+                    gs_col = DB.FilteredElementCollector(doc).OfClass(DB.GraphicsStyle).ToElements()
+                    found_gs = next((g for g in gs_col if g.GraphicsStyleCategory.Name == name), None)
+                    if found_gs:
+                        style_map[name] = found_gs.Id
+        except: pass
+        return style_map
+
+    @staticmethod
     def draw_content(fam_doc, data, text_scale=1.0):
         # View Finding
         ref_view = next((v for v in DB.FilteredElementCollector(fam_doc).OfClass(DB.View).ToElements() 
@@ -222,6 +257,9 @@ class FamilyGenerator(object):
             sp = next((p for p in DB.FilteredElementCollector(fam_doc).OfClass(DB.FillPatternElement).ToElements() if p.GetFillPattern().IsSolidFill), None)
             if sp: solid_pat_id = sp.Id
 
+            # Ensure Styles
+            line_style_map = FamilyGenerator.ensure_line_styles(fam_doc)
+
             # Pre-calc dimensions
             row_y = {}
             col_x = {}
@@ -240,7 +278,191 @@ class FamilyGenerator(object):
                 cw_px = data['column_widths'].get(str(c), 64.0)
                 curr_x += max(FamilyGenerator.pixels_to_feet(cw_px), 0.005) # Min width
 
-            # Draw Loop
+            # --- Geometry Optimizer (Style Aware) ---
+            class StyleAwareOptimizer:
+                def __init__(self):
+                    # Key: Coordinate (Y or X), Value: List of (start, end, weight)
+                    self.horiz_lines = {}
+                    self.vert_lines = {}
+                    # Fills: key=ColorStr, val=[(x, y, w, h)]
+                    self.fills = {}
+
+                def add_line(self, p1, p2, weight=1):
+                    # Normalize checks
+                    if abs(p1.Y - p2.Y) < 0.0001: # Horizontal
+                        y = round(p1.Y, 5)
+                        xs, xe = sorted([p1.X, p2.X])
+                        if y not in self.horiz_lines: self.horiz_lines[y] = []
+                        self.horiz_lines[y].append((xs, xe, weight))
+                    elif abs(p1.X - p2.X) < 0.0001: # Vertical
+                        x = round(p1.X, 5)
+                        ys, ye = sorted([p1.Y, p2.Y])
+                        if x not in self.vert_lines: self.vert_lines[x] = []
+                        self.vert_lines[x].append((ys, ye, weight))
+
+                def add_fill(self, color_str, x, y, w, h):
+                    if not color_str: return
+                    if color_str not in self.fills: self.fills[color_str] = []
+                    self.fills[color_str].append((x, y, w, h))
+                
+                def resolve_intervals(self, segments):
+                    """
+                    Resolves overlapping segments using a priority (weight) system.
+                    Input: List of (start, end, weight)
+                    Output: List of (start, end, weight) with no overlaps and merged neighbors.
+                    """
+                    if not segments: return []
+                    
+                    # 1. Collect all unique split points
+                    points = set()
+                    for s, e, w in segments:
+                        points.add(s)
+                        points.add(e)
+                    sorted_points = sorted(list(points))
+                    
+                    if len(sorted_points) < 2: return []
+                    
+                    # 2. Create atomic intervals and find max weight for each
+                    resolved = []
+                    for i in range(len(sorted_points) - 1):
+                        p1 = sorted_points[i]
+                        p2 = sorted_points[i+1]
+                        mid = (p1 + p2) / 2.0
+                        
+                        max_w = 0 # 0 means no line
+                        for s, e, w in segments:
+                            if s <= mid and e >= mid:
+                                if w > max_w: max_w = w
+                        
+                        if max_w > 0:
+                            resolved.append({'s': p1, 'e': p2, 'w': max_w})
+                            
+                    # 3. Merge adjacent intervals with same weight
+                    if not resolved: return []
+                    
+                    merged = []
+                    curr = resolved[0]
+                    
+                    for i in range(1, len(resolved)):
+                        next_int = resolved[i]
+                        # Check continuity and same weight
+                        if abs(curr['e'] - next_int['s']) < 0.0001 and curr['w'] == next_int['w']:
+                            curr['e'] = next_int['e'] # Extend
+                        else:
+                            merged.append(curr)
+                            curr = next_int
+                    merged.append(curr)
+                    
+                    return [(m['s'], m['e'], m['w']) for m in merged]
+
+                def get_line_style_id(self, doc, weight, cache):
+                    # Map weight to subcategory ID
+                    if weight >= 3: return cache.get("ODI_Wide", DB.ElementId.InvalidElementId)
+                    elif weight == 2: return cache.get("ODI_Medium", DB.ElementId.InvalidElementId)
+                    else: return cache.get("ODI_Thin", DB.ElementId.InvalidElementId)
+
+                def draw_lines(self, doc, view, style_cache):
+                    # Draw Horizontal
+                    for y, segments in self.horiz_lines.items():
+                        final_segments = self.resolve_intervals(segments)
+                        for s, e, w in final_segments:
+                            if abs(e - s) > 0.001:
+                                l = DB.Line.CreateBound(DB.XYZ(s, y, 0), DB.XYZ(e, y, 0))
+                                try:
+                                    dc = doc.FamilyCreate.NewDetailCurve(view, l)
+                                    gs_id = self.get_line_style_id(doc, w, style_cache)
+                                    if gs_id != DB.ElementId.InvalidElementId:
+                                        dc.LineStyle = doc.GetElement(gs_id)
+                                except: pass
+
+                    # Draw Vertical
+                    for x, segments in self.vert_lines.items():
+                        final_segments = self.resolve_intervals(segments)
+                        for s, e, w in final_segments:
+                            if abs(e - s) > 0.001:
+                                l = DB.Line.CreateBound(DB.XYZ(x, s, 0), DB.XYZ(x, e, 0))
+                                try:
+                                    dc = doc.FamilyCreate.NewDetailCurve(view, l)
+                                    gs_id = self.get_line_style_id(doc, w, style_cache)
+                                    if gs_id != DB.ElementId.InvalidElementId:
+                                        dc.LineStyle = doc.GetElement(gs_id)
+                                except: pass
+
+                def draw_fills(self, doc, view, type_cache, solid_id):
+                    for color_str, rects in self.fills.items():
+                        color = FamilyGenerator.get_color_from_string(color_str)
+                        if not color: continue
+                        
+                        # Improved FillType Creation
+                        name = "Solid_{}_{}_{}".format(color.Red, color.Green, color.Blue)
+                        ftype = None
+                        if name in type_cache:
+                            ftype = type_cache[name]
+                        else:
+                             # Create New
+                             base = DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).FirstElement()
+                             if base:
+                                 try: ftype = base.Duplicate(name)
+                                 except: 
+                                     # Try finding again
+                                     for x in DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).ToElements():
+                                         if x.Name == name: ftype = x; break
+                                 
+                                 if ftype:
+                                     # Modern API (2019+)
+                                     try: ftype.ForegroundPatternColor = color
+                                     except: 
+                                         try: ftype.Color = color
+                                         except: pass
+                                     
+                                     if solid_id:
+                                         try: ftype.ForegroundPatternId = solid_id
+                                         except: 
+                                              try: ftype.FillPatternId = solid_id
+                                              except: pass
+                                     
+                                     type_cache[name] = ftype
+                        
+                        if not ftype: continue
+
+                        # Batch loops. Limit to 500 per region to be safe
+                        batch_size = 500
+                        chunks = [rects[i:i + batch_size] for i in range(0, len(rects), batch_size)]
+                        
+                        for chunk in chunks:
+                            loops = System.Collections.Generic.List[DB.CurveLoop]()
+                            for (x, y, w, h) in chunk:
+                                lines = [
+                                    DB.Line.CreateBound(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0)),
+                                    DB.Line.CreateBound(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0)),
+                                    DB.Line.CreateBound(DB.XYZ(x+w, y-h, 0), DB.XYZ(x, y-h, 0)),
+                                    DB.Line.CreateBound(DB.XYZ(x, y-h, 0), DB.XYZ(x, y, 0))
+                                ]
+                                try:
+                                    loop = DB.CurveLoop.Create(lines)
+                                    loops.Add(loop)
+                                except: pass
+                            
+                            if loops.Count > 0:
+                                try: DB.FilledRegion.Create(doc, ftype.Id, view.Id, loops)
+                                except: pass
+
+            optimizer = StyleAwareOptimizer()
+
+            # Border Weight Mapping (NPOI Strings -> Int Priority)
+            BORDER_WEIGHTS = {
+                "NONE": 0,
+                "THIN": 1,
+                "HAIR": 1,
+                "DOTTED": 1,
+                "DASHED": 1,
+                "MEDIUM": 2,
+                "MEDIUM_DASHED": 2,
+                "THICK": 3,
+                "DOUBLE": 3
+            }
+
+            # Iterate Cells
             for cell in data['cells']:
                 r, c = cell['row'], cell['col']
                 
@@ -262,7 +484,7 @@ class FamilyGenerator(object):
                 w = 0.0
                 for cs in range(c_span):
                     target_c = c + cs
-                    if target_c in col_x: # Ensure col exists
+                    if target_c in col_x:
                         cw_px = data['column_widths'].get(str(target_c), 64.0)
                         w += max(FamilyGenerator.pixels_to_feet(cw_px), 0.005)
                         
@@ -273,56 +495,59 @@ class FamilyGenerator(object):
                         rh = data['row_heights'].get(str(target_r), 12.75)
                         h += max(FamilyGenerator.points_to_feet(rh), 0.005)
                 
-                # Draw Background Fill
-                fill_color = FamilyGenerator.get_color_from_string(cell['fill']['color'])
+                # Register Fill
+                fill_color = cell.get('fill', {}).get('color')
                 if fill_color:
-                    fill_type = FamilyGenerator.get_or_create_fill_type(fam_doc, fill_color, fill_type_cache, solid_pat_id)
-                    if fill_type:
-                        lines = [
-                            DB.Line.CreateBound(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0)),
-                            DB.Line.CreateBound(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0)),
-                            DB.Line.CreateBound(DB.XYZ(x+w, y-h, 0), DB.XYZ(x, y-h, 0)),
-                            DB.Line.CreateBound(DB.XYZ(x, y-h, 0), DB.XYZ(x, y, 0))
-                        ]
-                        try:
-                            loop = DB.CurveLoop.Create(lines)
-                            DB.FilledRegion.Create(fam_doc, fill_type.Id, ref_view.Id, [loop])
-                        except: pass
+                    optimizer.add_fill(fill_color, x, y, w, h)
 
-                # Draw Text
+                # Register Borders
+                borders = cell.get('borders', {})
+                
+                def get_w(b_val):
+                    return BORDER_WEIGHTS.get(str(b_val).upper(), 1) if b_val and str(b_val) != "0" else 0
+
+                wt = get_w(borders.get('top'))
+                if wt > 0: optimizer.add_line(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0), wt)
+                
+                wb = get_w(borders.get('bottom'))
+                if wb > 0: optimizer.add_line(DB.XYZ(x, y-h, 0), DB.XYZ(x+w, y-h, 0), wb)
+                
+                wl = get_w(borders.get('left'))
+                if wl > 0: optimizer.add_line(DB.XYZ(x, y, 0), DB.XYZ(x, y-h, 0), wl)
+                
+                wr = get_w(borders.get('right'))
+                if wr > 0: optimizer.add_line(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0), wr)
+
+                # Draw Text (Keep as is, but improved checking)
                 val = cell['value']
                 if val:
-                    # Apply Scaling
                     scaled_font = cell['font'].copy()
                     scaled_font['size'] = scaled_font['size'] * text_scale
                     
                     text_type = FamilyGenerator.get_or_create_text_type(fam_doc, scaled_font, text_type_cache)
                     
-                    # Alignment Logic
-                    align_h = cell.get('align', 'Left') # General, Left, Center, Right
-                    align_v = cell.get('v_align', 'Bottom') # Top, Center, Bottom
+                    align_h = cell.get('align', 'Left')
+                    align_v = cell.get('v_align', 'Bottom')
                     
-                    # Horizontal
                     revit_h_align = DB.HorizontalTextAlignment.Left
-                    ins_x = x + 0.002 # Tight padding left
+                    ins_x = x + 0.002
                     
                     if 'Center' in align_h:
                         revit_h_align = DB.HorizontalTextAlignment.Center
                         ins_x = x + w / 2.0
                     elif 'Right' in align_h:
                         revit_h_align = DB.HorizontalTextAlignment.Right
-                        ins_x = x + w - 0.002 # Tight padding right
+                        ins_x = x + w - 0.002
                     
-                    # Vertical
                     revit_v_align = DB.VerticalTextAlignment.Bottom
-                    ins_y = y - h + 0.002 # Tight padding bottom
+                    ins_y = y - h + 0.002
                     
                     if 'Center' in align_v:
                         revit_v_align = DB.VerticalTextAlignment.Middle
                         ins_y = y - h / 2.0
                     elif 'Top' in align_v:
                         revit_v_align = DB.VerticalTextAlignment.Top
-                        ins_y = y - 0.002 # Tight padding top
+                        ins_y = y - 0.002
                         
                     insertion_point = DB.XYZ(ins_x, ins_y, 0)
 
@@ -331,31 +556,15 @@ class FamilyGenerator(object):
                         tn.HorizontalAlignment = revit_h_align
                         tn.VerticalAlignment = revit_v_align
                         
-                        # Wrap Text Logic
-                        # If Excel has WrapText ON or if there are explicit newlines, we should set Width.
-                        # Explicit newlines work in unbounded text too, but wrapping requires width.
                         should_wrap = cell.get('wrap_text', False)
-                        
                         if should_wrap:
-                            # Set Width to trigger wrapping.
-                            # Increased padding to 0.004 (2x 0.002) to strictly fit inside borders.
                             tn.Width = max(w - 0.004, 0.001) 
-                            
-                    except: pass
-                
-                # Draw Borders (Simple Box for now, style mapping is complex)
-                # TODO: Map border styles (Thin/Thick) to Line Styles if desired.
-                # For now, standard Detail Lines.
-                rect = [
-                    DB.Line.CreateBound(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0)),
-                    DB.Line.CreateBound(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0)),
-                    DB.Line.CreateBound(DB.XYZ(x+w, y-h, 0), DB.XYZ(x, y-h, 0)),
-                    DB.Line.CreateBound(DB.XYZ(x, y-h, 0), DB.XYZ(x, y, 0))
-                ]
-                for line in rect:
-                    try: fam_doc.FamilyCreate.NewDetailCurve(ref_view, line)
                     except: pass
             
+            # Execute Optimization
+            optimizer.draw_fills(fam_doc, ref_view, fill_type_cache, solid_pat_id)
+            optimizer.draw_lines(fam_doc, ref_view, line_style_map)
+
             t.Commit()
         return True
 
@@ -482,6 +691,7 @@ class ExcelScheduleWindow(forms.WPFWindow):
         self.Loaded += self.window_loaded
 
     def window_loaded(self, sender, args):
+        self.Tb_Scale.Text = "80"
         self.Btn_Browse_Click(None, None)
 
     def Btn_Browse_Click(self, sender, args):
@@ -502,15 +712,30 @@ class ExcelScheduleWindow(forms.WPFWindow):
         if self.Cb_Ranges.ItemsSource: self.Cb_Ranges.SelectedIndex = 0
         self.Lb_Status.Text = "Ready"
 
+    def check_existing_scale(self):
+        try:
+            t_name = self.Tb_Name.Text
+            if not t_name: return
+            
+            # Find existing family
+            fam = next((f for f in DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements() if f.Name == t_name), None)
+            if fam:
+                meta = TableMetadataManager.get(fam)
+                if meta and meta.get("TextScale"):
+                    self.Tb_Scale.Text = str(meta["TextScale"])
+        except: pass
+
     def Cb_Sheets_SelectionChanged(self, sender, args):
         if self.Cb_Sheets.SelectedItem:
             self.Tb_Name.Text = "{}{}_Table".format(FAMILY_PREFIX, self.Cb_Sheets.SelectedItem)
+            self.check_existing_scale()
 
     def Cb_Ranges_SelectionChanged(self, sender, args):
         sel = self.Cb_Ranges.SelectedItem
         if sel:
             clean = sel.name.replace("_", " ") if sel.name != "Print_Area" else "{} Print Area".format(sel.sheet)
             self.Tb_Name.Text = "{}{}".format(FAMILY_PREFIX, clean)
+            self.check_existing_scale()
 
     def Btn_Import_Click(self, sender, args):
         if not self.excel_path: return
@@ -518,7 +743,7 @@ class ExcelScheduleWindow(forms.WPFWindow):
         r = self.Cb_Ranges.SelectedItem.name if self.Cb_Ranges.SelectedItem else None
         n = self.Tb_Name.Text or FAMILY_PREFIX + "Table"
         
-        scale_pct = 100.0
+        scale_pct = 80.0
         try:
             scale_pct = float(self.Tb_Scale.Text)
         except: pass
