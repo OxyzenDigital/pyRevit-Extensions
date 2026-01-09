@@ -29,6 +29,7 @@
             <RowDefinition Height="Auto"/> <!-- Sheet -->
             <RowDefinition Height="Auto"/> <!-- Range -->
             <RowDefinition Height="Auto"/> <!-- Name -->
+            <RowDefinition Height="Auto"/> <!-- Scale -->
             <RowDefinition Height="*"/>    <!-- Spacer -->
             <RowDefinition Height="Auto"/> <!-- Buttons -->
         </Grid.RowDefinitions>
@@ -88,8 +89,18 @@
             <TextBox Name="Tb_Name" Grid.Column="1"/>
         </Grid>
 
+        <!-- Scale -->
+        <Grid Grid.Row="5" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="100"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <TextBlock Text="Text Scale (%):" Grid.Column="0"/>
+            <TextBox Name="Tb_Scale" Grid.Column="1" Text="100"/>
+        </Grid>
+
         <!-- Buttons -->
-        <StackPanel Grid.Row="6" Orientation="Horizontal" HorizontalAlignment="Right">
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
             <TextBlock Name="Lb_Status" Text="Ready" Foreground="Gray" Margin="0,0,15,0" FontWeight="Normal"/>
             <Button Name="Btn_Import" Content="Create Table" Width="120" Click="Btn_Import_Click" IsDefault="True"/>
             <Button Name="Btn_Close" Content="Close" Width="80" Click="Btn_Close_Click" IsCancel="True"/>
