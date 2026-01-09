@@ -2,7 +2,7 @@
 
 __title__ = "Select Framing \n in Beam System"
 __author__ = "ODI"
-__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
+__context__ = "doc-project"
 
 import clr
 clr.AddReference('System')
