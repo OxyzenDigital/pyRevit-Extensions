@@ -37,7 +37,7 @@ if os.path.exists(lib_dir):
 else:
     print("Error: 'lib' directory with NPOI libraries not found at: " + lib_dir)
 
-from NPOI.SS.UserModel import WorkbookFactory, CellType, DateUtil
+from NPOI.SS.UserModel import WorkbookFactory, CellType, DateUtil, FillPattern
 from NPOI.SS.Util import AreaReference, CellReference
 from NPOI.SS import SpreadsheetVersion
 from NPOI.XSSF.UserModel import XSSFWorkbook
@@ -165,10 +165,6 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
             merge_map = {}
             for i in range(target_sheet.NumMergedRegions):
                 region = target_sheet.GetMergedRegion(i)
-                # Check if region intersects our target range
-                # Simple check: overlap
-                # Only strictly necessary if we are filtering by range, but good optimization.
-                # Actually, we just map all, and look them up.
                 r_min, r_max = region.FirstRow, region.LastRow
                 c_min, c_max = region.FirstColumn, region.LastColumn
                 
@@ -188,18 +184,20 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
             # Helper for Colors
             def get_rgb(xssf_color):
                 if not xssf_color: return None
-                # Check if RGB is available
-                # NPOI 2.5: GetARGB() -> bytes
                 try:
-                    argb = xssf_color.ARgb # Returns byte[]
-                    if argb and len(argb) >= 3:
-                        # ARGB or RGB? Usually [A, R, G, B] or [R, G, B]
-                        if len(argb) == 4:
-                            # Alpha ignored for Revit usually, or map to transparency?
-                            # Revit fills are opaque.
-                            return "{},{},{}".format(argb[1], argb[2], argb[3])
-                        elif len(argb) == 3:
-                            return "{},{},{}".format(argb[0], argb[1], argb[2])
+                    # ARgb returns byte[]: [A, R, G, B] or [R, G, B]
+                    argb = xssf_color.ARgb 
+                    if not argb: return None
+                    
+                    # Convert signed bytes to unsigned ints if necessary (IronPython might need this)
+                    vals = [int(b) & 0xFF for b in argb]
+                    
+                    if len(vals) == 4:
+                        # Alpha is index 0, we want RGB
+                        if vals[0] == 0 and vals[1] == 0 and vals[2] == 0 and vals[3] == 0: return None # Transparent/Empty
+                        return "{},{},{}".format(vals[1], vals[2], vals[3])
+                    elif len(vals) == 3:
+                        return "{},{},{}".format(vals[0], vals[1], vals[2])
                 except: pass
                 return None
 
@@ -218,29 +216,15 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                 for j in range(c_start, c_end):
                     if valid_range_found and (j < first_col or j > last_col): continue
                     
-                    # Check Merge Skip
                     if merge_map.get("{},{}".format(i, j)) == "SKIP":
                         continue
 
                     try:
                         cell = row.GetCell(j)
-                        
-                        # Dimensions (Pixels are better for width)
-                        # GetColumnWidthInPixels returns float
                         width_px = target_sheet.GetColumnWidthInPixels(j)
                         data['column_widths'][str(j + 1)] = width_px 
                         
-                        # If cell is null, we might still need to draw background if it's styled?
-                        # NPOI row.GetCell(j) returns null if empty.
-                        # But we might have a merged region starting here or a background.
-                        # If null, create dummy to hold style? No, style is on cell.
-                        # If cell is missing, we check if there's a default column style? Too complex.
-                        # We proceed only if cell exists OR if it's a merge head (handled by logic above, but head must exist?)
-                        # Actually, if cell is null, it has no style.
-                        if not cell: 
-                            # But if we have width/height, we should register it?
-                            # data['cells'].append({'row': i+1, 'col': j+1, 'value': ''})
-                            continue
+                        if not cell: continue
                         
                         # Value
                         val = ""
@@ -262,8 +246,16 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                         style = cell.CellStyle
                         font = style.GetFont(wb)
                         
-                        # Colors
-                        fg_color = get_rgb(style.FillForegroundColorColor)
+                        # Fill Color Logic
+                        fg_color_str = None
+                        if style.FillPattern != FillPattern.NoFill:
+                            # Usually SolidForeground is what we want. 
+                            # If it's a pattern, Revit doesn't map easily, but we'll try ForegroundColor.
+                            fg_color_str = get_rgb(style.FillForegroundColorColor)
+                            
+                            # Fallback: Sometimes background color is used for solid fills in older Excel versions?
+                            # No, standard is FillForegroundColor for Solid.
+                        
                         font_color = get_rgb(font.GetXSSFColor())
                         
                         font_data = {
@@ -275,17 +267,16 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                             'color': font_color
                         }
                         
+                        # Borders: Explicitly convert to String to match "THIN", "MEDIUM" etc.
                         borders = {
                             'left': str(style.BorderLeft),
                             'right': str(style.BorderRight),
                             'top': str(style.BorderTop),
                             'bottom': str(style.BorderBottom),
-                            # Colors? style.LeftBorderColor (index) or ...Color (XSSF)
-                            # 'left_color': get_rgb(style.LeftBorderColorColor) # NPOI property naming varies
                         }
                         
                         # Alignment
-                        align = str(style.Alignment) # "Center", "Left", etc.
+                        align = str(style.Alignment) 
                         v_align = str(style.VerticalAlignment)
                         wrap_text = style.WrapText
                         
@@ -294,7 +285,7 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                             'col': j + 1,
                             'value': val,
                             'font': font_data,
-                            'fill': {'color': fg_color},
+                            'fill': {'color': fg_color_str},
                             'borders': borders,
                             'align': align,
                             'v_align': v_align,
@@ -302,7 +293,7 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                         }
                         data['cells'].append(cell_data)
                     except Exception as cell_ex:
-                        print("Warning: Failed to read cell [{}, {}]: {}".format(i+1, j+1, str(cell_ex)))
+                        # print("Warning: Failed to read cell [{}, {}]: {}".format(i+1, j+1, str(cell_ex)))
                         continue
                     
     except Exception as e:
@@ -312,3 +303,15 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
         return None
         
     return data
+
+def save_to_json(data, file_path):
+    """Saves the extracted data to a JSON file (Schema Storage)."""
+    import json
+    try:
+        # Custom serializer for objects not natively serializable (though our dict should be clean)
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=4)
+        return True
+    except Exception as e:
+        print("Error saving JSON: " + str(e))
+        return False
