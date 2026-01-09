@@ -5,255 +5,484 @@ import System
 from pyrevit import revit, DB, forms, script
 import excelextract
 
-# --- Constants & Schema ---
-SCHEMA_GUID = System.Guid("72945C5C-002F-433A-9610-061093123456")
+# --- Constants ---
+SCHEMA_GUID = System.Guid("72945C5C-002F-433A-9610-061093123458")
 SCHEMA_NAME = "ODISmartExcelTable"
+FAMILY_PREFIX = "ODI_Excel_"
 
-def get_schema():
-    schema = DB.ExtensibleStorage.Schema.Lookup(SCHEMA_GUID)
-    if not schema:
-        builder = DB.ExtensibleStorage.SchemaBuilder(SCHEMA_GUID)
-        builder.SetReadAccessLevel(DB.ExtensibleStorage.AccessLevel.Public)
-        builder.SetWriteAccessLevel(DB.ExtensibleStorage.AccessLevel.Public)
-        builder.SetSchemaName(SCHEMA_NAME)
-        builder.AddSimpleField("SourcePath", str)
-        builder.AddSimpleField("SheetName", str)
-        builder.AddSimpleField("RangeName", str)
-        schema = builder.Finish()
-    return schema
+# --- Schema Manager ---
+class TableMetadataManager(object):
+    @staticmethod
+    def get_schema():
+        schema = DB.ExtensibleStorage.Schema.Lookup(SCHEMA_GUID)
+        if not schema:
+            builder = DB.ExtensibleStorage.SchemaBuilder(SCHEMA_GUID)
+            builder.SetReadAccessLevel(DB.ExtensibleStorage.AccessLevel.Public)
+            builder.SetWriteAccessLevel(DB.ExtensibleStorage.AccessLevel.Public)
+            builder.SetSchemaName(SCHEMA_NAME)
+            builder.AddSimpleField("SourcePath", str)
+            builder.AddSimpleField("SheetName", str)
+            builder.AddSimpleField("RangeName", str)
+            builder.AddSimpleField("TextScale", str)
+            schema = builder.Finish()
+        return schema
 
-def save_metadata(element, source_path, sheet_name, range_name):
-    if not element: return
-    try:
-        schema = get_schema()
-        entity = DB.ExtensibleStorage.Entity(schema)
-        entity.Set("SourcePath", source_path or "")
-        entity.Set("SheetName", sheet_name or "")
-        entity.Set("RangeName", range_name or "")
-        with DB.Transaction(element.Document, "Save Table Metadata") as t:
-            t.Start()
-            element.SetEntity(entity)
-            t.Commit()
-    except Exception as e:
-        print("Failed to save metadata: " + str(e))
+    @staticmethod
+    def save(element, source_path, sheet_name, range_name, text_scale=100.0):
+        if not element: return
+        try:
+            schema = TableMetadataManager.get_schema()
+            entity = DB.ExtensibleStorage.Entity(schema)
+            entity.Set("SourcePath", source_path or "")
+            entity.Set("SheetName", sheet_name or "")
+            entity.Set("RangeName", range_name or "")
+            entity.Set("TextScale", str(text_scale))
+            with DB.Transaction(element.Document, "Save Table Metadata") as t:
+                t.Start()
+                element.SetEntity(entity)
+                t.Commit()
+        except Exception as e:
+            print("Failed to save metadata: " + str(e))
 
-def get_metadata(element):
-    try:
-        schema = get_schema()
-        entity = element.GetEntity(schema)
-        if entity.IsValid():
-            return {
-                "SourcePath": entity.Get[str]("SourcePath"),
-                "SheetName": entity.Get[str]("SheetName"),
-                "RangeName": entity.Get[str]("RangeName")
-            }
-    except: pass
-    return None
-
-# --- Helpers ---
-def points_to_feet(pts):
-    return pts * (1.0 / 72.0) * (1.0 / 12.0)
-
-def width_units_to_feet(w):
-    if w <= 0: return 0.01
-    return w * (1.0 / 10.0) * (1.0 / 12.0) * 8.0 
-
-def get_family_template():
-    app = revit.doc.Application
-    versions = ["2020", "2021", "2022", "2023", "2024", "2025"]
-    base_paths = [r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English\Annotations",
-                  r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English-Imperial\Annotations"]
-    for v in versions:
-        for b in base_paths:
-            p = os.path.join(b.format(v), "Generic Annotation.rft")
-            if os.path.exists(p): return p
-    return forms.pick_file(file_ext='rft', title="Select 'Generic Annotation' Template")
-
-def draw_schedule_in_family(fam_doc, data):
-    """Draws the schedule geometry into the given family document."""
-    # Find active view
-    ref_view = fam_doc.ActiveView
-    if not ref_view:
-        ref_view = next((v for v in DB.FilteredElementCollector(fam_doc).OfClass(DB.View).ToElements() if v.Name == "Ref. Level"), None)
-    if not ref_view:
-         ref_view = DB.FilteredElementCollector(fam_doc).OfClass(DB.ViewPlan).FirstElement()
-    
-    if not ref_view: return False
-
-    with DB.Transaction(fam_doc, "Draw Excel Data") as t:
-        t.Start()
-        
-        # Cleanup existing (for updates)
-        collector = DB.FilteredElementCollector(fam_doc, ref_view.Id)
-        ids_to_del = []
-        for el in collector.ToElements():
-            if isinstance(el, (DB.DetailCurve, DB.TextNote, DB.FilledRegion)):
-                ids_to_del.append(el.Id)
-        
-        if ids_to_del:
-            # Convert python list to ICollection[ElementId]
-            col = System.Collections.Generic.List[DB.ElementId](ids_to_del)
-            fam_doc.Delete(col)
-
-        # Setup Fonts
-        def_text_type = DB.FilteredElementCollector(fam_doc).OfClass(DB.TextNoteType).FirstElement()
-        
-        # Pre-calc offsets
-        sorted_rows = sorted([int(k) for k in data['row_heights'].keys()])
-        row_y = {}
-        curr_y = 0.0
-        for r in sorted_rows:
-            row_y[r] = curr_y
-            rh = data['row_heights'].get(str(r), 12.75)
-            curr_y -= max(points_to_feet(rh), 0.01)
-        
-        sorted_cols = sorted([int(k) for k in data['column_widths'].keys()])
-        col_x = {}
-        curr_x = 0.0
-        for c in sorted_cols:
-            col_x[c] = curr_x
-            cw = data['column_widths'].get(str(c), 10.0)
-            curr_x += max(width_units_to_feet(cw), 0.01)
-
-        # Draw Cells
-        for cell in data['cells']:
-            r = cell['row']
-            c = cell['col']
-            if r not in row_y or c not in col_x: continue
-                
-            x = col_x[c]
-            y = row_y[r]
-            
-            rh_pts = data['row_heights'].get(str(r), 12.75)
-            cw_units = data['column_widths'].get(str(c), 10.0)
-            h = max(points_to_feet(rh_pts), 0.01)
-            w = max(width_units_to_feet(cw_units), 0.01)
-            
-            # Draw Box
-            rect = [
-                DB.Line.CreateBound(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0)),
-                DB.Line.CreateBound(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0)),
-                DB.Line.CreateBound(DB.XYZ(x+w, y-h, 0), DB.XYZ(x, y-h, 0)),
-                DB.Line.CreateBound(DB.XYZ(x, y-h, 0), DB.XYZ(x, y, 0))
-            ]
-            
-            for line in rect:
-                try: fam_doc.FamilyCreate.NewDetailCurve(ref_view, line)
+    @staticmethod
+    def get(element):
+        try:
+            schema = TableMetadataManager.get_schema()
+            entity = element.GetEntity(schema)
+            if entity.IsValid():
+                # Safe get for new field
+                scale = 100.0
+                try: scale = float(entity.Get[str]("TextScale"))
                 except: pass
-            
-            # Draw Text
-            val = cell['value']
-            if val and def_text_type:
-                center = DB.XYZ(x + w/2.0, y - h/2.0, 0)
-                try:
-                    DB.TextNote.Create(fam_doc, ref_view.Id, center, val, def_text_type.Id)
-                except:
-                    try: fam_doc.FamilyCreate.NewTextNote(val, center, def_text_type)
-                    except: pass
-        
-        t.Commit()
-    return True
+                
+                return {
+                    "SourcePath": entity.Get[str]("SourcePath"),
+                    "SheetName": entity.Get[str]("SheetName"),
+                    "RangeName": entity.Get[str]("RangeName"),
+                    "TextScale": scale
+                }
+        except: pass
+        return None
 
-# --- Core Logic ---
-def create_new_schedule(file_path, sheet_name, range_name, schedule_name, template_path):
-    data = excelextract.get_excel_data(file_path, sheet_name, range_name)
-    if not data: return None
-    
-    app = revit.doc.Application
-    fam_doc = app.NewFamilyDocument(template_path)
-    if not fam_doc: return None
-    
-    success = draw_schedule_in_family(fam_doc, data)
-    
-    if success:
-        # Load
+# --- Family Generation Logic ---
+class FamilyGenerator(object):
+    @staticmethod
+    def pixels_to_feet(px):
+        # NPOI Pixels -> 1/96 inch (Standard Screen DPI).
+        if px <= 0: return 0.001
+        return px * (1.0 / 96.0) * (1.0 / 12.0)
+
+    @staticmethod
+    def points_to_feet(pts):
+        # 1 pt = 1/72 inch (Standard). 
+        # User confirmed 1/96 failed for rows, so reverting to standard.
+        return pts * (1.0 / 72.0) * (1.0 / 12.0)
+
+    @staticmethod
+    def text_points_to_feet(pts):
+        # User Request: Treat Points as 96 DPI (Pixels) for consistency.
+        return pts * (1.0 / 96.0) * (1.0 / 12.0)
+
+    @staticmethod
+    def get_color_from_string(rgb_str):
+        if not rgb_str: return None
+        try:
+            parts = [int(x) for x in rgb_str.split(',')]
+            if len(parts) == 3:
+                return DB.Color(parts[0], parts[1], parts[2])
+        except: pass
+        return None
+
+    @staticmethod
+    def get_or_create_fill_type(doc, color, type_cache, solid_pat_id):
+        name = "Solid_{}_{}_{}".format(color.Red, color.Green, color.Blue)
+        
+        if name in type_cache:
+            return type_cache[name]
+        
+        # Base type for duplication (should be passed or found once, but for now find once if needed)
+        # Optimization: We can't easily cache the "base" element across calls unless passed.
+        # But FilteredElementCollector for just FirstElement is fast enough if called rarely (only on new creation).
+        # The main cost was checking *all* types every time.
+        
+        base = DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).FirstElement()
+        if not base: return None
+        
+        try:
+            new_type = base.Duplicate(name)
+        except Exception:
+            # Race condition or name collision? Try to find it again just in case
+            for x in DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).ToElements():
+                if x.Name == name:
+                    type_cache[name] = x
+                    return x
+            return None
+        
+        # Set Color (Support New and Old API)
+        try: new_type.ForegroundPatternColor = color
+        except: 
+            try: new_type.Color = color
+            except: pass
+        
+        if solid_pat_id:
+            try: new_type.ForegroundPatternId = solid_pat_id
+            except: 
+                try: new_type.FillPatternId = solid_pat_id
+                except: pass
+        
+        type_cache[name] = new_type
+        return new_type
+
+    @staticmethod
+    def get_or_create_text_type(doc, font_data, type_cache):
+        color = FamilyGenerator.get_color_from_string(font_data['color']) or DB.Color(0,0,0)
+        
+        name = "{}_{}_{}{}_{}_{}_{}".format(
+            font_data['name'], 
+            int(font_data['size']),
+            "B" if font_data['bold'] else "",
+            "I" if font_data['italic'] else "",
+            color.Red, color.Green, color.Blue
+        ).replace(" ", "")
+        
+        if name in type_cache:
+            return type_cache[name]
+        
+        base = DB.FilteredElementCollector(doc).OfClass(DB.TextNoteType).FirstElement()
+        if not base: return None
+        
+        try:
+            new_type = base.Duplicate(name)
+        except Exception:
+             # Fallback lookup
+            for x in DB.FilteredElementCollector(doc).OfClass(DB.TextNoteType).ToElements():
+                if x.Name == name:
+                    type_cache[name] = x
+                    return x
+            return None
+        
+        # Set Props
+        # Font Name
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_FONT).Set(font_data['name'])
+        # Size (pts to ft) - Use corrected text size
+        size_ft = FamilyGenerator.text_points_to_feet(font_data['size'])
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_SIZE).Set(size_ft)
+        # Bold/Italic
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_BOLD).Set(1 if font_data['bold'] else 0)
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_ITALIC).Set(1 if font_data['italic'] else 0)
+        # Color
+        new_type.get_Parameter(DB.BuiltInParameter.LINE_COLOR).Set(color.Red + (color.Green << 8) + (color.Blue << 16))
+        
+        # Width Factor & Background
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_WIDTH_SCALE).Set(1.0)
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_BACKGROUND).Set(1) # 1 = Transparent
+        
+        type_cache[name] = new_type
+        return new_type
+
+    @staticmethod
+    def get_template_path():
+        versions = ["2020", "2021", "2022", "2023", "2024", "2025"]
+        base_paths = [r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English\Annotations",
+                      r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English-Imperial\Annotations"]
+        for v in versions:
+            for b in base_paths:
+                p = os.path.join(b.format(v), "Generic Annotation.rft")
+                if os.path.exists(p): return p
+        return forms.pick_file(file_ext='rft', title="Select 'Generic Annotation' Template")
+
+    @staticmethod
+    def draw_content(fam_doc, data, text_scale=1.0):
+        # View Finding
+        ref_view = next((v for v in DB.FilteredElementCollector(fam_doc).OfClass(DB.View).ToElements() 
+                         if not v.IsTemplate and v.ViewType != DB.ViewType.ProjectBrowser), None)
+        if not ref_view: return False
+
+        with DB.Transaction(fam_doc, "Draw Excel Data") as t:
+            t.Start()
+            
+            # Clean existing
+            collector = DB.FilteredElementCollector(fam_doc, ref_view.Id)
+            ids_to_del = System.Collections.Generic.List[DB.ElementId]()
+            for el in collector.ToElements():
+                if isinstance(el, (DB.DetailCurve, DB.TextNote, DB.FilledRegion)):
+                    ids_to_del.Add(el.Id)
+            if ids_to_del.Count > 0:
+                fam_doc.Delete(ids_to_del)
+
+            # --- Optimization: Cache Types ---
+            def get_type_name(e):
+                p = e.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM)
+                return p.AsString() if p else ""
+
+            text_type_cache = {get_type_name(t): t for t in DB.FilteredElementCollector(fam_doc).OfClass(DB.TextNoteType).ToElements()}
+            fill_type_cache = {get_type_name(t): t for t in DB.FilteredElementCollector(fam_doc).OfClass(DB.FilledRegionType).ToElements()}
+            
+            solid_pat_id = None
+            sp = next((p for p in DB.FilteredElementCollector(fam_doc).OfClass(DB.FillPatternElement).ToElements() if p.GetFillPattern().IsSolidFill), None)
+            if sp: solid_pat_id = sp.Id
+
+            # Pre-calc dimensions
+            row_y = {}
+            col_x = {}
+            
+            curr_y = 0.0
+            sorted_rows = sorted([int(k) for k in data['row_heights'].keys()])
+            for r in sorted_rows:
+                row_y[r] = curr_y
+                rh = data['row_heights'].get(str(r), 12.75)
+                curr_y -= max(FamilyGenerator.points_to_feet(rh), 0.005) # Min height
+            
+            curr_x = 0.0
+            sorted_cols = sorted([int(k) for k in data['column_widths'].keys()])
+            for c in sorted_cols:
+                col_x[c] = curr_x
+                cw_px = data['column_widths'].get(str(c), 64.0)
+                curr_x += max(FamilyGenerator.pixels_to_feet(cw_px), 0.005) # Min width
+
+            # Draw Loop
+            for cell in data['cells']:
+                r, c = cell['row'], cell['col']
+                
+                if r not in row_y or c not in col_x: continue
+                
+                # Dimensions with Span
+                x = col_x[c]
+                y = row_y[r]
+                
+                # Check spans
+                r_span = 1
+                c_span = 1
+                merge_key = "{},{}".format(r, c)
+                if merge_key in data['merges']:
+                    r_span = data['merges'][merge_key]['r_span']
+                    c_span = data['merges'][merge_key]['c_span']
+                
+                # Calculate W/H based on span
+                w = 0.0
+                for cs in range(c_span):
+                    target_c = c + cs
+                    if target_c in col_x: # Ensure col exists
+                        cw_px = data['column_widths'].get(str(target_c), 64.0)
+                        w += max(FamilyGenerator.pixels_to_feet(cw_px), 0.005)
+                        
+                h = 0.0
+                for rs in range(r_span):
+                    target_r = r + rs
+                    if target_r in row_y:
+                        rh = data['row_heights'].get(str(target_r), 12.75)
+                        h += max(FamilyGenerator.points_to_feet(rh), 0.005)
+                
+                # Draw Background Fill
+                fill_color = FamilyGenerator.get_color_from_string(cell['fill']['color'])
+                if fill_color:
+                    fill_type = FamilyGenerator.get_or_create_fill_type(fam_doc, fill_color, fill_type_cache, solid_pat_id)
+                    if fill_type:
+                        lines = [
+                            DB.Line.CreateBound(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0)),
+                            DB.Line.CreateBound(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0)),
+                            DB.Line.CreateBound(DB.XYZ(x+w, y-h, 0), DB.XYZ(x, y-h, 0)),
+                            DB.Line.CreateBound(DB.XYZ(x, y-h, 0), DB.XYZ(x, y, 0))
+                        ]
+                        try:
+                            loop = DB.CurveLoop.Create(lines)
+                            DB.FilledRegion.Create(fam_doc, fill_type.Id, ref_view.Id, [loop])
+                        except: pass
+
+                # Draw Text
+                val = cell['value']
+                if val:
+                    # Apply Scaling
+                    scaled_font = cell['font'].copy()
+                    scaled_font['size'] = scaled_font['size'] * text_scale
+                    
+                    text_type = FamilyGenerator.get_or_create_text_type(fam_doc, scaled_font, text_type_cache)
+                    
+                    # Alignment Logic
+                    align_h = cell.get('align', 'Left') # General, Left, Center, Right
+                    align_v = cell.get('v_align', 'Bottom') # Top, Center, Bottom
+                    
+                    # Horizontal
+                    revit_h_align = DB.HorizontalTextAlignment.Left
+                    ins_x = x + 0.002 # Tight padding left
+                    
+                    if 'Center' in align_h:
+                        revit_h_align = DB.HorizontalTextAlignment.Center
+                        ins_x = x + w / 2.0
+                    elif 'Right' in align_h:
+                        revit_h_align = DB.HorizontalTextAlignment.Right
+                        ins_x = x + w - 0.002 # Tight padding right
+                    
+                    # Vertical
+                    revit_v_align = DB.VerticalTextAlignment.Bottom
+                    ins_y = y - h + 0.002 # Tight padding bottom
+                    
+                    if 'Center' in align_v:
+                        revit_v_align = DB.VerticalTextAlignment.Middle
+                        ins_y = y - h / 2.0
+                    elif 'Top' in align_v:
+                        revit_v_align = DB.VerticalTextAlignment.Top
+                        ins_y = y - 0.002 # Tight padding top
+                        
+                    insertion_point = DB.XYZ(ins_x, ins_y, 0)
+
+                    try:
+                        tn = DB.TextNote.Create(fam_doc, ref_view.Id, insertion_point, val, text_type.Id)
+                        tn.HorizontalAlignment = revit_h_align
+                        tn.VerticalAlignment = revit_v_align
+                        
+                        # Wrap Text Logic
+                        # If Excel has WrapText ON or if there are explicit newlines, we should set Width.
+                        # Explicit newlines work in unbounded text too, but wrapping requires width.
+                        should_wrap = cell.get('wrap_text', False)
+                        
+                        if should_wrap:
+                            # Set Width to trigger wrapping.
+                            # Increased padding to 0.004 (2x 0.002) to strictly fit inside borders.
+                            tn.Width = max(w - 0.004, 0.001) 
+                            
+                    except: pass
+                
+                # Draw Borders (Simple Box for now, style mapping is complex)
+                # TODO: Map border styles (Thin/Thick) to Line Styles if desired.
+                # For now, standard Detail Lines.
+                rect = [
+                    DB.Line.CreateBound(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0)),
+                    DB.Line.CreateBound(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0)),
+                    DB.Line.CreateBound(DB.XYZ(x+w, y-h, 0), DB.XYZ(x, y-h, 0)),
+                    DB.Line.CreateBound(DB.XYZ(x, y-h, 0), DB.XYZ(x, y, 0))
+                ]
+                for line in rect:
+                    try: fam_doc.FamilyCreate.NewDetailCurve(ref_view, line)
+                    except: pass
+            
+            t.Commit()
+        return True
+
+    @staticmethod
+    def load_family(fam_doc):
         class FamLoadOpt(DB.IFamilyLoadOptions):
             def OnFamilyFound(self, familyInUse, overwriteParameterValues):
                 overwriteParameterValues.Value = True
                 return True
             def OnSharedFamilyFound(self, sharedFamily, familyInUse, source, overwriteParameterValues):
+                source.Value = DB.FamilySource.Family
+                overwriteParameterValues.Value = True
                 return True
         
-        # Handle Naming: SaveAs not strictly needed if we rename via FamilyName parameter?
-        # Actually NewFamilyDocument creates "Family1". We should SaveAs to set name.
-        # But we can't easily save to temp without path.
-        # Alternative: Load it, then rename the symbol in project.
+        try:
+            return fam_doc.LoadFamily(revit.doc)
+        except:
+            try:
+                return fam_doc.LoadFamily(revit.doc, FamLoadOpt())
+            except Exception as e:
+                print("Error Loading Family: " + str(e))
+                return None
+
+# --- Main App Logic ---
+def perform_family_update(family, data, text_scale=1.0):
+    fam_doc = revit.doc.EditFamily(family)
+    success = FamilyGenerator.draw_content(fam_doc, data, text_scale)
+    
+    result = None
+    if success:
+        result = FamilyGenerator.load_family(fam_doc)
         
-        fam = fam_doc.LoadFamily(revit.doc, FamLoadOpt())
+    fam_doc.Close(False)
+    return result
+
+def create_table(file_path, sheet_name, range_name, table_name, text_scale_percent=100.0):
+    # Check Exists
+    existing_fam = next((f for f in DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements() if f.Name == table_name), None)
+    
+    data = excelextract.get_excel_data(file_path, sheet_name, range_name)
+    if not data: return
+    
+    scale_factor = text_scale_percent / 100.0
+
+    if existing_fam:
+        res = forms.alert("Table '{}' already exists.\nUpdate it with new data?".format(table_name), options=["Update", "Cancel"])
+        if res == "Update":
+            updated_fam = perform_family_update(existing_fam, data, scale_factor)
+            if updated_fam:
+                TableMetadataManager.save(updated_fam, file_path, sheet_name, range_name, text_scale_percent)
+                print("Table updated successfully.")
+        return
+
+    # Create New
+    template = FamilyGenerator.get_template_path()
+    if not template: return
+
+    app = revit.doc.Application
+    fam_doc = app.NewFamilyDocument(template)
+    if not fam_doc: return
+    
+    success = FamilyGenerator.draw_content(fam_doc, data, scale_factor)
+    
+    if success:
+        fam = FamilyGenerator.load_family(fam_doc)
         fam_doc.Close(False)
         
         if fam:
-            # Rename Family
+            # Rename
             try:
-                with DB.Transaction(revit.doc, "Rename Family") as t:
-                    t.Start()
-                    fam.Name = schedule_name
-                    t.Commit()
-            except: pass # Might fail if name exists
+                with revit.Transaction("Rename Table Family"):
+                    fam.Name = table_name
+                    
+                    # Rename Type to match Family Name
+                    symbol_ids = fam.GetFamilySymbolIds()
+                    if symbol_ids:
+                        for sid in symbol_ids:
+                            symbol = revit.doc.GetElement(sid)
+                            if symbol:
+                                symbol.Name = table_name
+                            break # Rename the first/default type only
+                        
+            except Exception as e_rename:
+                print("Warning: Rename failed. Family is named '{}'. Error: {}".format(fam.Name, str(e_rename)))
             
-            # Save Metadata to the FAMILY element
-            save_metadata(fam, file_path, sheet_name, range_name)
+            TableMetadataManager.save(fam, file_path, sheet_name, range_name, text_scale_percent)
             
-            # Notify User
-            forms.alert("Excel Table family '{}' created and loaded.\nYou can now place it from the Annotations browser.".format(fam.Name))
-            return fam
+            forms.alert("Excel Table '{}' loaded successfully.".format(fam.Name))
     else:
         fam_doc.Close(False)
-    return None
 
-def update_selected_instance(instance):
-    # Metadata is now on the Family, not the instance
+def update_table(instance):
     fam = instance.Symbol.Family
-    meta = get_metadata(fam)
+    meta = TableMetadataManager.get(fam) or TableMetadataManager.get(instance)
     
     if not meta:
-        # Backward compatibility: check instance (if any old ones exist)
-        meta = get_metadata(instance)
-        
-    if not meta:
-        forms.alert("This element is not linked to an Excel file.")
+        forms.alert("Not a linked Excel Table.")
         return
     
-    f_path = meta["SourcePath"]
-    if not os.path.exists(f_path):
-        forms.alert("Source file not found: " + f_path)
+    if not os.path.exists(meta["SourcePath"]):
+        forms.alert("Source file missing: " + meta["SourcePath"])
         return
         
-    data = excelextract.get_excel_data(f_path, meta["SheetName"], meta["RangeName"])
+    data = excelextract.get_excel_data(meta["SourcePath"], meta["SheetName"], meta["RangeName"])
     if not data: return
     
-    # Edit Family
-    fam_doc = revit.doc.EditFamily(fam)
+    scale_pct = meta.get("TextScale", 100.0)
+    scale_factor = scale_pct / 100.0
     
-    success = draw_schedule_in_family(fam_doc, data)
-    
-    if success:
-        class FamLoadOpt(DB.IFamilyLoadOptions):
-            def OnFamilyFound(self, familyInUse, overwriteParameterValues):
-                overwriteParameterValues.Value = True
-                return True
-            def OnSharedFamilyFound(self, sharedFamily, familyInUse, source, overwriteParameterValues):
-                return True
-        fam_doc.LoadFamily(revit.doc, FamLoadOpt())
-        fam_doc.Close(False)
-        print("Table updated successfully.")
-    else:
-        fam_doc.Close(False)
+    if perform_family_update(fam, data, scale_factor):
+        print("Table updated.")
 
+# --- UI ---
 class NamedRangeItem(object):
     def __init__(self, data):
         self.name = data['name']
         self.sheet = data['sheet'] if data['sheet'] else "Workbook"
         self.formula = data['formula']
 
-# --- UI Class ---
 class ExcelScheduleWindow(forms.WPFWindow):
     def __init__(self):
         forms.WPFWindow.__init__(self, 'ui.xaml')
         self.excel_path = None
-        self.sheets = []
-        self.ranges = []
-        self.template_path = None
+        self.Loaded += self.window_loaded
+
+    def window_loaded(self, sender, args):
+        self.Btn_Browse_Click(None, None)
 
     def Btn_Browse_Click(self, sender, args):
         f = forms.pick_file(file_ext='xlsx')
@@ -264,86 +493,50 @@ class ExcelScheduleWindow(forms.WPFWindow):
 
     def refresh_data(self):
         if not self.excel_path: return
-        self.Lb_Status.Text = "Reading file..."
+        self.Lb_Status.Text = "Reading..."
+        self.Cb_Sheets.ItemsSource = excelextract.get_sheet_names(self.excel_path)
+        if self.Cb_Sheets.ItemsSource: self.Cb_Sheets.SelectedIndex = 0
         
-        # Load Sheets
-        self.sheets = excelextract.get_sheet_names(self.excel_path)
-        self.Cb_Sheets.ItemsSource = self.sheets
-        if self.sheets: self.Cb_Sheets.SelectedIndex = 0
-        
-        # Load Ranges
         raw_ranges = excelextract.get_print_areas(self.excel_path)
-        self.ranges = [NamedRangeItem(r) for r in raw_ranges]
-        self.Cb_Ranges.ItemsSource = self.ranges
-        # DisplayMemberPath removed to avoid conflict with XAML ItemTemplate
-        
+        self.Cb_Ranges.ItemsSource = [NamedRangeItem(r) for r in raw_ranges]
+        if self.Cb_Ranges.ItemsSource: self.Cb_Ranges.SelectedIndex = 0
         self.Lb_Status.Text = "Ready"
 
     def Cb_Sheets_SelectionChanged(self, sender, args):
         if self.Cb_Sheets.SelectedItem:
-            # Default: Sheet Name + Table
-            self.Tb_Name.Text = "{} Table".format(self.Cb_Sheets.SelectedItem)
+            self.Tb_Name.Text = "{}{}_Table".format(FAMILY_PREFIX, self.Cb_Sheets.SelectedItem)
 
     def Cb_Ranges_SelectionChanged(self, sender, args):
         sel = self.Cb_Ranges.SelectedItem
         if sel:
-            raw_name = sel.name # Access property
-            sheet_name = sel.sheet
-            
-            # Smart naming
-            if raw_name == "Print_Area":
-                clean_name = "{} Print Area".format(sheet_name)
-            else:
-                # Replace underscores with spaces for readability
-                clean_name = raw_name.replace("_", " ")
-                
-            self.Tb_Name.Text = clean_name
+            clean = sel.name.replace("_", " ") if sel.name != "Print_Area" else "{} Print Area".format(sel.sheet)
+            self.Tb_Name.Text = "{}{}".format(FAMILY_PREFIX, clean)
 
     def Btn_Import_Click(self, sender, args):
         if not self.excel_path: return
+        s = self.Cb_Sheets.SelectedItem
+        r = self.Cb_Ranges.SelectedItem.name if self.Cb_Ranges.SelectedItem else None
+        n = self.Tb_Name.Text or FAMILY_PREFIX + "Table"
         
-        s_name = self.Cb_Sheets.SelectedItem
-        r_name = None
-        if self.Cb_Ranges.SelectedItem:
-            r_name = self.Cb_Ranges.SelectedItem.name # Access property
-            
-        n_name = self.Tb_Name.Text
-        if not n_name: n_name = "Excel Table"
+        scale_pct = 100.0
+        try:
+            scale_pct = float(self.Tb_Scale.Text)
+        except: pass
         
-        # Get Template
-        if not self.template_path:
-             self.template_path = get_family_template()
-             
-        if not self.template_path:
-            forms.alert("Template required.")
-            return
-
         self.Close()
-        
-        # Run Creation
-        create_new_schedule(self.excel_path, s_name, r_name, n_name, self.template_path)
+        create_table(self.excel_path, s, r, n, scale_pct)
 
     def Btn_Close_Click(self, sender, args):
         self.Close()
 
-# --- Main Entry Point ---
+# --- Entry ---
 sel = revit.get_selection()
 if len(sel) == 1 and isinstance(sel[0], DB.FamilyInstance):
-    # Check if it's our smart table
-    # Metadata is on the Family
     fam = sel[0].Symbol.Family
-    meta = get_metadata(fam)
-    
-    # Fallback for older instances
-    if not meta:
-        meta = get_metadata(sel[0])
-        
+    meta = TableMetadataManager.get(fam) or TableMetadataManager.get(sel[0])
     if meta and meta["SourcePath"]:
-        res = forms.alert("Selected element is a Smart Excel Table.\nUpdate from source?", options=["Update", "Create New..."])
-        if res == "Update":
-            update_selected_instance(sel[0])
+        if forms.alert("Update this Excel Table?", options=["Update", "Create New..."]) == "Update":
+            update_table(sel[0])
             script.exit()
 
-# Default: Open UI
-win = ExcelScheduleWindow()
-win.ShowDialog()
+ExcelScheduleWindow().ShowDialog()
