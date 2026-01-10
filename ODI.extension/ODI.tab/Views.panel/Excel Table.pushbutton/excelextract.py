@@ -8,20 +8,18 @@ lib_dir = os.path.join(script_dir, "lib")
 
 if os.path.exists(lib_dir):
     sys.path.append(lib_dir)
-    
     try:
-        # Load Dependencies first using FULL PATHS with AddReferenceToFileAndPath
+        # Load Dependencies first using FULL PATHS
         clr.AddReferenceToFileAndPath(os.path.join(lib_dir, "BouncyCastle.Crypto.dll"))
         clr.AddReferenceToFileAndPath(os.path.join(lib_dir, "ICSharpCode.SharpZipLib.dll"))
         
-        # Load NPOI using FULL PATHS with AddReferenceToFileAndPath
+        # Load NPOI using FULL PATHS
         clr.AddReferenceToFileAndPath(os.path.join(lib_dir, "NPOI.dll"))
         clr.AddReferenceToFileAndPath(os.path.join(lib_dir, "NPOI.OOXML.dll"))
         clr.AddReferenceToFileAndPath(os.path.join(lib_dir, "NPOI.OpenXml4Net.dll"))
         clr.AddReferenceToFileAndPath(os.path.join(lib_dir, "NPOI.OpenXmlFormats.dll"))
-    except AttributeError:
-        # Fallback if AddReferenceToFileAndPath is missing (some implementations)
-        # Try adding to path and loading by filename
+    except Exception:
+        # Fallback
         try:
             sys.path.append(lib_dir)
             clr.AddReference("BouncyCastle.Crypto")
@@ -30,92 +28,168 @@ if os.path.exists(lib_dir):
             clr.AddReference("NPOI.OOXML")
             clr.AddReference("NPOI.OpenXml4Net")
             clr.AddReference("NPOI.OpenXmlFormats")
-        except Exception as e2:
-             print("Fallback load failed: " + str(e2))
-    except Exception as e:
-        print("Error loading bundled NPOI libraries: " + str(e))
-else:
-    print("Error: 'lib' directory with NPOI libraries not found at: " + lib_dir)
+        except Exception:
+             pass
+    except Exception:
+        pass
 
 from NPOI.SS.UserModel import WorkbookFactory, CellType, DateUtil, FillPattern
 from NPOI.SS.Util import AreaReference, CellReference
 from NPOI.SS import SpreadsheetVersion
-from NPOI.XSSF.UserModel import XSSFWorkbook
-from System.IO import FileStream, FileMode, FileAccess
+from NPOI.XSSF.UserModel import XSSFWorkbook, XSSFColor
+from System.IO import FileStream, FileMode, FileAccess, FileShare
+
+# Helper for Colors
+def get_rgb(color_obj, cell_style=None):
+    rgb_bytes = None
+    alpha = 255
+    tint = 0.0
+    
+    # 1. Try XSSFColor (ARGB or RGB + Tint)
+    if color_obj:
+        # Check for Auto
+        if hasattr(color_obj, "IsAuto") and color_obj.IsAuto:
+            return None, 0
+
+        # Get Tint
+        if hasattr(color_obj, "Tint"):
+            tint = color_obj.Tint
+
+        # Try RGB (Red, Green, Blue) - Priority
+        if hasattr(color_obj, "RGB"):
+            try:
+                b = color_obj.RGB
+                if b and len(b) == 3:
+                    rgb_bytes = [int(b[0]) & 0xFF, int(b[1]) & 0xFF, int(b[2]) & 0xFF]
+            except: pass
+
+        # Try ARgb (Alpha, Red, Green, Blue) - Fallback
+        if not rgb_bytes and hasattr(color_obj, "ARgb"):
+            try:
+                b = color_obj.ARgb
+                if b and len(b) == 4:
+                    alpha = int(b[0]) & 0xFF
+                    rgb_bytes = [int(b[1]) & 0xFF, int(b[2]) & 0xFF, int(b[3]) & 0xFF]
+                elif b and len(b) == 3:
+                    rgb_bytes = [int(b[0]) & 0xFF, int(b[1]) & 0xFF, int(b[2]) & 0xFF]
+            except: pass
+
+    # 2. Try HSSFColor (RGB only, no tint)
+    if not rgb_bytes and color_obj and hasattr(color_obj, "RGB"):
+        try:
+            b = color_obj.RGB 
+            if b and len(b) == 3:
+                rgb_bytes = [int(b[0]) & 0xFF, int(b[1]) & 0xFF, int(b[2]) & 0xFF]
+        except: pass
+
+    # 3. Process RGB
+    if rgb_bytes:
+        red, green, blue = rgb_bytes
+        
+        # Apply Tint
+        if tint != 0:
+            def apply_tint(c, t):
+                val = float(c)
+                if t > 0: val = val * (1.0 - t) + 255.0 * t
+                else: val = val * (1.0 + t)
+                return int(round(val))
+            
+            red = apply_tint(red, tint)
+            green = apply_tint(green, tint)
+            blue = apply_tint(blue, tint)
+
+        if alpha == 0: return None, 0 # Fully transparent
+
+        rgb_str = "{},{},{}".format(red, green, blue)
+        transparency = int(100 - (alpha / 255.0 * 100))
+        
+        return rgb_str, transparency
+
+    # 4. Indexed Color Fallback
+    if cell_style:
+        try:
+            idx = cell_style.FillForegroundColor
+            if idx == 64: return None, 0 # Auto
+            if idx == 0 or idx == 8: return "0,0,0", 0 # Black
+            if idx == 1 or idx == 9: return "255,255,255", 0 # White
+            if idx == 10: return "255,0,0", 0 # Red
+            if idx == 11: return "0,255,0", 0 # Green
+            if idx == 12: return "0,0,255", 0 # Blue
+            if idx == 13: return "255,255,0", 0 # Yellow
+            if idx == 14: return "255,0,255", 0 # Magenta
+            if idx == 15: return "0,255,255", 0 # Cyan
+            # Extended Palette (Standard Excel Colors)
+            if idx == 16: return "128,0,0", 0      # Dark Red
+            if idx == 17: return "0,128,0", 0      # Dark Green
+            if idx == 18: return "0,0,128", 0      # Dark Blue
+            if idx == 19: return "128,128,0", 0    # Dark Yellow
+            if idx == 20: return "128,0,128", 0    # Dark Magenta
+            if idx == 21: return "0,128,128", 0    # Teal
+            if idx == 22: return "192,192,192", 0  # Silver
+            if idx == 23: return "128,128,128", 0  # Grey
+            # Add more standard index mappings if needed
+        except: pass
+    
+    return None, 0
 
 def get_sheet_names(file_path):
-    """Returns a list of sheet names in the Excel file."""
-    if not os.path.exists(file_path): return []
+    names = []
+    if not os.path.exists(file_path): return names
     try:
-        with FileStream(file_path, FileMode.Open, FileAccess.Read) as fs:
+        with FileStream(file_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite) as fs:
             wb = WorkbookFactory.Create(fs)
-            return [wb.GetSheetName(i) for i in range(wb.NumberOfSheets)]
-    except:
-        return []
+            for i in range(wb.NumberOfSheets):
+                names.append(wb.GetSheetName(i))
+    except Exception as e:
+        print("Error getting sheets: " + str(e))
+    return names
 
 def get_print_areas(file_path):
-    """
-    Returns a list of Named Ranges (including Print_Area) found in the workbook.
-    Format: [{'name': 'Print_Area', 'sheet': 'Sheet1', 'formula': 'Sheet1!$A$1:$F$20'}, ...]
-    """
-    if not os.path.exists(file_path): return []
     areas = []
+    if not os.path.exists(file_path): return areas
     try:
-        with FileStream(file_path, FileMode.Open, FileAccess.Read) as fs:
+        with FileStream(file_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite) as fs:
             wb = WorkbookFactory.Create(fs)
             for i in range(wb.NumberOfNames):
-                try:
-                    name = wb.GetNameAt(i)
-                    if name.IsDeleted: continue
-                    
-                    # Skip if formula is complex/invalid/dynamic (starts with OFFSET etc or contains errors)
-                    # Simple check: try to see if it looks like a range reference
-                    formula = name.RefersToFormula
-                    if not formula or "REF!" in formula: continue
-                    
-                    # Resolve sheet name
-                    sheet_name = ""
-                    if name.SheetIndex >= 0 and name.SheetIndex < wb.NumberOfSheets:
-                        sheet_name = wb.GetSheetName(name.SheetIndex)
-                    
-                    # Use NameName for display
-                    areas.append({
-                        'name': name.NameName,
-                        'sheet': sheet_name, 
-                        'formula': formula
-                    })
-                except Exception as ex_name:
-                    # Skip problematic names
-                    continue
+                name = wb.GetNameAt(i)
+                if name.IsDeleted: continue
+                
+                # Check for Print_Area or user defined ranges
+                # Print_Area is usually specific to a sheet, identified by SheetIndex
+                sheet_name = ""
+                if name.SheetIndex >= 0 and name.SheetIndex < wb.NumberOfSheets:
+                    sheet_name = wb.GetSheetName(name.SheetIndex)
+                
+                # We return a dict for the UI
+                areas.append({
+                    'name': name.NameName,
+                    'sheet': sheet_name,
+                    'formula': name.RefersToFormula
+                })
     except Exception as e:
-        print("Error reading named ranges: " + str(e))
+        print("Error getting ranges: " + str(e))
     return areas
 
 def get_excel_data(file_path, sheet_name=None, range_name=None):
-    """
-    Reads excel using NPOI with high fidelity (Colors, Merges, Dimensions).
-    """
     data = {
         'sheet_name': '',
         'row_heights': {},
-        'column_widths': {}, # In pixels
-        'cells': [],
-        'merges': {} # Key: "r,c", Value: {'r_span': int, 'c_span': int}
+        'column_widths': {}, 
+        'cells': []
     }
     
-    if not os.path.exists(file_path):
-        return None
+    if not os.path.exists(file_path): return None
         
     try:
-        with FileStream(file_path, FileMode.Open, FileAccess.Read) as fs:
+        with FileStream(file_path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite) as fs:
             wb = WorkbookFactory.Create(fs)
             
-            # 1. Resolve Sheet and Range (Same logic as before)
             target_sheet = None
             first_row, last_row = 0, 0
             first_col, last_col = 0, 0
             valid_range_found = False
             
+            # Resolve Range
             if range_name:
                 found_name = None
                 for i in range(wb.NumberOfNames):
@@ -123,195 +197,192 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                         name_obj = wb.GetNameAt(i)
                         if name_obj.IsDeleted: continue
                         if name_obj.NameName == range_name:
-                            found_name = name_obj
-                            break
+                            # If sheet_name is specified, ensure match
+                            if sheet_name:
+                                if name_obj.SheetIndex >= 0:
+                                    if wb.GetSheetName(name_obj.SheetIndex) == sheet_name:
+                                        found_name = name_obj
+                                        break
+                                else:
+                                    # Name is global, might refer to our sheet
+                                    found_name = name_obj
+                            else:
+                                found_name = name_obj
+                                break
                     except: continue
                 
                 if found_name:
-                    name_obj = found_name
-                    formula = name_obj.RefersToFormula
                     try:
                         version = SpreadsheetVersion.EXCEL2007
-                        try:
-                            area_ref = AreaReference(formula, version)
-                            refs = area_ref.GetAllReferencedCells()
-                            if refs and len(refs) > 0:
-                                s_name = refs[0].SheetName
-                                target_sheet = wb.GetSheet(s_name)
-                                first_row = min(c.Row for c in refs)
-                                last_row = max(c.Row for c in refs)
-                                first_col = min(c.Col for c in refs)
-                                last_col = max(c.Col for c in refs)
-                                valid_range_found = True
-                        except: return None 
-                    except: return None
+                        area_ref = AreaReference(found_name.RefersToFormula, version)
+                        refs = area_ref.GetAllReferencedCells()
+                        if refs and len(refs) > 0:
+                            s_name = refs[0].SheetName
+                            target_sheet = wb.GetSheet(s_name)
+                            first_row = min(c.Row for c in refs)
+                            last_row = max(c.Row for c in refs)
+                            first_col = min(c.Col for c in refs)
+                            last_col = max(c.Col for c in refs)
+                            valid_range_found = True
+                    except: pass
             
+            # Fallback to Sheet
             if not target_sheet:
                 if sheet_name: target_sheet = wb.GetSheet(sheet_name)
                 else: target_sheet = wb.GetSheetAt(0)
+                
                 if target_sheet:
                     first_row = target_sheet.FirstRowNum
                     last_row = target_sheet.LastRowNum
-                    first_col = 0
-                    last_col = 0 
-            
-            if not target_sheet: return None
+                    # Initialize cols logic later per row or scan
+                    valid_range_found = False 
 
+            if not target_sheet: return None
             data['sheet_name'] = target_sheet.SheetName
             
-            # --- Pre-process Merged Regions ---
-            # Map: "row,col" -> (row_span, col_span) for HEAD
-            # Map: "row,col" -> "SKIP" for others
+            # Pre-process Merged Regions into a map for O(1) lookup
             merge_map = {}
             for i in range(target_sheet.NumMergedRegions):
                 region = target_sheet.GetMergedRegion(i)
-                r_min, r_max = region.FirstRow, region.LastRow
-                c_min, c_max = region.FirstColumn, region.LastColumn
-                
-                # Head
-                key = "{},{}".format(r_min, c_min)
-                data['merges'][key] = {
-                    'r_span': r_max - r_min + 1,
-                    'c_span': c_max - c_min + 1
-                }
-                
-                # Mark others as skip
-                for r in range(r_min, r_max + 1):
-                    for c in range(c_min, c_max + 1):
-                        if r == r_min and c == c_min: continue
-                        merge_map["{},{}".format(r, c)] = "SKIP"
+                for r in range(region.FirstRow, region.LastRow + 1):
+                    for c in range(region.FirstColumn, region.LastColumn + 1):
+                        merge_map[(r, c)] = region
 
-            # Helper for Colors
-            def get_rgb(xssf_color):
-                if not xssf_color: return None
-                try:
-                    # ARgb returns byte[]: [A, R, G, B] or [R, G, B]
-                    argb = xssf_color.ARgb 
-                    if not argb: return None
-                    
-                    # Convert signed bytes to unsigned ints if necessary (IronPython might need this)
-                    vals = [int(b) & 0xFF for b in argb]
-                    
-                    if len(vals) == 4:
-                        # Alpha is index 0, we want RGB
-                        if vals[0] == 0 and vals[1] == 0 and vals[2] == 0 and vals[3] == 0: return None # Transparent/Empty
-                        return "{},{},{}".format(vals[1], vals[2], vals[3])
-                    elif len(vals) == 3:
-                        return "{},{},{}".format(vals[0], vals[1], vals[2])
-                except: pass
-                return None
-
-            # 2. Iterate Data
+            # Read Data
             for i in range(first_row, last_row + 1):
                 row = target_sheet.GetRow(i)
-                if not row: continue
+                if not row:
+                    # Capture default height for empty rows to maintain vertical spacing
+                    data['row_heights'][str(i + 1)] = target_sheet.DefaultRowHeightInPoints
+                    continue
                 
-                data['row_heights'][str(i + 1)] = row.HeightInPoints
+                data['row_heights'][str(i + 1)] = row.HeightInPoints if row.HeightInPoints >= 0 else target_sheet.DefaultRowHeightInPoints
                 
                 c_start = first_col if valid_range_found else row.FirstCellNum
-                if c_start < 0: c_start = 0
                 c_end = last_col + 1 if valid_range_found else row.LastCellNum
-                if c_end < c_start: c_end = c_start
                 
-                for j in range(c_start, c_end):
-                    if valid_range_found and (j < first_col or j > last_col): continue
-                    
-                    if merge_map.get("{},{}".format(i, j)) == "SKIP":
-                        continue
+                if c_start < 0: c_start = 0
+                if c_end < c_start: continue 
 
-                    try:
-                        cell = row.GetCell(j)
-                        width_px = target_sheet.GetColumnWidthInPixels(j)
-                        data['column_widths'][str(j + 1)] = width_px 
+                for j in range(c_start, c_end):
+                    # Check Merge Status
+                    region = merge_map.get((i, j))
+                    is_head = False
+                    
+                    if region:
+                        if region.FirstRow == i and region.FirstColumn == j:
+                            is_head = True
+                        else:
+                            # Skip cells that are part of a merge but not the head
+                            continue
+
+                    cell = row.GetCell(j)
+                    if not cell: cell = row.CreateCell(j)
+
+                    width_px = target_sheet.GetColumnWidthInPixels(j)
+                    data['column_widths'][str(j + 1)] = width_px 
+                    
+                    # Extract Value
+                    val = ""
+                    ctype = cell.CellType
+                    if ctype == CellType.Formula:
+                        try: ctype = cell.CachedFormulaResultType
+                        except: pass
+                    
+                    if ctype == CellType.String: val = cell.StringCellValue or ""
+                    elif ctype == CellType.Numeric:
+                        try:
+                            if DateUtil.IsCellDateFormatted(cell): val = str(cell.DateCellValue)
+                            else: val = str(cell.NumericCellValue)
+                        except: val = str(cell.NumericCellValue)
+                    elif ctype == CellType.Boolean: val = str(cell.BooleanCellValue)
+                    elif ctype == CellType.Error: val = ""
+                    
+                    # Extract Style
+                    style = cell.CellStyle
+                    font = style.GetFont(wb)
+                    
+                    bg_color_str = None
+                    if style.FillPattern != FillPattern.NoFill:
+                        # 1. Try Foreground (High Precision) - No Index Fallback
+                        bg_color_str = get_rgb(style.FillForegroundColorColor, None)
                         
-                        if not cell: continue
-                        
-                        # Value
-                        val = ""
-                        ctype = cell.CellType
-                        if ctype == CellType.Formula:
-                            try: ctype = cell.CachedFormulaResultType
-                            except: pass
-                        
-                        if ctype == CellType.String: val = cell.StringCellValue
-                        elif ctype == CellType.Numeric:
-                            try:
-                                if DateUtil.IsCellDateFormatted(cell): val = str(cell.DateCellValue)
-                                else: val = str(cell.NumericCellValue)
-                            except: val = str(cell.NumericCellValue)
-                        elif ctype == CellType.Boolean: val = str(cell.BooleanCellValue)
-                        elif ctype == CellType.Error: val = ""
-                        
-                        # Style
-                        style = cell.CellStyle
-                        font = style.GetFont(wb)
-                        
-                        # Fill Color Logic
-                        fg_color_str = None
-                        if style.FillPattern != FillPattern.NoFill:
-                            # Usually SolidForeground is what we want. 
-                            # If it's a pattern, Revit doesn't map easily, but we'll try ForegroundColor.
-                            fg_color_str = get_rgb(style.FillForegroundColorColor)
+                        # 2. Try Background (High Precision) - NPOI sometimes swaps these for Solid fills
+                        if (not bg_color_str or not bg_color_str[0]) and style.FillPattern == FillPattern.SolidForeground:
+                            bg_color_str = get_rgb(style.FillBackgroundColorColor, None)
                             
-                            # Fallback: Sometimes background color is used for solid fills in older Excel versions?
-                            # No, standard is FillForegroundColor for Solid.
+                        # 3. Fallback to Indexed Color (Low Precision)
+                        if not bg_color_str or not bg_color_str[0]:
+                            bg_color_str = get_rgb(style.FillForegroundColorColor, style)
+                    
+                    f_color_obj = None
+                    if hasattr(font, "GetXSSFColor"):
+                        # XSSF Font Color
+                        f_color_obj = font.GetXSSFColor()
+                    elif hasattr(font, "GetHSSFColor"):
+                        # HSSF Font Color
+                        f_color_obj = font.GetHSSFColor(wb)
+                    font_color = get_rgb(f_color_obj)
+                    
+                    font_data = {
+                        'name': font.FontName,
+                        'size': font.FontHeightInPoints,
+                        'bold': font.IsBold,
+                        'italic': font.IsItalic,
+                        'underline': font.Underline != 0, 
+                        'color': font_color
+                    }
+                    
+                    b_left, b_right, b_top, b_bottom = str(style.BorderLeft), str(style.BorderRight), str(style.BorderTop), str(style.BorderBottom)
+                    
+                    # Merge Border Logic
+                    if is_head and region:
+                        # Right Border
+                        if region.LastColumn > j:
+                            r_row = target_sheet.GetRow(i)
+                            if r_row:
+                                # Check the cell at the actual edge of the merge
+                                r_cell = r_row.GetCell(region.LastColumn) 
+                                if r_cell and r_cell.CellStyle:
+                                    b_right = str(r_cell.CellStyle.BorderRight)
+                                # Fallback: if edge cell is null, use head cell style (common in some Excel writers)
+                                elif style: b_right = str(style.BorderRight)
+                        # Bottom Border
+                        if region.LastRow > i:
+                            b_row = target_sheet.GetRow(region.LastRow)
+                            if b_row:
+                                b_cell = b_row.GetCell(j) # Check bottom-left cell of the column
+                                if b_cell and b_cell.CellStyle:
+                                    b_bottom = str(b_cell.CellStyle.BorderBottom)
+                                elif style: b_bottom = str(style.BorderBottom)
+
+                    borders = {
+                        'left': b_left,
+                        'right': b_right,
+                        'top': b_top,
+                        'bottom': b_bottom,
+                    }
+                    
+                    cell_data = {
+                        'row': i + 1,
+                        'col': j + 1,
+                        'value': val,
+                        'font': font_data,
+                        'fill': {'color': bg_color_str},
+                        'borders': borders,
+                        'align': str(style.Alignment),
+                        'v_align': str(style.VerticalAlignment),
+                        'wrap_text': style.WrapText
+                    }
+                    
+                    if is_head and region:
+                        cell_data['r_span'] = region.LastRow - region.FirstRow + 1
+                        cell_data['c_span'] = region.LastColumn - region.FirstColumn + 1
                         
-                        font_color = get_rgb(font.GetXSSFColor())
-                        
-                        font_data = {
-                            'name': font.FontName,
-                            'size': font.FontHeightInPoints,
-                            'bold': font.IsBold,
-                            'italic': font.IsItalic,
-                            'underline': font.Underline != 0, 
-                            'color': font_color
-                        }
-                        
-                        # Borders: Explicitly convert to String to match "THIN", "MEDIUM" etc.
-                        borders = {
-                            'left': str(style.BorderLeft),
-                            'right': str(style.BorderRight),
-                            'top': str(style.BorderTop),
-                            'bottom': str(style.BorderBottom),
-                        }
-                        
-                        # Alignment
-                        align = str(style.Alignment) 
-                        v_align = str(style.VerticalAlignment)
-                        wrap_text = style.WrapText
-                        
-                        cell_data = {
-                            'row': i + 1,
-                            'col': j + 1,
-                            'value': val,
-                            'font': font_data,
-                            'fill': {'color': fg_color_str},
-                            'borders': borders,
-                            'align': align,
-                            'v_align': v_align,
-                            'wrap_text': wrap_text
-                        }
-                        data['cells'].append(cell_data)
-                    except Exception as cell_ex:
-                        # print("Warning: Failed to read cell [{}, {}]: {}".format(i+1, j+1, str(cell_ex)))
-                        continue
+                    data['cells'].append(cell_data)
                     
     except Exception as e:
         print("Error reading Excel: " + str(e))
-        import traceback
-        traceback.print_exc()
         return None
         
     return data
-
-def save_to_json(data, file_path):
-    """Saves the extracted data to a JSON file (Schema Storage)."""
-    import json
-    try:
-        # Custom serializer for objects not natively serializable (though our dict should be clean)
-        with open(file_path, 'w') as f:
-            json.dump(data, f, indent=4)
-        return True
-    except Exception as e:
-        print("Error saving JSON: " + str(e))
-        return False
