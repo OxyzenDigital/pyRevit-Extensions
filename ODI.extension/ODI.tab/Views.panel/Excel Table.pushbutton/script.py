@@ -1,87 +1,131 @@
+# -*- coding: utf-8 -*-
+__title__ = "Excel Table"
+__version__ = "1.0.0"
+__doc__ = """Imports Excel ranges as Revit Annotation Families.
+Features:
+- Preserves Formatting (Fonts, Colors, Borders)
+- One-click Updates
+- Persistent Settings"""
+
 import os
 import sys
+import json
 import clr
 import System
+import tempfile
+import shutil
 from pyrevit import revit, DB, forms, script
 import excelextract
 
+# --- Debug Helper ---
+def log(msg):
+    print("[Debug] " + str(msg))
+
 # --- Constants ---
-SCHEMA_GUID = System.Guid("72945C5C-002F-433A-9610-061093123458")
-SCHEMA_NAME = "ODISmartExcelTable"
 FAMILY_PREFIX = "ODI_Excel_"
 
-# --- Schema Manager ---
-class TableMetadataManager(object):
-    @staticmethod
-    def get_schema():
-        schema = DB.ExtensibleStorage.Schema.Lookup(SCHEMA_GUID)
-        if not schema:
-            builder = DB.ExtensibleStorage.SchemaBuilder(SCHEMA_GUID)
-            builder.SetReadAccessLevel(DB.ExtensibleStorage.AccessLevel.Public)
-            builder.SetWriteAccessLevel(DB.ExtensibleStorage.AccessLevel.Public)
-            builder.SetSchemaName(SCHEMA_NAME)
-            builder.AddSimpleField("SourcePath", str)
-            builder.AddSimpleField("SheetName", str)
-            builder.AddSimpleField("RangeName", str)
-            builder.AddSimpleField("TextScale", str)
-            schema = builder.Finish()
-        return schema
-
-    @staticmethod
-    def save(element, source_path, sheet_name, range_name, text_scale=100.0):
-        if not element: return
+# --- Load Options ---
+class FamLoadOpt(DB.IFamilyLoadOptions, System.Object):
+    def OnFamilyFound(self, familyInUse, overwriteParameterValues):
+        if overwriteParameterValues is None:
+            log("FamLoadOpt: overwriteParameterValues is None")
+            return False
         try:
-            schema = TableMetadataManager.get_schema()
-            entity = DB.ExtensibleStorage.Entity(schema)
-            entity.Set("SourcePath", source_path or "")
-            entity.Set("SheetName", sheet_name or "")
-            entity.Set("RangeName", range_name or "")
-            entity.Set("TextScale", str(text_scale))
-            with DB.Transaction(element.Document, "Save Table Metadata") as t:
-                t.Start()
-                element.SetEntity(entity)
-                t.Commit()
+            overwriteParameterValues.Value = True
+            return True
         except Exception as e:
-            print("Failed to save metadata: " + str(e))
+            log("FamLoadOpt Error: " + str(e))
+            return False
+
+    def OnSharedFamilyFound(self, sharedFamily, familyInUse, source, overwriteParameterValues):
+        if source is None or overwriteParameterValues is None:
+            log("FamLoadOpt Shared: source or overwriteParameterValues is None")
+            return False
+        try:
+            source.Value = DB.FamilySource.Family
+            overwriteParameterValues.Value = True
+            return True
+        except Exception as e:
+            log("FamLoadOpt Shared Error: " + str(e))
+            return False
+
+# --- Warning Swallower ---
+class WarningSwallower(DB.IFailuresPreprocessor, System.Object):
+    def PreprocessFailures(self, failuresAccessor):
+        if failuresAccessor is None:
+            return DB.FailureProcessingResult.Continue
+        try:
+            failures = failuresAccessor.GetFailureMessages()
+            if not failures: return DB.FailureProcessingResult.Continue
+            
+            for f in failures:
+                if f.GetSeverity() == DB.FailureSeverity.Warning:
+                    failuresAccessor.DeleteWarning(f)
+            return DB.FailureProcessingResult.Continue
+        except Exception as e:
+            log("WarningSwallower Error: " + str(e))
+            return DB.FailureProcessingResult.Continue
+
+# --- Local Settings Manager (JSON) ---
+SETTINGS_DIR = os.path.join(os.getenv('APPDATA'), 'ODI_ExcelTable')
+if not os.path.exists(SETTINGS_DIR):
+    try: os.makedirs(SETTINGS_DIR)
+    except: pass
+SETTINGS_FILE = os.path.join(SETTINGS_DIR, "excel_table_map.json")
+
+class TableDataManager(object):
+    @staticmethod
+    def load_db():
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r') as f:
+                    return json.load(f)
+            except: pass
+        return {}
 
     @staticmethod
-    def get(element):
+    def save_db(db):
         try:
-            schema = TableMetadataManager.get_schema()
-            entity = element.GetEntity(schema)
-            if entity.IsValid():
-                # Safe get for new field
-                scale = 100.0
-                try: scale = float(entity.Get[str]("TextScale"))
-                except: pass
-                
-                return {
-                    "SourcePath": entity.Get[str]("SourcePath"),
-                    "SheetName": entity.Get[str]("SheetName"),
-                    "RangeName": entity.Get[str]("RangeName"),
-                    "TextScale": scale
-                }
-        except: pass
-        return None
+            with open(SETTINGS_FILE, 'w') as f:
+                json.dump(db, f, indent=2)
+        except Exception as e:
+            log("Error saving DB: " + str(e))
+
+    @staticmethod
+    def save_metadata(family, source_path, sheet_name, range_name, text_scale):
+        fam_name = family.Name if hasattr(family, "Name") else str(family)
+        db = TableDataManager.load_db()
+        db[fam_name] = {
+            "SourcePath": source_path,
+            "SheetName": sheet_name,
+            "RangeName": range_name,
+            "TextScale": text_scale
+        }
+        TableDataManager.save_db(db)
+
+    @staticmethod
+    def get_metadata(family_or_name):
+        fam_name = family_or_name
+        if hasattr(family_or_name, "Name"):
+            fam_name = family_or_name.Name
+        db = TableDataManager.load_db()
+        return db.get(fam_name)
 
 # --- Family Generation Logic ---
 class FamilyGenerator(object):
     @staticmethod
     def pixels_to_feet(px):
-        # NPOI Pixels -> 1/96 inch (Standard Screen DPI).
         if px <= 0: return 0.001
         return px * (1.0 / 96.0) * (1.0 / 12.0)
 
     @staticmethod
     def points_to_feet(pts):
-        # 1 pt = 1/72 inch (Standard). 
-        # User confirmed 1/96 failed for rows, so reverting to standard.
         return pts * (1.0 / 72.0) * (1.0 / 12.0)
 
     @staticmethod
     def text_points_to_feet(pts):
-        # User Request: Treat Points as 96 DPI (Pixels) for consistency.
-        return pts * (1.0 / 96.0) * (1.0 / 12.0)
+        val = pts * (1.0 / 96.0) * (1.0 / 12.0)
+        return max(val, 0.0005) # Ensure non-zero positive value
 
     @staticmethod
     def get_color_from_string(rgb_str):
@@ -94,87 +138,157 @@ class FamilyGenerator(object):
         return None
 
     @staticmethod
+    def safe_name(element):
+        try: return element.Name
+        except: return ""
+
+    @staticmethod
     def get_or_create_fill_type(doc, color, type_cache, solid_pat_id):
+        # Revit treats pure white (255,255,255) as black/inverse. 
+        # Force it to near-white (255,255,254) to ensure it stays white.
+        if int(color.Red) == 255 and int(color.Green) == 255 and int(color.Blue) == 255:
+            color = DB.Color(255, 255, 254)
+
         name = "Solid_{}_{}_{}".format(color.Red, color.Green, color.Blue)
         
+        # 1. Check Cache / Existing
         if name in type_cache:
-            return type_cache[name]
-        
-        # Base type for duplication (should be passed or found once, but for now find once if needed)
-        
+            existing = type_cache[name]
+            # Verify properties (If it's the same, use it)
+            try:
+                # Check Color
+                e_color = existing.ForegroundPatternColor
+                if not e_color.IsValid: e_color = existing.Color
+                color_match = (e_color.Red == color.Red and e_color.Green == color.Green and e_color.Blue == color.Blue)
+                
+                # Check Pattern
+                e_pat_id = existing.ForegroundPatternId
+                if e_pat_id == DB.ElementId.InvalidElementId: e_pat_id = existing.FillPatternId
+                pat_match = (not solid_pat_id) or (e_pat_id == solid_pat_id)
+                
+                if color_match and pat_match:
+                    return existing
+            except: pass
+            # If we are here, name exists but properties differ. We need a new unique name.
+            name = "{}_{}".format(name, str(System.Guid.NewGuid())[:8])
+
         base = DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).FirstElement()
         if not base: return None
         
-        try:
-            new_type = base.Duplicate(name)
-        except Exception:
-            # Race condition or name collision? Try to find it again just in case
-            for x in DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).ToElements():
-                if x.Name == name:
-                    type_cache[name] = x
-                    return x
-            return None
+        new_type = None
+        try: new_type = base.Duplicate(name)
+        except Exception as e:
+            # Try unique name if duplicate failed
+            try:
+                unique_name = "{}_{}".format(name, str(System.Guid.NewGuid())[:8])
+                new_type = base.Duplicate(unique_name)
+            except:
+                log("Warning: Could not create FillType '{}'. Using base. Error: {}".format(name, e))
+                return base
         
-        # Set Color (Support New and Old API)
+        # Set Color
         try: new_type.ForegroundPatternColor = color
         except: 
             try: new_type.Color = color
             except: pass
         
+        # Set Pattern
         if solid_pat_id:
             try: new_type.ForegroundPatternId = solid_pat_id
             except: 
                 try: new_type.FillPatternId = solid_pat_id
                 except: pass
         
-        type_cache[name] = new_type
+        # Cache using the requested name (or the unique one) to avoid re-creation
+        type_cache["Solid_{}_{}_{}".format(color.Red, color.Green, color.Blue)] = new_type
         return new_type
 
     @staticmethod
     def get_or_create_text_type(doc, font_data, type_cache):
-        color = FamilyGenerator.get_color_from_string(font_data['color']) or DB.Color(0,0,0)
+        c_data = font_data.get('color')
+        # Handle tuple (rgb_str, transparency) or string
+        rgb_str = c_data[0] if c_data and isinstance(c_data, tuple) else (c_data if c_data else "0,0,0")
+        color = FamilyGenerator.get_color_from_string(rgb_str) or DB.Color(0,0,0)
         
+        # Revit treats pure white (255,255,255) as black/inverse. 
+        # Force it to near-white (255,255,254) to ensure it stays white.
+        if int(color.Red) == 255 and int(color.Green) == 255 and int(color.Blue) == 255:
+            color = DB.Color(255, 255, 254)
+
         name = "{}_{}_{}{}_{}_{}_{}".format(
-            font_data['name'], 
-            int(font_data['size']),
-            "B" if font_data['bold'] else "",
-            "I" if font_data['italic'] else "",
-            color.Red, color.Green, color.Blue
+            font_data.get('name', 'Arial'), 
+            int(font_data.get('size', 10)),
+            "B" if font_data.get('bold') else "",
+            "I" if font_data.get('italic') else "",
+            int(color.Red), int(color.Green), int(color.Blue)
         ).replace(" ", "")
         
+        # 1. Check Cache / Existing
         if name in type_cache:
-            return type_cache[name]
+            existing = type_cache[name]
+            # Verify properties
+            try:
+                matches = True
+                # Font
+                p_font = existing.get_Parameter(DB.BuiltInParameter.TEXT_FONT)
+                if p_font and p_font.AsString() != font_data.get('name', 'Arial'): matches = False
+                
+                # Size
+                p_size = existing.get_Parameter(DB.BuiltInParameter.TEXT_SIZE)
+                target_size = FamilyGenerator.text_points_to_feet(font_data.get('size', 10))
+                if p_size and abs(p_size.AsDouble() - target_size) > 0.001: matches = False
+                
+                # Bold/Italic
+                p_bold = existing.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_BOLD)
+                if p_bold and p_bold.AsInteger() != (1 if font_data.get('bold') else 0): matches = False
+                
+                p_italic = existing.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_ITALIC)
+                if p_italic and p_italic.AsInteger() != (1 if font_data.get('italic') else 0): matches = False
+                
+                # Color
+                p_color = existing.get_Parameter(DB.BuiltInParameter.LINE_COLOR)
+                target_int = color.Red + (color.Green << 8) + (color.Blue << 16)
+                if p_color and p_color.AsInteger() != target_int: matches = False
+                
+                if matches: return existing
+            except: pass
+            # Properties differ, use unique name
+            name = "{}_{}".format(name, str(System.Guid.NewGuid())[:8])
         
         base = DB.FilteredElementCollector(doc).OfClass(DB.TextNoteType).FirstElement()
         if not base: return None
         
-        try:
-            new_type = base.Duplicate(name)
-        except Exception:
-             # Fallback lookup
-            for x in DB.FilteredElementCollector(doc).OfClass(DB.TextNoteType).ToElements():
-                if x.Name == name:
-                    type_cache[name] = x
-                    return x
-            return None
+        new_type = None
+        try: new_type = base.Duplicate(name)
+        except Exception as e:
+            # Try unique name
+            try:
+                unique_name = "{}_{}".format(name, str(System.Guid.NewGuid())[:8])
+                new_type = base.Duplicate(unique_name)
+            except:
+                log("Warning: Could not create TextType '{}'. Using base. Error: {}".format(name, e))
+                return base
         
-        # Set Props
-        # Font Name
-        new_type.get_Parameter(DB.BuiltInParameter.TEXT_FONT).Set(font_data['name'])
-        # Size (pts to ft) - Use corrected text size
-        size_ft = FamilyGenerator.text_points_to_feet(font_data['size'])
+        # Explicitly set parameters
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_FONT).Set(font_data.get('name', 'Arial'))
+        size_ft = FamilyGenerator.text_points_to_feet(font_data.get('size', 10))
         new_type.get_Parameter(DB.BuiltInParameter.TEXT_SIZE).Set(size_ft)
-        # Bold/Italic
-        new_type.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_BOLD).Set(1 if font_data['bold'] else 0)
-        new_type.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_ITALIC).Set(1 if font_data['italic'] else 0)
-        # Color
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_BOLD).Set(1 if font_data.get('bold') else 0)
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_STYLE_ITALIC).Set(1 if font_data.get('italic') else 0)
         new_type.get_Parameter(DB.BuiltInParameter.LINE_COLOR).Set(color.Red + (color.Green << 8) + (color.Blue << 16))
-        
-        # Width Factor & Background
         new_type.get_Parameter(DB.BuiltInParameter.TEXT_WIDTH_SCALE).Set(1.0)
-        new_type.get_Parameter(DB.BuiltInParameter.TEXT_BACKGROUND).Set(1) # 1 = Transparent
+        new_type.get_Parameter(DB.BuiltInParameter.TEXT_BACKGROUND).Set(1) 
         
-        type_cache[name] = new_type
+        # Cache the result mapped to the *original requested name* logic
+        # This ensures that next time we ask for "Arial_10...", we get this new valid type
+        original_name_key = "{}_{}_{}{}_{}_{}_{}".format(
+            font_data.get('name', 'Arial'), 
+            int(font_data.get('size', 10)),
+            "B" if font_data.get('bold') else "",
+            "I" if font_data.get('italic') else "",
+            int(color.Red), int(color.Green), int(color.Blue)
+        ).replace(" ", "")
+        type_cache[original_name_key] = new_type
         return new_type
 
     @staticmethod
@@ -192,12 +306,13 @@ class FamilyGenerator(object):
     def ensure_line_styles(doc):
         style_map = {}
         try:
-            # Safe Access to Category
             cat = None
             try: cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_GenericAnnotation)
             except: pass
             
-            if not cat: return {}
+            if not cat: 
+                log("Warning: Could not find Generic Annotation category.")
+                return {}
             
             styles = {
                 "ODI_Wide": 5,
@@ -205,33 +320,328 @@ class FamilyGenerator(object):
                 "ODI_Thin": 1
             }
             
+            cats_created = False
             for name, weight in styles.items():
-                subcat = None
+                if not cat.SubCategories.Contains(name):
+                    try:
+                        doc.Settings.Categories.NewSubcategory(cat, name)
+                        cats_created = True
+                    except Exception as e:
+                        log("Error creating subcategory '{}': {}".format(name, e))
+            
+            if cats_created:
+                doc.Regenerate()
+
+            for name, weight in styles.items():
                 if cat.SubCategories.Contains(name):
                     subcat = cat.SubCategories.get_Item(name)
-                else:
-                    try:
-                        subcat = doc.Settings.Categories.NewSubcategory(cat, name)
-                    except: pass
-                
-                if subcat:
                     try: subcat.LineWeight = weight
                     except: pass
                     
-                    # Find GraphicsStyle
                     gs_col = DB.FilteredElementCollector(doc).OfClass(DB.GraphicsStyle).ToElements()
-                    found_gs = next((g for g in gs_col if g.GraphicsStyleCategory.Name == name), None)
+                    found_gs = next((g for g in gs_col if g.GraphicsStyleCategory and g.GraphicsStyleCategory.Id == subcat.Id), None)
+                    
+                    # Fallback: Try matching by name if ID match fails
+                    if not found_gs:
+                        found_gs = next((g for g in gs_col if FamilyGenerator.safe_name(g) == name), None)
+                    
                     if found_gs:
                         style_map[name] = found_gs.Id
-        except: pass
+                    else:
+                        log("Warning: GraphicsStyle not found for subcategory '{}'".format(name))
+        except Exception as e:
+            log("Error ensuring line styles: " + str(e))
         return style_map
+    
+    @staticmethod
+    def get_invisible_style_id(doc):
+        # 1. Try Generic Annotation Category (Specific to Annotation Families)
+        try:
+            cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_GenericAnnotation)
+            if cat and cat.SubCategories.Contains("Invisible Lines"):
+                return cat.SubCategories.get_Item("Invisible Lines").GetGraphicsStyle(DB.GraphicsStyleType.Projection).Id
+        except: pass
+
+        # 2. Try Lines Category (Standard)
+        try:
+            cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_Lines)
+            if cat and cat.SubCategories.Contains("Invisible Lines"):
+                return cat.SubCategories.get_Item("Invisible Lines").GetGraphicsStyle(DB.GraphicsStyleType.Projection).Id
+        except: pass
+
+        # 3. Search all GraphicsStyles by name (Fallback)
+        for gs in DB.FilteredElementCollector(doc).OfClass(DB.GraphicsStyle):
+            name = FamilyGenerator.safe_name(gs)
+            if name == "<Invisible lines>" or name == "Invisible lines":
+                return gs.Id
+
+        return DB.ElementId.InvalidElementId
+
+    # --- Task-Based Managers ---
+    class FillManager(object):
+        def __init__(self):
+            self.fills = {} # Key: (rgb_str, transparency), Value: list of rects (x,y,w,h)
+
+        def add(self, rgb_str, transparency, x, y, w, h):
+            if not rgb_str: return
+            key = (rgb_str, transparency)
+            if key not in self.fills: self.fills[key] = []
+            self.fills[key].append((x, y, w, h))
+
+        def draw(self, doc, view, type_cache, solid_id, invisible_id):
+            log("Task: Drawing Fills ({} groups)...".format(len(self.fills)))
+            created_regions = []
+            eps = 0.0005
+
+            for (rgb_str, transparency), rects in self.fills.items():
+                color = FamilyGenerator.get_color_from_string(rgb_str)
+                if not color: continue
+                
+                ftype = FamilyGenerator.get_or_create_fill_type(doc, color, type_cache, solid_id)
+                if not ftype: continue
+
+                # 1. Merge Horizontally
+                sorted_rects = sorted(rects, key=lambda r: (-round(r[1], 5), round(r[0], 5)))
+                merged_h = []
+                if sorted_rects:
+                    curr_x, curr_y, curr_w, curr_h = sorted_rects[0]
+                    for i in range(1, len(sorted_rects)):
+                        nx, ny, nw, nh = sorted_rects[i]
+                        if abs(ny - curr_y) < 0.0001 and abs(nh - curr_h) < 0.0001 and abs(nx - (curr_x + curr_w)) < 0.0001:
+                            curr_w += nw
+                        else:
+                            merged_h.append((curr_x, curr_y, curr_w, curr_h))
+                            curr_x, curr_y, curr_w, curr_h = nx, ny, nw, nh
+                    merged_h.append((curr_x, curr_y, curr_w, curr_h))
+
+                # 2. Merge Vertically
+                sorted_v = sorted(merged_h, key=lambda r: (round(r[0], 5), -round(r[1], 5)))
+                final_rects = []
+                if sorted_v:
+                    curr_x, curr_y, curr_w, curr_h = sorted_v[0]
+                    for i in range(1, len(sorted_v)):
+                        nx, ny, nw, nh = sorted_v[i]
+                        if abs(nx - curr_x) < 0.0001 and abs(nw - curr_w) < 0.0001 and abs(ny - (curr_y - curr_h)) < 0.0001:
+                            curr_h += nh
+                        else:
+                            final_rects.append((curr_x, curr_y, curr_w, curr_h))
+                            curr_x, curr_y, curr_w, curr_h = nx, ny, nw, nh
+                    final_rects.append((curr_x, curr_y, curr_w, curr_h))
+
+                # 3. Create Regions
+                batch_size = 500
+                chunks = [final_rects[i:i + batch_size] for i in range(0, len(final_rects), batch_size)]
+                
+                for chunk in chunks:
+                    loops = System.Collections.Generic.List[DB.CurveLoop]()
+                    for (x, y, w, h) in chunk:
+                        sx, sy = x + eps, y - eps
+                        sw, sh = w - (2 * eps), h - (2 * eps)
+                        if sw <= 0 or sh <= 0: continue
+
+                        lines = System.Collections.Generic.List[DB.Curve]()
+                        p0, p1 = DB.XYZ(sx, sy, 0), DB.XYZ(sx + sw, sy, 0)
+                        p2, p3 = DB.XYZ(sx + sw, sy - sh, 0), DB.XYZ(sx, sy - sh, 0)
+                        
+                        lines.Add(DB.Line.CreateBound(p0, p1))
+                        lines.Add(DB.Line.CreateBound(p1, p2))
+                        lines.Add(DB.Line.CreateBound(p2, p3))
+                        lines.Add(DB.Line.CreateBound(p3, p0))
+                        try: loops.Add(DB.CurveLoop.Create(lines))
+                        except: pass
+
+                    if loops.Count > 0:
+                        try:
+                            fr = DB.FilledRegion.Create(doc, ftype.Id, view.Id, loops)
+                            if transparency > 0:
+                                p = fr.get_Parameter(DB.BuiltInParameter.TRANSPARENCY)
+                                if p and not p.IsReadOnly: p.Set(transparency)
+                            created_regions.append(fr)
+                        except Exception as e: log("Fill Create Error: " + str(e))
+            
+            # 4. Apply Invisible Lines (Requires Regeneration first)
+            if invisible_id != DB.ElementId.InvalidElementId and created_regions:
+                log("Regenerating to access sketches...")
+                doc.Regenerate()
+                
+                invisible_gs = doc.GetElement(invisible_id)
+                if invisible_gs:
+                    count_fixed = 0
+                    for fr in created_regions:
+                        try:
+                            # Try to find sketch
+                            sketch = None
+                            if hasattr(fr, "SketchId"):
+                                try:
+                                    sid = fr.SketchId
+                                    if sid != DB.ElementId.InvalidElementId:
+                                        sketch = doc.GetElement(sid)
+                                except: pass
+                            
+                            if not sketch:
+                                # Fallback search
+                                sketch = next((s for s in DB.FilteredElementCollector(doc).OfClass(DB.Sketch).ToElements() if s.OwnerId == fr.Id), None)
+                            
+                            if sketch:
+                                sketch_lines = DB.FilteredElementCollector(doc).OfClass(DB.CurveElement).WherePasses(DB.ElementOwnerFilter(sketch.Id)).ToElements()
+                                for line in sketch_lines:
+                                    try: line.LineStyle = invisible_gs
+                                    except: pass
+                                count_fixed += 1
+                        except: pass
+                    log("Applied invisible lines to {} regions.".format(count_fixed))
+                else:
+                    log("Invisible GraphicsStyle not found from ID.")
+
+    class BorderManager(object):
+        def __init__(self):
+            self.horiz = {}
+            self.vert = {}
+            self.styles = {
+                "NONE": 0, "THIN": 1, "HAIR": 1, "DOTTED": 1, "DASHED": 1,
+                "MEDIUM": 2, "MEDIUM_DASHED": 2, "THICK": 3, "DOUBLE": 3
+            }
+
+        def add(self, p1, p2, weight_key):
+            weight = self.styles.get(str(weight_key).upper(), 1) if weight_key and str(weight_key) != "0" else 0
+            if weight == 0: return
+
+            if abs(p1.Y - p2.Y) < 0.0001:
+                y = round(p1.Y, 5)
+                xs, xe = sorted([p1.X, p2.X])
+                if y not in self.horiz: self.horiz[y] = []
+                self.horiz[y].append((xs, xe, weight))
+            elif abs(p1.X - p2.X) < 0.0001:
+                x = round(p1.X, 5)
+                ys, ye = sorted([p1.Y, p2.Y])
+                if x not in self.vert: self.vert[x] = []
+                self.vert[x].append((ys, ye, weight))
+
+        def _resolve(self, segments):
+            if not segments: return []
+            # Split segments into points and find max weight for each interval.
+            # Round points to ensure continuity between adjacent cells.
+            raw_points = [s for s,e,w in segments] + [e for s,e,w in segments]
+            points = sorted(list(set([round(p, 5) for p in raw_points])))
+            
+            if len(points) < 2: return []
+            
+            resolved = []
+            for i in range(len(points) - 1):
+                p1, p2 = points[i], points[i+1]
+                mid = (p1 + p2) / 2.0
+                max_w = 0
+                for s, e, w in segments:
+                    if s <= mid and e >= mid:
+                        max_w = max(max_w, w)
+                if max_w > 0:
+                    resolved.append({'s': p1, 'e': p2, 'w': max_w})
+            
+            # Merge adjacent equal weights
+            if not resolved: return []
+            merged = []
+            curr = resolved[0]
+            for i in range(1, len(resolved)):
+                nxt = resolved[i]
+                if abs(curr['e'] - nxt['s']) < 0.0001 and curr['w'] == nxt['w']:
+                    curr['e'] = nxt['e']
+                else:
+                    merged.append(curr)
+                    curr = nxt
+            merged.append(curr)
+            return merged
+
+        def _get_style_id(self, weight, cache):
+            if weight >= 3: return cache.get("ODI_Wide", DB.ElementId.InvalidElementId)
+            elif weight == 2: return cache.get("ODI_Medium", DB.ElementId.InvalidElementId)
+            else: return cache.get("ODI_Thin", DB.ElementId.InvalidElementId)
+
+        def draw(self, doc, view, style_cache):
+            log("Task: Drawing Borders...")
+            cnt = 0
+            # Horizontal
+            for y, segs in self.horiz.items():
+                for r in self._resolve(segs):
+                    if abs(r['e'] - r['s']) > 0.0025:
+                        l = DB.Line.CreateBound(DB.XYZ(r['s'], y, 0), DB.XYZ(r['e'], y, 0))
+                        try:
+                            dc = doc.FamilyCreate.NewDetailCurve(view, l)
+                            sid = self._get_style_id(r['w'], style_cache)
+                            if sid != DB.ElementId.InvalidElementId: dc.LineStyle = doc.GetElement(sid)
+                            cnt += 1
+                        except: pass
+            # Vertical
+            for x, segs in self.vert.items():
+                for r in self._resolve(segs):
+                    if abs(r['e'] - r['s']) > 0.0025:
+                        l = DB.Line.CreateBound(DB.XYZ(x, r['s'], 0), DB.XYZ(x, r['e'], 0))
+                        try:
+                            dc = doc.FamilyCreate.NewDetailCurve(view, l)
+                            sid = self._get_style_id(r['w'], style_cache)
+                            if sid != DB.ElementId.InvalidElementId: dc.LineStyle = doc.GetElement(sid)
+                            cnt += 1
+                        except: pass
+            log("Borders Drawn: {}".format(cnt))
+
+    class TextManager(object):
+        def __init__(self):
+            self.texts = []
+
+        def add(self, val, font_data, x, y, w, h, align_h, align_v, wrap):
+            if val:
+                self.texts.append({
+                    'val': val, 'font': font_data, 
+                    'x': x, 'y': y, 'w': w, 'h': h,
+                    'ah': align_h, 'av': align_v, 'wrap': wrap
+                })
+
+        def draw(self, doc, view, type_cache, scale):
+            log("Task: Drawing Text ({} items)...".format(len(self.texts)))
+            cnt = 0
+            for t in self.texts:
+                scaled_font = t['font'].copy()
+                scaled_font['size'] = scaled_font.get('size', 10) * scale
+                
+                ttype = FamilyGenerator.get_or_create_text_type(doc, scaled_font, type_cache)
+                if not ttype: continue
+
+                # Alignment
+                r_align_h = DB.HorizontalTextAlignment.Left
+                ins_x = t['x'] + 0.002
+                if 'Center' in t['ah']:
+                    r_align_h = DB.HorizontalTextAlignment.Center
+                    ins_x = t['x'] + t['w'] / 2.0
+                elif 'Right' in t['ah']:
+                    r_align_h = DB.HorizontalTextAlignment.Right
+                    ins_x = t['x'] + t['w'] - 0.002
+                
+                r_align_v = DB.VerticalTextAlignment.Bottom
+                ins_y = t['y'] - t['h'] + 0.002
+                if 'Center' in t['av']:
+                    r_align_v = DB.VerticalTextAlignment.Middle
+                    ins_y = t['y'] - t['h'] / 2.0
+                elif 'Top' in t['av']:
+                    r_align_v = DB.VerticalTextAlignment.Top
+                    ins_y = t['y'] - 0.002
+
+                try:
+                    tn = DB.TextNote.Create(doc, view.Id, DB.XYZ(ins_x, ins_y, 0), t['val'], ttype.Id)
+                    tn.HorizontalAlignment = r_align_h
+                    tn.VerticalAlignment = r_align_v
+                    if t['wrap']:
+                        tn.Width = max(t['w'] - 0.004, 0.005) # Min width ~1.5mm
+                    cnt += 1
+                except Exception as e: log("Text Create Failed: " + str(e))
+            log("Text Notes Created: {}".format(cnt))
 
     @staticmethod
     def draw_content(fam_doc, data, text_scale=1.0):
-        # View Finding
-        ref_view = next((v for v in DB.FilteredElementCollector(fam_doc).OfClass(DB.View).ToElements() 
-                         if not v.IsTemplate and v.ViewType != DB.ViewType.ProjectBrowser), None)
-        if not ref_view: return False
+        log("Starting draw_content...")
+        views = [v for v in DB.FilteredElementCollector(fam_doc).OfClass(DB.View).ToElements() if not v.IsTemplate and v.ViewType != DB.ViewType.ProjectBrowser]
+        ref_view = next((v for v in views if v.Name == "Ref. Level"), views[0] if views else None)
+        if not ref_view: 
+            log("No valid view found in family.")
+            return False
 
         with DB.Transaction(fam_doc, "Draw Excel Data") as t:
             t.Start()
@@ -243,244 +653,57 @@ class FamilyGenerator(object):
                 if isinstance(el, (DB.DetailCurve, DB.TextNote, DB.FilledRegion)):
                     ids_to_del.Add(el.Id)
             if ids_to_del.Count > 0:
-                fam_doc.Delete(ids_to_del)
+                try: fam_doc.Delete(ids_to_del)
+                except: pass
 
-            # --- Optimization: Cache Types ---
-            def get_type_name(e):
-                p = e.get_Parameter(DB.BuiltInParameter.SYMBOL_NAME_PARAM)
-                return p.AsString() if p else ""
-
-            text_type_cache = {get_type_name(t): t for t in DB.FilteredElementCollector(fam_doc).OfClass(DB.TextNoteType).ToElements()}
-            fill_type_cache = {get_type_name(t): t for t in DB.FilteredElementCollector(fam_doc).OfClass(DB.FilledRegionType).ToElements()}
+            # Caches (Use safe_name to prevent crashes on invalid elements)
+            text_type_cache = {FamilyGenerator.safe_name(t): t for t in DB.FilteredElementCollector(fam_doc).OfClass(DB.TextNoteType).ToElements()}
+            fill_type_cache = {FamilyGenerator.safe_name(t): t for t in DB.FilteredElementCollector(fam_doc).OfClass(DB.FilledRegionType).ToElements()}
             
+            # Solid Pattern
             solid_pat_id = None
-            sp = next((p for p in DB.FilteredElementCollector(fam_doc).OfClass(DB.FillPatternElement).ToElements() if p.GetFillPattern().IsSolidFill), None)
+            pats = DB.FilteredElementCollector(fam_doc).OfClass(DB.FillPatternElement).ToElements()
+            sp = next((p for p in pats if p.GetFillPattern().IsSolidFill), None)
+            if not sp:
+                sp = next((p for p in pats if FamilyGenerator.safe_name(p) in ["<Solid>", "Solid Fill"]), None)
             if sp: solid_pat_id = sp.Id
+            else: log("Warning: No Solid Fill Pattern found.")
 
-            # Ensure Styles
+            # Line Styles
             line_style_map = FamilyGenerator.ensure_line_styles(fam_doc)
+            invisible_style_id = FamilyGenerator.get_invisible_style_id(fam_doc)
+            log("Line Styles Mapped: {}".format(line_style_map.keys()))
 
-            # Pre-calc dimensions
-            row_y = {}
-            col_x = {}
+            # --- Task Managers ---
+            fill_mgr = FamilyGenerator.FillManager()
+            border_mgr = FamilyGenerator.BorderManager()
+            text_mgr = FamilyGenerator.TextManager()
+
+            # --- 1. Coordinate Mapping ---
+            row_y, col_x = {}, {}
+            curr_y, curr_x = 0.0, 0.0
             
-            curr_y = 0.0
-            sorted_rows = sorted([int(k) for k in data['row_heights'].keys()])
-            for r in sorted_rows:
+            for r in sorted([int(k) for k in data['row_heights'].keys()]):
                 row_y[r] = curr_y
                 rh = data['row_heights'].get(str(r), 12.75)
-                curr_y -= max(FamilyGenerator.points_to_feet(rh), 0.005) # Min height
+                curr_y -= max(FamilyGenerator.points_to_feet(rh), 0.005)
             
-            curr_x = 0.0
-            sorted_cols = sorted([int(k) for k in data['column_widths'].keys()])
-            for c in sorted_cols:
+            for c in sorted([int(k) for k in data['column_widths'].keys()]):
                 col_x[c] = curr_x
                 cw_px = data['column_widths'].get(str(c), 64.0)
-                curr_x += max(FamilyGenerator.pixels_to_feet(cw_px), 0.005) # Min width
+                curr_x += max(FamilyGenerator.pixels_to_feet(cw_px), 0.005)
 
-            # --- Geometry Optimizer (Style Aware) ---
-            class StyleAwareOptimizer:
-                def __init__(self):
-                    # Key: Coordinate (Y or X), Value: List of (start, end, weight)
-                    self.horiz_lines = {}
-                    self.vert_lines = {}
-                    # Fills: key=ColorStr, val=[(x, y, w, h)]
-                    self.fills = {}
-
-                def add_line(self, p1, p2, weight=1):
-                    # Normalize checks
-                    if abs(p1.Y - p2.Y) < 0.0001: # Horizontal
-                        y = round(p1.Y, 5)
-                        xs, xe = sorted([p1.X, p2.X])
-                        if y not in self.horiz_lines: self.horiz_lines[y] = []
-                        self.horiz_lines[y].append((xs, xe, weight))
-                    elif abs(p1.X - p2.X) < 0.0001: # Vertical
-                        x = round(p1.X, 5)
-                        ys, ye = sorted([p1.Y, p2.Y])
-                        if x not in self.vert_lines: self.vert_lines[x] = []
-                        self.vert_lines[x].append((ys, ye, weight))
-
-                def add_fill(self, color_str, x, y, w, h):
-                    if not color_str: return
-                    if color_str not in self.fills: self.fills[color_str] = []
-                    self.fills[color_str].append((x, y, w, h))
-                
-                def resolve_intervals(self, segments):
-                    """
-                    Resolves overlapping segments using a priority (weight) system.
-                    Input: List of (start, end, weight)
-                    Output: List of (start, end, weight) with no overlaps and merged neighbors.
-                    """
-                    if not segments: return []
-                    
-                    # 1. Collect all unique split points
-                    points = set()
-                    for s, e, w in segments:
-                        points.add(s)
-                        points.add(e)
-                    sorted_points = sorted(list(points))
-                    
-                    if len(sorted_points) < 2: return []
-                    
-                    # 2. Create atomic intervals and find max weight for each
-                    resolved = []
-                    for i in range(len(sorted_points) - 1):
-                        p1 = sorted_points[i]
-                        p2 = sorted_points[i+1]
-                        mid = (p1 + p2) / 2.0
-                        
-                        max_w = 0 # 0 means no line
-                        for s, e, w in segments:
-                            if s <= mid and e >= mid:
-                                if w > max_w: max_w = w
-                        
-                        if max_w > 0:
-                            resolved.append({'s': p1, 'e': p2, 'w': max_w})
-                            
-                    # 3. Merge adjacent intervals with same weight
-                    if not resolved: return []
-                    
-                    merged = []
-                    curr = resolved[0]
-                    
-                    for i in range(1, len(resolved)):
-                        next_int = resolved[i]
-                        # Check continuity and same weight
-                        if abs(curr['e'] - next_int['s']) < 0.0001 and curr['w'] == next_int['w']:
-                            curr['e'] = next_int['e'] # Extend
-                        else:
-                            merged.append(curr)
-                            curr = next_int
-                    merged.append(curr)
-                    
-                    return [(m['s'], m['e'], m['w']) for m in merged]
-
-                def get_line_style_id(self, doc, weight, cache):
-                    # Map weight to subcategory ID
-                    if weight >= 3: return cache.get("ODI_Wide", DB.ElementId.InvalidElementId)
-                    elif weight == 2: return cache.get("ODI_Medium", DB.ElementId.InvalidElementId)
-                    else: return cache.get("ODI_Thin", DB.ElementId.InvalidElementId)
-
-                def draw_lines(self, doc, view, style_cache):
-                    # Draw Horizontal
-                    for y, segments in self.horiz_lines.items():
-                        final_segments = self.resolve_intervals(segments)
-                        for s, e, w in final_segments:
-                            if abs(e - s) > 0.001:
-                                l = DB.Line.CreateBound(DB.XYZ(s, y, 0), DB.XYZ(e, y, 0))
-                                try:
-                                    dc = doc.FamilyCreate.NewDetailCurve(view, l)
-                                    gs_id = self.get_line_style_id(doc, w, style_cache)
-                                    if gs_id != DB.ElementId.InvalidElementId:
-                                        dc.LineStyle = doc.GetElement(gs_id)
-                                except: pass
-
-                    # Draw Vertical
-                    for x, segments in self.vert_lines.items():
-                        final_segments = self.resolve_intervals(segments)
-                        for s, e, w in final_segments:
-                            if abs(e - s) > 0.001:
-                                l = DB.Line.CreateBound(DB.XYZ(x, s, 0), DB.XYZ(x, e, 0))
-                                try:
-                                    dc = doc.FamilyCreate.NewDetailCurve(view, l)
-                                    gs_id = self.get_line_style_id(doc, w, style_cache)
-                                    if gs_id != DB.ElementId.InvalidElementId:
-                                        dc.LineStyle = doc.GetElement(gs_id)
-                                except: pass
-
-                def draw_fills(self, doc, view, type_cache, solid_id):
-                    for color_str, rects in self.fills.items():
-                        color = FamilyGenerator.get_color_from_string(color_str)
-                        if not color: continue
-                        
-                        # Improved FillType Creation
-                        name = "Solid_{}_{}_{}".format(color.Red, color.Green, color.Blue)
-                        ftype = None
-                        if name in type_cache:
-                            ftype = type_cache[name]
-                        else:
-                             # Create New
-                             base = DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).FirstElement()
-                             if base:
-                                 try: ftype = base.Duplicate(name)
-                                 except: 
-                                     # Try finding again
-                                     for x in DB.FilteredElementCollector(doc).OfClass(DB.FilledRegionType).ToElements():
-                                         if x.Name == name: ftype = x; break
-                                 
-                                 if ftype:
-                                     # Modern API (2019+)
-                                     try: ftype.ForegroundPatternColor = color
-                                     except: 
-                                         try: ftype.Color = color
-                                         except: pass
-                                     
-                                     if solid_id:
-                                         try: ftype.ForegroundPatternId = solid_id
-                                         except: 
-                                              try: ftype.FillPatternId = solid_id
-                                              except: pass
-                                     
-                                     type_cache[name] = ftype
-                        
-                        if not ftype: continue
-
-                        # Batch loops. Limit to 500 per region to be safe
-                        batch_size = 500
-                        chunks = [rects[i:i + batch_size] for i in range(0, len(rects), batch_size)]
-                        
-                        for chunk in chunks:
-                            loops = System.Collections.Generic.List[DB.CurveLoop]()
-                            for (x, y, w, h) in chunk:
-                                lines = [
-                                    DB.Line.CreateBound(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0)),
-                                    DB.Line.CreateBound(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0)),
-                                    DB.Line.CreateBound(DB.XYZ(x+w, y-h, 0), DB.XYZ(x, y-h, 0)),
-                                    DB.Line.CreateBound(DB.XYZ(x, y-h, 0), DB.XYZ(x, y, 0))
-                                ]
-                                try:
-                                    loop = DB.CurveLoop.Create(lines)
-                                    loops.Add(loop)
-                                except: pass
-                            
-                            if loops.Count > 0:
-                                try: DB.FilledRegion.Create(doc, ftype.Id, view.Id, loops)
-                                except: pass
-
-            optimizer = StyleAwareOptimizer()
-
-            # Border Weight Mapping (NPOI Strings -> Int Priority)
-            BORDER_WEIGHTS = {
-                "NONE": 0,
-                "THIN": 1,
-                "HAIR": 1,
-                "DOTTED": 1,
-                "DASHED": 1,
-                "MEDIUM": 2,
-                "MEDIUM_DASHED": 2,
-                "THICK": 3,
-                "DOUBLE": 3
-            }
-
-            # Iterate Cells
+            # --- 2. Data Collection ---
             for cell in data['cells']:
                 r, c = cell['row'], cell['col']
-                
                 if r not in row_y or c not in col_x: continue
                 
-                # Dimensions with Span
                 x = col_x[c]
                 y = row_y[r]
                 
-                # Check spans
-                r_span = 1
-                c_span = 1
-                merge_key = "{},{}".format(r, c)
-                if merge_key in data['merges']:
-                    r_span = data['merges'][merge_key]['r_span']
-                    c_span = data['merges'][merge_key]['c_span']
+                r_span = cell.get('r_span', 1)
+                c_span = cell.get('c_span', 1)
                 
-                # Calculate W/H based on span
                 w = 0.0
                 for cs in range(c_span):
                     target_c = c + cs
@@ -495,113 +718,160 @@ class FamilyGenerator(object):
                         rh = data['row_heights'].get(str(target_r), 12.75)
                         h += max(FamilyGenerator.points_to_feet(rh), 0.005)
                 
-                # Register Fill
-                fill_color = cell.get('fill', {}).get('color')
-                if fill_color:
-                    optimizer.add_fill(fill_color, x, y, w, h)
+                # Fill
+                rgb_info = cell.get('fill', {}).get('color')
+                if rgb_info and rgb_info[0]:
+                    fill_mgr.add(rgb_info[0], rgb_info[1], x, y, w, h)
 
-                # Register Borders
+                # Borders
                 borders = cell.get('borders', {})
-                
-                def get_w(b_val):
-                    return BORDER_WEIGHTS.get(str(b_val).upper(), 1) if b_val and str(b_val) != "0" else 0
+                border_mgr.add(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0), borders.get('top'))
+                border_mgr.add(DB.XYZ(x, y-h, 0), DB.XYZ(x+w, y-h, 0), borders.get('bottom'))
+                border_mgr.add(DB.XYZ(x, y, 0), DB.XYZ(x, y-h, 0), borders.get('left'))
+                border_mgr.add(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0), borders.get('right'))
 
-                wt = get_w(borders.get('top'))
-                if wt > 0: optimizer.add_line(DB.XYZ(x, y, 0), DB.XYZ(x+w, y, 0), wt)
-                
-                wb = get_w(borders.get('bottom'))
-                if wb > 0: optimizer.add_line(DB.XYZ(x, y-h, 0), DB.XYZ(x+w, y-h, 0), wb)
-                
-                wl = get_w(borders.get('left'))
-                if wl > 0: optimizer.add_line(DB.XYZ(x, y, 0), DB.XYZ(x, y-h, 0), wl)
-                
-                wr = get_w(borders.get('right'))
-                if wr > 0: optimizer.add_line(DB.XYZ(x+w, y, 0), DB.XYZ(x+w, y-h, 0), wr)
+                # Text
+                if cell['value']:
+                    text_mgr.add(cell['value'], cell['font'], x, y, w, h, 
+                                 cell.get('align', 'Left'), cell.get('v_align', 'Bottom'), 
+                                 cell.get('wrap_text', False))
 
-                # Draw Text (Keep as is, but improved checking)
-                val = cell['value']
-                if val:
-                    scaled_font = cell['font'].copy()
-                    scaled_font['size'] = scaled_font['size'] * text_scale
-                    
-                    text_type = FamilyGenerator.get_or_create_text_type(fam_doc, scaled_font, text_type_cache)
-                    
-                    align_h = cell.get('align', 'Left')
-                    align_v = cell.get('v_align', 'Bottom')
-                    
-                    revit_h_align = DB.HorizontalTextAlignment.Left
-                    ins_x = x + 0.002
-                    
-                    if 'Center' in align_h:
-                        revit_h_align = DB.HorizontalTextAlignment.Center
-                        ins_x = x + w / 2.0
-                    elif 'Right' in align_h:
-                        revit_h_align = DB.HorizontalTextAlignment.Right
-                        ins_x = x + w - 0.002
-                    
-                    revit_v_align = DB.VerticalTextAlignment.Bottom
-                    ins_y = y - h + 0.002
-                    
-                    if 'Center' in align_v:
-                        revit_v_align = DB.VerticalTextAlignment.Middle
-                        ins_y = y - h / 2.0
-                    elif 'Top' in align_v:
-                        revit_v_align = DB.VerticalTextAlignment.Top
-                        ins_y = y - 0.002
-                        
-                    insertion_point = DB.XYZ(ins_x, ins_y, 0)
+            # --- 3. Execution Phase ---
+            fill_mgr.draw(fam_doc, ref_view, fill_type_cache, solid_pat_id, invisible_style_id)
+            border_mgr.draw(fam_doc, ref_view, line_style_map)
+            text_mgr.draw(fam_doc, ref_view, text_type_cache, text_scale)
 
-                    try:
-                        tn = DB.TextNote.Create(fam_doc, ref_view.Id, insertion_point, val, text_type.Id)
-                        tn.HorizontalAlignment = revit_h_align
-                        tn.VerticalAlignment = revit_v_align
-                        
-                        should_wrap = cell.get('wrap_text', False)
-                        if should_wrap:
-                            tn.Width = max(w - 0.004, 0.001) 
-                    except: pass
-            
-            # Execute Optimization
-            optimizer.draw_fills(fam_doc, ref_view, fill_type_cache, solid_pat_id)
-            optimizer.draw_lines(fam_doc, ref_view, line_style_map)
-
-            t.Commit()
+            log("Regenerating Family Document...")
+            fam_doc.Regenerate()
+            log("Committing Transaction...")
+            if t.Commit() != DB.TransactionStatus.Committed:
+                log("Draw Content Transaction Failed")
+                return False
+            log("Transaction Committed.")
         return True
 
     @staticmethod
-    def load_family(fam_doc):
-        class FamLoadOpt(DB.IFamilyLoadOptions):
-            def OnFamilyFound(self, familyInUse, overwriteParameterValues):
-                overwriteParameterValues.Value = True
-                return True
-            def OnSharedFamilyFound(self, sharedFamily, familyInUse, source, overwriteParameterValues):
-                source.Value = DB.FamilySource.Family
-                overwriteParameterValues.Value = True
-                return True
+    def load_family_to_project(fam_doc, target_name, existing_family_id=None):
+        """
+        Loads the family into the project.
+        Prioritizes Memory Load to avoid 'DocumentSaving' event triggers (SaveAs) which cause crashes 
+        with some external add-ins.
+        """
+        # Check if project is modifiable before starting
+        if revit.doc.IsReadOnly:
+            log("Error: Project document is Read-Only.")
+            return None
+
+        loaded_fam = None
         
+        # --- Attempt 1: Memory Load (Primary) ---
         try:
-            return fam_doc.LoadFamily(revit.doc)
-        except:
-            try:
-                return fam_doc.LoadFamily(revit.doc, FamLoadOpt())
-            except Exception as e:
-                print("Error Loading Family: " + str(e))
-                return None
+            # Memory Load requires the document to NOT be modifiable (no open transaction).
+            # It handles its own transaction internally.
+            load_opt = FamLoadOpt()
+            loaded_fam = fam_doc.LoadFamily(revit.doc, load_opt)
+                
+        except Exception as e:
+            log("Memory Load Failed: " + str(e))
+            loaded_fam = None
+
+        if loaded_fam:
+            try: fam_doc.Close(False)
+            except: pass
+            return loaded_fam
+
+        # --- Attempt 2: Disk Load (Fallback) ---
+        log("Attempting Disk Load Fallback...")
+        app = revit.doc.Application
+        temp_folder = None
+        try:
+            temp_folder = tempfile.mkdtemp()
+            safe_name = "".join([c for c in target_name if c.isalnum() or c in (' ', '-', '_', '(', ')', '.')]).strip()
+            if not safe_name: safe_name = "ExcelTable"
+            if not safe_name.lower().endswith(".rfa"): safe_name += ".rfa"
+            temp_path = os.path.join(temp_folder, safe_name)
+            
+            # Save Family
+            save_opt = DB.SaveAsOptions()
+            save_opt.OverwriteExistingFile = True
+            fam_doc.SaveAs(temp_path, save_opt)
+            
+            # Close Memory Doc
+            try: fam_doc.Close(False)
+            except: pass
+            
+            # Load from Disk
+            loaded_fam_ref = clr.Reference[DB.Family]()
+            with DB.Transaction(revit.doc, "Load Excel Table (Disk)") as t:
+                t.Start()
+                
+                swallower = WarningSwallower()
+                fho = t.GetFailureHandlingOptions()
+                fho.SetFailuresPreprocessor(swallower)
+                t.SetFailureHandlingOptions(fho)
+                
+                load_opt = FamLoadOpt()
+                load_success = revit.doc.LoadFamily(temp_path, load_opt, loaded_fam_ref)
+                revit.doc.Regenerate()
+                
+                if t.Commit() != DB.TransactionStatus.Committed:
+                    return None
+                
+                if loaded_fam_ref.Value:
+                    loaded_fam = loaded_fam_ref.Value
+                elif load_success:
+                    if existing_family_id:
+                        try: loaded_fam = revit.doc.GetElement(existing_family_id)
+                        except: pass
+                    if not loaded_fam:
+                        loaded_fam = next((f for f in DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements() if f.Name == target_name), None)
+
+        except Exception as e:
+            log("Disk Load Failed: " + str(e))
+        finally:
+            if temp_folder and os.path.exists(temp_folder):
+                try: shutil.rmtree(temp_folder)
+                except: pass
+        
+        return loaded_fam
 
 # --- Main App Logic ---
 def perform_family_update(family, data, text_scale=1.0):
-    fam_doc = revit.doc.EditFamily(family)
-    success = FamilyGenerator.draw_content(fam_doc, data, text_scale)
-    
-    result = None
-    if success:
-        result = FamilyGenerator.load_family(fam_doc)
+    if not family.IsEditable:
+        log("Cannot edit System Family: " + family.Name)
+        return None
         
-    fam_doc.Close(False)
-    return result
+    fam_doc = None
+    try:
+        log("Editing Family: " + family.Name)
+        fam_doc = revit.doc.EditFamily(family)
+        
+        log("Drawing Content...")
+        success = FamilyGenerator.draw_content(fam_doc, data, text_scale)
+        
+        if success:
+            # Force timestamp to ensure change detection
+            try:
+                with DB.Transaction(fam_doc, "Update Timestamp") as t_time:
+                    t_time.Start()
+                    p = fam_doc.OwnerFamily.get_Parameter(DB.BuiltInParameter.ALL_MODEL_DESCRIPTION)
+                    if p: p.Set("Updated: " + str(System.DateTime.Now))
+                    t_time.Commit()
+            except Exception as e:
+                log("Timestamp update failed: " + str(e))
+
+            return FamilyGenerator.load_family_to_project(fam_doc, family.Name, family.Id)
+        else:
+            fam_doc.Close(False)
+            return None
+    except Exception as e:
+        log("Error during update: " + str(e))
+        if fam_doc:
+            try: fam_doc.Close(False)
+            except: pass
+        return None
 
 def create_table(file_path, sheet_name, range_name, table_name, text_scale_percent=100.0):
-    # Check Exists
     existing_fam = next((f for f in DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements() if f.Name == table_name), None)
     
     data = excelextract.get_excel_data(file_path, sheet_name, range_name)
@@ -612,13 +882,26 @@ def create_table(file_path, sheet_name, range_name, table_name, text_scale_perce
     if existing_fam:
         res = forms.alert("Table '{}' already exists.\nUpdate it with new data?".format(table_name), options=["Update", "Cancel"])
         if res == "Update":
-            updated_fam = perform_family_update(existing_fam, data, scale_factor)
-            if updated_fam:
-                TableMetadataManager.save(updated_fam, file_path, sheet_name, range_name, text_scale_percent)
-                print("Table updated successfully.")
+            # Deselect to prevent silent rejection during family update
+            try:
+                revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]())
+                revit.uidoc.RefreshActiveView()
+            except: pass
+
+            with DB.TransactionGroup(revit.doc, "Update Excel Table") as tg:
+                tg.Start()
+                updated_fam = perform_family_update(existing_fam, data, scale_factor)
+                if updated_fam:
+                    TableDataManager.save_metadata(updated_fam, file_path, sheet_name, range_name, text_scale_percent)
+                    log("Table updated successfully.")
+                    tg.Assimilate()
+                    try: revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]([updated_fam.Id]))
+                    except: pass
+                else:
+                    tg.RollBack()
+                    forms.alert("Failed to update table. Check log for details.")
         return
 
-    # Create New
     template = FamilyGenerator.get_template_path()
     if not template: return
 
@@ -629,39 +912,44 @@ def create_table(file_path, sheet_name, range_name, table_name, text_scale_perce
     success = FamilyGenerator.draw_content(fam_doc, data, scale_factor)
     
     if success:
-        fam = FamilyGenerator.load_family(fam_doc)
-        fam_doc.Close(False)
+        # Load using the unified method (handles saving/naming/loading)
+        fam = FamilyGenerator.load_family_to_project(fam_doc, table_name)
         
         if fam:
-            # Rename
-            try:
-                with revit.Transaction("Rename Table Family"):
-                    fam.Name = table_name
-                    
-                    # Rename Type to match Family Name
-                    symbol_ids = fam.GetFamilySymbolIds()
-                    if symbol_ids:
-                        for sid in symbol_ids:
-                            symbol = revit.doc.GetElement(sid)
-                            if symbol:
-                                symbol.Name = table_name
-                            break # Rename the first/default type only
-                        
-            except Exception as e_rename:
-                print("Warning: Rename failed. Family is named '{}'. Error: {}".format(fam.Name, str(e_rename)))
+            # Ensure name matches (in case fallback memory load was used)
+            if fam.Name != table_name:
+                try:
+                    with revit.Transaction("Rename Table Family"):
+                        fam.Name = table_name
+                        # Also rename the type/symbol if possible
+                        for sid in fam.GetFamilySymbolIds():
+                            s = revit.doc.GetElement(sid)
+                            if s: s.Name = table_name
+                            break
+                except: pass
             
-            TableMetadataManager.save(fam, file_path, sheet_name, range_name, text_scale_percent)
-            
-            forms.alert("Excel Table '{}' loaded successfully.".format(fam.Name))
+            TableDataManager.save_metadata(fam, file_path, sheet_name, range_name, text_scale_percent)
+            try: revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]([fam.Id]))
+            except: pass
+        else:
+            # If load failed, fam_doc might still be open if it wasn't closed by load_family_to_project
+            try: fam_doc.Close(False)
+            except: pass
     else:
         fam_doc.Close(False)
 
 def update_table(instance):
+    # Deselect to prevent silent rejection during family update
+    try:
+        revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]())
+        revit.uidoc.RefreshActiveView()
+    except: pass
+
     fam = instance.Symbol.Family
-    meta = TableMetadataManager.get(fam) or TableMetadataManager.get(instance)
+    meta = TableDataManager.get_metadata(fam)
     
     if not meta:
-        forms.alert("Not a linked Excel Table.")
+        forms.alert("Not a linked Excel Table (No local settings found).")
         return
     
     if not os.path.exists(meta["SourcePath"]):
@@ -669,30 +957,71 @@ def update_table(instance):
         return
         
     data = excelextract.get_excel_data(meta["SourcePath"], meta["SheetName"], meta["RangeName"])
-    if not data: return
+    if not data: 
+        forms.alert("Failed to read Excel data. Check file path and permissions.")
+        return
     
-    scale_pct = meta.get("TextScale", 100.0)
+    scale_pct = meta.get("TextScale", 80.0)
     scale_factor = scale_pct / 100.0
     
-    if perform_family_update(fam, data, scale_factor):
-        print("Table updated.")
+    updated_fam = perform_family_update(fam, data, scale_factor)
+    if updated_fam:
+        TableDataManager.save_metadata(updated_fam, meta["SourcePath"], meta["SheetName"], meta["RangeName"], scale_pct)
+        log("Table updated.")
+        revit.uidoc.RefreshActiveView()
+        try: revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]([instance.Id]))
+        except: pass
+    else:
+        log("Update failed (Family object not returned).")
+        forms.alert("Failed to update table family.")
 
 # --- UI ---
 class NamedRangeItem(object):
     def __init__(self, data):
         self.name = data['name']
-        self.sheet = data['sheet'] if data['sheet'] else "Workbook"
+        self.sheet = data['sheet'] if data['sheet'] else "Global"
         self.formula = data['formula']
 
 class ExcelScheduleWindow(forms.WPFWindow):
-    def __init__(self):
+    def __init__(self, metadata=None):
         forms.WPFWindow.__init__(self, 'ui.xaml')
         self.excel_path = None
+        self.initial_metadata = metadata
         self.Loaded += self.window_loaded
 
     def window_loaded(self, sender, args):
-        self.Tb_Scale.Text = "80"
-        self.Btn_Browse_Click(None, None)
+        if self.initial_metadata:
+            self.load_initial_settings(self.initial_metadata)
+        else:
+            self.Tb_Scale.Text = "80"
+            self.Btn_Browse_Click(None, None)
+
+    def load_initial_settings(self, meta):
+        path = meta.get("SourcePath")
+        if path and os.path.exists(path):
+            self.excel_path = path
+            self.Tb_FilePath.Text = path
+            self.Tb_Scale.Text = str(meta.get("TextScale", "80"))
+            if meta.get("FamilyName"):
+                self.Tb_Name.Text = meta["FamilyName"]
+            self.refresh_data()
+            
+            target_sheet = meta.get("SheetName")
+            if target_sheet and self.Cb_Sheets.ItemsSource:
+                for item in self.Cb_Sheets.ItemsSource:
+                    if item == target_sheet:
+                        self.Cb_Sheets.SelectedItem = item
+                        break
+            
+            target_range = meta.get("RangeName")
+            if target_range and self.Cb_Ranges.ItemsSource:
+                for item in self.Cb_Ranges.ItemsSource:
+                    if item.name == target_range:
+                        self.Cb_Ranges.SelectedItem = item
+                        break
+        else:
+            self.Tb_Scale.Text = "80"
+            self.Btn_Browse_Click(None, None)
 
     def Btn_Browse_Click(self, sender, args):
         f = forms.pick_file(file_ext='xlsx')
@@ -716,19 +1045,15 @@ class ExcelScheduleWindow(forms.WPFWindow):
         try:
             t_name = self.Tb_Name.Text
             if not t_name: return
-            
-            # Find existing family
-            fam = next((f for f in DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements() if f.Name == t_name), None)
-            if fam:
-                meta = TableMetadataManager.get(fam)
-                if meta and meta.get("TextScale"):
-                    self.Tb_Scale.Text = str(meta["TextScale"])
+            meta = TableDataManager.get_metadata(t_name)
+            if meta and meta.get("TextScale"):
+                self.Tb_Scale.Text = str(meta["TextScale"])
         except: pass
 
     def Cb_Sheets_SelectionChanged(self, sender, args):
         if self.Cb_Sheets.SelectedItem:
-            self.Tb_Name.Text = "{}{}_Table".format(FAMILY_PREFIX, self.Cb_Sheets.SelectedItem)
-            self.check_existing_scale()
+             self.Tb_Name.Text = "{}{}_Table".format(FAMILY_PREFIX, self.Cb_Sheets.SelectedItem)
+             self.check_existing_scale()
 
     def Cb_Ranges_SelectionChanged(self, sender, args):
         sel = self.Cb_Ranges.SelectedItem
@@ -744,8 +1069,7 @@ class ExcelScheduleWindow(forms.WPFWindow):
         n = self.Tb_Name.Text or FAMILY_PREFIX + "Table"
         
         scale_pct = 80.0
-        try:
-            scale_pct = float(self.Tb_Scale.Text)
+        try: scale_pct = float(self.Tb_Scale.Text)
         except: pass
         
         self.Close()
@@ -756,12 +1080,13 @@ class ExcelScheduleWindow(forms.WPFWindow):
 
 # --- Entry ---
 sel = revit.get_selection()
+initial_meta = None
+
 if len(sel) == 1 and isinstance(sel[0], DB.FamilyInstance):
     fam = sel[0].Symbol.Family
-    meta = TableMetadataManager.get(fam) or TableMetadataManager.get(sel[0])
+    meta = TableDataManager.get_metadata(fam)
     if meta and meta["SourcePath"]:
-        if forms.alert("Update this Excel Table?", options=["Update", "Create New..."]) == "Update":
-            update_table(sel[0])
-            script.exit()
+        initial_meta = meta
+        initial_meta["FamilyName"] = fam.Name
 
-ExcelScheduleWindow().ShowDialog()
+ExcelScheduleWindow(initial_meta).ShowDialog()
