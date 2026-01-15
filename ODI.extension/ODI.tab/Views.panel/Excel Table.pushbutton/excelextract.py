@@ -372,6 +372,7 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                         'borders': borders,
                         'align': str(style.Alignment),
                         'v_align': str(style.VerticalAlignment),
+                        'indent': style.Indention,
                         'wrap_text': style.WrapText
                     }
                     
