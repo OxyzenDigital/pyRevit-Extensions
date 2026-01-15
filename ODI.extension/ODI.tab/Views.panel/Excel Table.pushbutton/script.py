@@ -587,12 +587,12 @@ class FamilyGenerator(object):
         def __init__(self):
             self.texts = []
 
-        def add(self, val, font_data, x, y, w, h, align_h, align_v, wrap):
+        def add(self, val, font_data, x, y, w, h, align_h, align_v, indent, wrap):
             if val:
                 self.texts.append({
                     'val': val, 'font': font_data, 
                     'x': x, 'y': y, 'w': w, 'h': h,
-                    'ah': align_h, 'av': align_v, 'wrap': wrap
+                    'ah': align_h, 'av': align_v, 'indent': indent, 'wrap': wrap
                 })
 
         def draw(self, doc, view, type_cache, scale):
@@ -606,6 +606,10 @@ class FamilyGenerator(object):
                 if not ttype: continue
 
                 # Alignment
+                indent_level = t.get('indent', 0)
+                indent_offset = indent_level * 0.009
+                width_reduction = 0.0
+
                 r_align_h = DB.HorizontalTextAlignment.Left
                 ins_x = t['x'] + 0.002
                 if 'Center' in t['ah']:
@@ -613,7 +617,11 @@ class FamilyGenerator(object):
                     ins_x = t['x'] + t['w'] / 2.0
                 elif 'Right' in t['ah']:
                     r_align_h = DB.HorizontalTextAlignment.Right
-                    ins_x = t['x'] + t['w'] - 0.002
+                    ins_x = t['x'] + t['w'] - 0.002 - indent_offset
+                    width_reduction = indent_offset
+                else:
+                    ins_x = t['x'] + 0.002 + indent_offset
+                    width_reduction = indent_offset
                 
                 r_align_v = DB.VerticalTextAlignment.Bottom
                 ins_y = t['y'] - t['h'] + 0.002
@@ -629,7 +637,7 @@ class FamilyGenerator(object):
                     tn.HorizontalAlignment = r_align_h
                     tn.VerticalAlignment = r_align_v
                     if t['wrap']:
-                        tn.Width = max(t['w'] - 0.004, 0.005) # Min width ~1.5mm
+                        tn.Width = max(t['w'] - 0.004 - width_reduction, 0.005) # Min width ~1.5mm
                     cnt += 1
                 except Exception as e: log("Text Create Failed: " + str(e))
             log("Text Notes Created: {}".format(cnt))
@@ -734,6 +742,7 @@ class FamilyGenerator(object):
                 if cell['value']:
                     text_mgr.add(cell['value'], cell['font'], x, y, w, h, 
                                  cell.get('align', 'Left'), cell.get('v_align', 'Bottom'), 
+                                 cell.get('indent', 0),
                                  cell.get('wrap_text', False))
 
             # --- 3. Execution Phase ---
