@@ -1,5 +1,0 @@
-name: "Create Light Fixture Schedule View"
-description: "Creates a light schedule view in the model."
-author: "Oxyzen Digital Inc"
-version: "1.0"
-output: "self"

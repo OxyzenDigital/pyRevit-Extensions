@@ -1,7 +1,0 @@
-title:
-  en_us: Excel Table
-  fr_fr: Tableau Excel
-tooltip:
-  en_us: Import Excel data as a Generic Annotation family.
-# highlight: new
-run-mode: "automatic"

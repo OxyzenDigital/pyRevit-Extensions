@@ -1,5 +1,0 @@
-name: "Create Legend View"
-description: "Creates a legend view with text loaded from a .txt file."
-author: "Oxyzen Digital Inc"
-version: "1.0"
-output: "self"
