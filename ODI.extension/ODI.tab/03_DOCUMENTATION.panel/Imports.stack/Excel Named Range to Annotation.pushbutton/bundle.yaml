@@ -1,0 +1,7 @@
+title:
+  en_us: Excel Named Range to Annotation
+  fr_fr: Tableau Excel
+tooltip:
+  en_us: Import Excel data as a Generic Annotation family.
+# highlight: new
+run-mode: "automatic"

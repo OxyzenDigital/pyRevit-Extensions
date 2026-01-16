@@ -1,5 +1,0 @@
-name: "Create Equipment Schedule View"
-description: "Creates a schedule view in the model."
-author: "Oxyzen Digital Inc"
-version: "1.0"
-output: "self"
