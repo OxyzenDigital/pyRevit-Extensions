@@ -1165,11 +1165,11 @@ def perform_sculpt(state):
                 else:
                     # For curves, use derivatives
                     t0 = curve.GetEndParameter(0)
-                    tan0 = curve.ComputeDerivatives(t0, True).BasisX
+                    tan0 = curve.ComputeDerivatives(t0, False).BasisX
                     tan0_xy = XYZ(tan0.X, tan0.Y, 0)
                     
                     t1 = curve.GetEndParameter(1)
-                    tan1 = curve.ComputeDerivatives(t1, True).BasisX
+                    tan1 = curve.ComputeDerivatives(t1, False).BasisX
                     tan1_xy = XYZ(tan1.X, tan1.Y, 0)
 
                     if not tan0_xy.IsZeroLength() and not tan1_xy.IsZeroLength():
