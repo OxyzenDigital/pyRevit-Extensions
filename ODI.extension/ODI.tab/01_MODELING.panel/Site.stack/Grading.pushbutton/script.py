@@ -22,7 +22,8 @@ from System.Collections.Generic import List
 from Autodesk.Revit.DB import (
     XYZ, Transaction, TransactionGroup, ElementId, BuiltInParameter,
     ReferenceIntersector, FindReferenceTarget, Options, Solid, ViewType, Edge,
-    ElementTransformUtils, FamilyInstance, CurveElement, UnitUtils, SpecTypeId
+    ElementTransformUtils, FamilyInstance, CurveElement, UnitUtils, SpecTypeId, Line,
+    FilteredElementCollector, Family
 )
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
 from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, AccessLevel
@@ -184,6 +185,7 @@ def save_state_to_disk(state):
         "grid": state.grid, 
         "slope": state.slope_val, 
         "mode": state.mode,
+        "square_ends": state.square_ends,
         "win_top": str(state.win_top),
         "win_left": str(state.win_left)
     }
@@ -204,6 +206,7 @@ class GradingState(object):
         self.grid = sets.get("grid", "3.0")
         self.slope_val = sets.get("slope", "2.0")
         self.mode = sets.get("mode", "stakes")
+        self.square_ends = sets.get("square_ends", False)
         self.reset_mode = False
         
         self.win_top = float(sets.get("win_top", "100"))
@@ -239,9 +242,9 @@ class GradingWindow(forms.WPFWindow):
             if self.state.win_left > 0: self.Left = self.state.win_left
         except: pass
         
+        self.apply_revit_theme()
         self.bind_ui()
         self.setup_events()
-        self.apply_revit_theme()
 
     def refresh_ui(self):
         from System.Windows import Media
@@ -295,6 +298,31 @@ class GradingWindow(forms.WPFWindow):
         
         # 5. Reset Mode
         self.Cb_ResetPoints.IsChecked = self.state.reset_mode
+        
+        # 6. Square Ends
+        if hasattr(self, "Cb_SquareEnds"):
+            self.Cb_SquareEnds.IsChecked = self.state.square_ends
+            
+        # 7. Calculated Slope
+        slope_info = "Slope: -"
+        if self.state.start_stake and self.state.end_stake:
+            try:
+                if self.state.start_stake.IsValidObject and self.state.end_stake.IsValidObject:
+                    p1 = self.state.start_stake.Location.Point
+                    p2 = self.state.end_stake.Location.Point
+                    
+                    d_xy = flatten(p1).DistanceTo(flatten(p2))
+                    d_z = p2.Z - p1.Z
+                    
+                    if d_xy > 0.01:
+                        s_pct = (d_z / d_xy) * 100.0
+                        d_z_disp = UnitHelper.from_internal(d_z)
+                        slope_info = "Slope: {:.2f}% (ΔZ: {:.2f})".format(s_pct, d_z_disp)
+                    else:
+                        slope_info = "Slope: Vertical"
+            except: pass
+        if hasattr(self, "Lb_CalculatedSlope"):
+            self.Lb_CalculatedSlope.Text = slope_info
 
     def bind_ui(self):
         # Initial Bind
@@ -441,6 +469,8 @@ class GradingWindow(forms.WPFWindow):
         self.state.grid = str(UnitHelper.to_internal(self.Tb_Grid.Text))
         self.state.slope_val = self.Tb_Slope.Text
         self.state.reset_mode = self.Cb_ResetPoints.IsChecked
+        if hasattr(self, "Cb_SquareEnds"):
+            self.state.square_ends = self.Cb_SquareEnds.IsChecked
 
     def a_stakes(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_stakes"; self.Close()
     def a_line(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_line"; self.Close()
@@ -642,6 +672,7 @@ def perform_load_recipe(state):
             state.grid = str(data.get("grid", "3.0"))
             state.slope_val = str(data.get("slope", "2.0"))
             state.mode = str(data.get("mode", "stakes"))
+            state.square_ends = data.get("square_ends", False)
             log.info("Recipe loaded successfully.")
         else:
             log.info("No grading recipe found on this element.")
@@ -1108,6 +1139,57 @@ def perform_sculpt(state):
         core_rad = w_int / 2.0
 
         total_rad = core_rad + f_int
+        
+        # Pre-calc for Square Ends (Generic for Lines & Curves)
+        check_square_ends = False
+        sq_start_pt = None
+        sq_start_tan = None
+        sq_end_pt = None
+        sq_end_tan = None
+
+        if state.square_ends:
+            try:
+                sq_start_pt = curve.GetEndPoint(0)
+                sq_end_pt = curve.GetEndPoint(1)
+                
+                # Robust Tangent Calculation
+                if isinstance(curve, Line):
+                    # For lines, simple subtraction is safer/faster
+                    vec = (sq_end_pt - sq_start_pt)
+                    vec_xy = XYZ(vec.X, vec.Y, 0)
+                    if not vec_xy.IsZeroLength():
+                        tan = vec_xy.Normalize()
+                        sq_start_tan = tan
+                        sq_end_tan = tan
+                        check_square_ends = True
+                else:
+                    # For curves, use derivatives
+                    t0 = curve.GetEndParameter(0)
+                    tan0 = curve.ComputeDerivatives(t0, True).BasisX
+                    tan0_xy = XYZ(tan0.X, tan0.Y, 0)
+                    
+                    t1 = curve.GetEndParameter(1)
+                    tan1 = curve.ComputeDerivatives(t1, True).BasisX
+                    tan1_xy = XYZ(tan1.X, tan1.Y, 0)
+
+                    if not tan0_xy.IsZeroLength() and not tan1_xy.IsZeroLength():
+                        sq_start_tan = tan0_xy.Normalize()
+                        sq_end_tan = tan1_xy.Normalize()
+                        check_square_ends = True
+                
+                if check_square_ends:
+                    log.info("Square Ends Active.")
+            except Exception as e:
+                log.error("Square Ends Calc Failed", e)
+
+        def is_outside_bounds(pt):
+            if not check_square_ends: return False
+            # Strict 2D check
+            v_s = XYZ(pt.X - sq_start_pt.X, pt.Y - sq_start_pt.Y, 0)
+            if v_s.DotProduct(sq_start_tan) < -0.001: return True
+            v_e = XYZ(pt.X - sq_end_pt.X, pt.Y - sq_end_pt.Y, 0)
+            if v_e.DotProduct(sq_end_tan) > 0.001: return True
+            return False
 
         
 
@@ -1134,6 +1216,8 @@ def perform_sculpt(state):
                 to_delete = []
 
                 for v in editor.SlabShapeVertices:
+                    # When resetting, we must clear the full "bulbous" zone to remove old artifacts.
+                    # We do NOT check is_outside_bounds() here, so that old rounded tips get deleted.
 
                     res = curve.Project(v.Position)
 
@@ -1230,6 +1314,7 @@ def perform_sculpt(state):
                     candidates_checked += 1
 
                     t_pt = XYZ(x, y, 0)
+                    if is_outside_bounds(t_pt): y += g_int; continue
 
                     res = curve.Project(t_pt)
 
@@ -1314,6 +1399,7 @@ def perform_sculpt(state):
             
 
             for v in current_verts:
+                if is_outside_bounds(v.Position): continue
 
                 res = curve.Project(v.Position)
 
@@ -1623,10 +1709,49 @@ def perform_edging(state):
 # They cannot be individually hidden via API. Users must hide the "Folding Lines" 
 # subcategory in Visibility/Graphics to make them invisible.
 
+def ensure_grade_stake_family():
+    """Checks for ODI-GradeStake family and loads it if missing."""
+    log = BatchLogger()
+    fam_name = "ODI-GradeStake"
+    
+    # Check if already loaded
+    collector = FilteredElementCollector(doc).OfClass(Family)
+    if any(f.Name == fam_name for f in collector):
+        return
+
+    log.info("Family '{}' missing. Attempting to load...".format(fam_name))
+
+    # Construct path: .../Site.stack/resources/ODI-GradeStake.rfa
+    # __file__ is inside .../Site.stack/Grading.pushbutton/script.py
+    # We use abspath to ensure we don't rely on the Current Working Directory (CWD)
+    script_path = os.path.abspath(__file__)
+    stack_dir = os.path.dirname(os.path.dirname(script_path))
+    fam_path = os.path.join(stack_dir, "_Resources", "ODI-GradeStake.rfa")
+    log.info("Target Family Path: {}".format(fam_path))
+
+    if os.path.exists(fam_path):
+        t = Transaction(doc, "Load Grading Stake Family")
+        t.Start()
+        try:
+            if doc.LoadFamily(fam_path):
+                t.Commit()
+                log.info("Family loaded successfully.")
+            else:
+                t.RollBack()
+                log.error("Revit LoadFamily returned False.")
+        except Exception as e:
+            t.RollBack()
+            log.error("Error loading family.", e)
+    else:
+        log.error("Family file not found at path.")
+
+    log.show()
+
 # ==========================================
 # 6. LOOP
 # ==========================================
 if __name__ == '__main__':
+    ensure_grade_stake_family()
     state = GradingState()
     while True:
         win = GradingWindow(state)
