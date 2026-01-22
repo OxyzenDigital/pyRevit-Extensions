@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*- 
 # Grading Assistant v1.0
 # Developed by Oxyzen Digital
 # Description: Advanced Toposolid grading tool with sculpting, edging, and auto-triangulation features.
@@ -20,10 +20,10 @@ clr.AddReference('PresentationFramework')
 # --- IMPORTS ---
 from System.Collections.Generic import List
 from Autodesk.Revit.DB import (
-    XYZ, Transaction, TransactionGroup, ElementId, BuiltInParameter,
+    XYZ, Transaction, TransactionGroup, ElementId, BuiltInParameter, BuiltInCategory,
     ReferenceIntersector, FindReferenceTarget, Options, Solid, ViewType, Edge,
     ElementTransformUtils, FamilyInstance, CurveElement, UnitUtils, SpecTypeId, Line,
-    FilteredElementCollector, Family
+    FilteredElementCollector, Family, Toposolid
 )
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
 from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, AccessLevel
@@ -128,6 +128,7 @@ class BatchLogger(object):
 
 def get_id_val(element):
     if not element: return -1
+    if not hasattr(element, "Id"): return -1
     try: return element.Id.Value
     except AttributeError: return element.Id.IntegerValue
 
@@ -210,7 +211,7 @@ class GradingState(object):
         self.reset_mode = False
         
         self.win_top = float(sets.get("win_top", "100"))
-        self.win_left = float(sets.get("win_left", "100"))
+        self.win_left = float(sets.get("win_left", "100")),
         
         self.start_stake = None
         self.end_stake = None
@@ -509,14 +510,30 @@ def is_too_close(candidate_pt, occupied_points, tolerance=MIN_DIST_TOLERANCE):
         if cand_flat.DistanceTo(flatten(existing)) < tolerance: return True
     return False
 
-def get_surface_z(intersector, pt, start_z):
-    if not intersector: return None
-    origin = XYZ(pt.X, pt.Y, start_z + 10.0) 
+def get_surface_info(intersector, pt, start_z):
+    """Returns (Z_value, ElementId) of the surface hit at pt (x,y)."""
+    if not intersector: return (None, None)
+    origin = XYZ(pt.X, pt.Y, start_z + 50.0) # Start high
     try:
+        # FindNearest finds the first hit
         context = intersector.FindNearest(origin, XYZ(0, 0, -1))
-        if context: return context.GetReference().GlobalPoint.Z
+        if context: 
+            ref = context.GetReference()
+            return (ref.GlobalPoint.Z, ref.ElementId)
     except: pass
-    return None
+    return (None, None)
+
+def get_subdivision_offset(doc, elem_id):
+    """Checks if the element is a subdivision and returns its height parameter."""
+    if not elem_id or elem_id == ElementId.InvalidElementId: return 0.0
+    try:
+        el = doc.GetElement(elem_id)
+        # Check if it has HostTopoId (Revit 2024+)
+        if hasattr(el, "HostTopoId") and el.HostTopoId != ElementId.InvalidElementId:
+            p = el.get_Parameter(BuiltInParameter.TOPOSOLID_SUBDIV_HEIGHT)
+            if p: return p.AsDouble()
+    except: pass
+    return 0.0
 
 def get_boundary_curves(toposolid):
     opt = Options(); opt.ComputeReferences = True
@@ -538,6 +555,21 @@ def get_z_from_curve_param(curve, projected_result, z_start, z_end):
 
 def get_line_ends(curve):
     return curve.GetEndPoint(0), curve.GetEndPoint(1)
+
+def resolve_toposolid_host(doc, element):
+    """
+    Checks if the selected Toposolid is a Subdivision.
+    If so, returns the Host Toposolid (the one with the points).
+    """
+    try:
+        # Revit 2024+ Property for Toposolid Subdivision Host
+        if hasattr(element, "HostTopoId"):
+            hid = element.HostTopoId
+            if hid and hid != ElementId.InvalidElementId:
+                host = doc.GetElement(hid)
+                if host: return host
+    except: pass
+    return element
 
 def validate_input(state, log):
     """Failsafe check for basic inputs and parameter logic before processing."""
@@ -639,7 +671,7 @@ def calculate_and_adjust_stakes(state, log):
                     if abs(diff_z) > 0.001:
                         vec = XYZ(0, 0, diff_z)
                         ElementTransformUtils.MoveElement(doc, state.end_stake.Id, vec)
-                except: 
+                except:
                     # Fallback for families constrained to host
                     try:
                         p = state.end_stake.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
@@ -670,8 +702,8 @@ def perform_load_recipe(state):
             state.width = str(data.get("width", "6.0"))
             state.falloff = str(data.get("falloff", "10.0"))
             state.grid = str(data.get("grid", "3.0"))
-            state.slope_val = str(data.get("slope", "2.0"))
-            state.mode = str(data.get("mode", "stakes"))
+            state.slope_val = str(data.get("slope", "2.0")),
+            state.mode = str(data.get("mode", "stakes")),
             state.square_ends = data.get("square_ends", False)
             log.info("Recipe loaded successfully.")
         else:
@@ -795,7 +827,7 @@ def get_chain_of_edges(toposolid, start_edge):
             f0 = edge.GetFace(0)
             f1 = edge.GetFace(1)
             
-            if not f0 or not f1: return True # Keep if we can't determine (safe fallback)
+            if not f0 or not f1: return True # Keep if we can't determine (safe fallback) 
             
             def is_up(face):
                 # Using face.ComputeNormal at UV center is robust for Planar/Ruled faces
@@ -891,8 +923,11 @@ def perform_manual_stitch(state):
             log.error("Selected object is not a valid Edge.")
             log.show(); return
 
-        toposolid = edge_elem
-        log.info("Selected Toposolid ID: {}".format(toposolid.Id))
+        toposolid = resolve_toposolid_host(doc, edge_elem)
+        if toposolid.Id != edge_elem.Id:
+            log.info("Switching to Host Toposolid ID: {}".format(toposolid.Id))
+        else:
+            log.info("Selected Toposolid ID: {}".format(toposolid.Id))
         
         # NEW: Get the full chain of connected edges
         log.info("Tracing connected boundary edges...")
@@ -993,154 +1028,92 @@ def perform_swap(state):
         state.start_stake, state.end_stake = state.end_stake, state.start_stake
 
 def perform_sculpt(state):
-
     log = BatchLogger()
-
     if not validate_input(state, log):
-
         log.show()
-
         return
-
-
 
     # Safety Check
-
     if doc.IsModifiable:
-
         log.error("Another transaction is currently active.", "Please finish or cancel the active command before running this tool.")
-
         log.show()
-
         return
 
-
-
     try:
-
         # 1. Parse Inputs & Log
-
         w_int = float(state.width)
-
         f_int = float(state.falloff)
-
         g_int = float(state.grid)
-
         
-
         log.info("--- SCULPT STARTED ---")
-
         log.info("Parameters (Internal Ft): Width={:.2f}, Falloff={:.2f}, Grid={:.2f}".format(w_int, f_int, g_int))
-
         
-
         try:
-
             ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid to Grade")
+            raw_elem = doc.GetElement(ref)
+            toposolid = resolve_toposolid_host(doc, raw_elem)
 
-            toposolid = doc.GetElement(ref)
-
-            log.info("Selected Toposolid ID: {}".format(toposolid.Id))
+            if toposolid.Id != raw_elem.Id:
+                log.info("Selected Element is a Subdivision. Targeting Host Toposolid ID: {}".format(toposolid.Id))
+            else:
+                log.info("Selected Toposolid ID: {}".format(toposolid.Id))
 
         except:
-
             return # Cancelled
-
             
-
         if not toposolid:
-
             log.error("Invalid Toposolid selection.")
-
             log.show(); return
 
-
-
     except Exception as e:
-
         log.error("Invalid parameter inputs.", e)
-
         log.show(); return
 
-
-
     tg = TransactionGroup(doc, "Sculpt Terrain")
-
     tg.Start()
-
     
-
     try:
-
         # Save Recipe
-
         rec = {
-
             "width": state.width, 
-
             "falloff": state.falloff, 
-
             "grid": state.grid,
-
             "slope": state.slope_val,
-
             "mode": state.mode
-
         }
-
         
-
         t_rec = Transaction(doc, "Save Recipe")
-
         t_rec.Start()
-
         try:
-
             GradingRecipe.save_recipe(toposolid, rec)
-
             t_rec.Commit()
-
         except: t_rec.RollBack()
 
-
-
         # Calculation
-
         z_s, z_e = calculate_and_adjust_stakes(state, log)
-
         log.info("Stake Elevations: Start={:.2f}, End={:.2f}".format(z_s, z_e))
-
         
-
-        ids = List[ElementId]([toposolid.Id])
-
+        # Initialize Intersector for Raycasting Context
+        # We need this even if 2D, but for Z checks we need 3D view usually.
+        # Ensure we look for ALL Toposolids (Host + Subdivisions)
         intersector = None
-
-        ray_start_z = get_toposolid_max_z(toposolid)
-
+        ray_start_z = get_toposolid_max_z(toposolid) + 100.0
         
-
         if doc.ActiveView.ViewType == ViewType.ThreeD:
-
+            # Collect all Toposolids to intersect against
+            col = FilteredElementCollector(doc).OfClass(Toposolid).WhereElementIsNotElementType()
+            ids = List[ElementId]([e.Id for e in col])
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
-
         else:
-
-            log.info("Warning: Active view is not 3D. Raycasting for new points might be less accurate.")
-
-
+            log.info("Warning: Active view is not 3D. Raycasting required for Subdivision support.")
 
         curve = state.grading_line.GeometryCurve
-
         log.info("Guide Line Length: {:.2f}".format(curve.Length))
 
-
-
         core_rad = w_int / 2.0
-
         total_rad = core_rad + f_int
         
-        # Pre-calc for Square Ends (Generic for Lines & Curves)
+        # Pre-calc for Square Ends
         check_square_ends = False
         sq_start_pt = None
         sq_start_tan = None
@@ -1152,9 +1125,7 @@ def perform_sculpt(state):
                 sq_start_pt = curve.GetEndPoint(0)
                 sq_end_pt = curve.GetEndPoint(1)
                 
-                # Robust Tangent Calculation
                 if isinstance(curve, Line):
-                    # For lines, simple subtraction is safer/faster
                     vec = (sq_end_pt - sq_start_pt)
                     vec_xy = XYZ(vec.X, vec.Y, 0)
                     if not vec_xy.IsZeroLength():
@@ -1163,7 +1134,6 @@ def perform_sculpt(state):
                         sq_end_tan = tan
                         check_square_ends = True
                 else:
-                    # For curves, use derivatives
                     t0 = curve.GetEndParameter(0)
                     tan0 = curve.ComputeDerivatives(t0, False).BasisX
                     tan0_xy = XYZ(tan0.X, tan0.Y, 0)
@@ -1184,337 +1154,188 @@ def perform_sculpt(state):
 
         def is_outside_bounds(pt):
             if not check_square_ends: return False
-            # Strict 2D check
             v_s = XYZ(pt.X - sq_start_pt.X, pt.Y - sq_start_pt.Y, 0)
             if v_s.DotProduct(sq_start_tan) < -0.001: return True
             v_e = XYZ(pt.X - sq_end_pt.X, pt.Y - sq_end_pt.Y, 0)
             if v_e.DotProduct(sq_end_tan) > 0.001: return True
             return False
 
-        
-
         # Phase 0: Reset (Optional)
-
         if state.reset_mode:
-
             log.info("--- PHASE 0: RESET POINTS ---")
-
             t0 = Transaction(doc, "Reset Points")
-
             t0.Start()
-
             try:
-
                 editor = toposolid.GetSlabShapeEditor()
-
                 editor.Enable()
-
-                
-
-                # Identify points to remove
-
                 to_delete = []
-
                 for v in editor.SlabShapeVertices:
-                    # When resetting, we must clear the full "bulbous" zone to remove old artifacts.
-                    # We do NOT check is_outside_bounds() here, so that old rounded tips get deleted.
-
                     res = curve.Project(v.Position)
-
                     if res:
-
                         d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
-
                         if d < (total_rad + g_int):
-
                             to_delete.append(v)
-
                 
-
                 if to_delete:
-
                     count_del = 0
-
                     for v_del in to_delete:
-
                         try:
-
                             editor.DeletePoint(v_del)
-
                             count_del += 1
-
                         except: pass
-
                     log.info("Removed {} old points to clear resolution.".format(count_del))
-
                 else:
-
                     log.info("No points found within grading zone to remove.")
-
-                    
-
                 t0.Commit()
-
             except Exception as e:
-
                 t0.RollBack()
-
                 log.error("Failed to reset points.", e)
 
-
-
         # Phase 1: Densify
-
         log.info("--- PHASE 1: DENSIFY ---")
-
         t1 = Transaction(doc, "Densify")
-
         t1.Start()
-
         try:
-
             editor = toposolid.GetSlabShapeEditor()
-
             editor.Enable()
-
             occupied_points = [v.Position for v in editor.SlabShapeVertices]
-
             log.info("Initial Vertex Count: {}".format(len(occupied_points)))
-
             
-
             bb = state.grading_line.get_BoundingBox(None)
-
             start_x = math.floor((bb.Min.X - total_rad - g_int) / g_int) * g_int
-
             end_x   = math.ceil((bb.Max.X + total_rad + g_int) / g_int) * g_int
-
             start_y = math.floor((bb.Min.Y - total_rad - g_int) / g_int) * g_int
-
             end_y   = math.ceil((bb.Max.Y + total_rad + g_int) / g_int) * g_int
-
             
-
             log.info("Grid Search Bounds: X[{:.1f}, {:.1f}] Y[{:.1f}, {:.1f}]".format(start_x, end_x, start_y, end_y))
-
             
-
             grid_pts = []
-
             candidates_checked = 0
-
             x = start_x
-
             while x <= end_x:
-
                 y = start_y
-
                 while y <= end_y:
-
                     candidates_checked += 1
-
                     t_pt = XYZ(x, y, 0)
                     if is_outside_bounds(t_pt): y += g_int; continue
 
                     res = curve.Project(t_pt)
-
-                    
-
                     if res and flatten(t_pt).DistanceTo(flatten(res.XYZPoint)) < (total_rad + g_int):
-
                         if is_point_on_solid(intersector, t_pt, ray_start_z):
-
-                            rz = get_surface_z(intersector, t_pt, ray_start_z)
-
+                            # Raycast to find SURFACE Z and HIT ELEMENT
+                            rz, hit_id = get_surface_info(intersector, t_pt, ray_start_z)
+                            
                             if rz is not None: 
-
-                                grid_pts.append(XYZ(x, y, rz))
-
+                                # Check if hit element is subdivision and get offset
+                                off = get_subdivision_offset(doc, hit_id)
+                                grid_pts.append(XYZ(x, y, rz - off))
                     y += g_int
-
                 x += g_int
-
                 
-
             log.info("Grid Points Found on Solid: {} (out of {} checked)".format(len(grid_pts), candidates_checked))
-
             
-
             added_count = 0
-
             for p in grid_pts:
-
                 if not is_too_close(p, occupied_points):
-
                     try: 
-
                         editor.AddPoint(p)
-
                         occupied_points.append(p)
-
                         added_count += 1
-
                     except: pass
-
             t1.Commit()
-
             log.info("Points Added: {}".format(added_count))
-
         except:
-
             t1.RollBack()
-
             raise
 
-
-
         # Phase 2: Sculpt
-
         log.info("--- PHASE 2: SCULPT ---")
-
         t2 = Transaction(doc, "Sculpt")
-
         t2.Start()
-
         modified_count = 0
-
         try:
-
             editor = toposolid.GetSlabShapeEditor()
-
             editor.Enable()
-
-            
-
             updates = []
-
             current_verts = [v for v in editor.SlabShapeVertices]
-
             log.info("Total Vertices to Process: {}".format(len(current_verts)))
-
-            
-
             sample_log = []
-
             
-
             for v in current_verts:
                 if is_outside_bounds(v.Position): continue
 
                 res = curve.Project(v.Position)
-
                 if not res: continue
-
                 
-
                 d = flatten(v.Position).DistanceTo(flatten(res.XYZPoint))
-
                 if d > total_rad: continue
-
                 
-
-                target_z = get_z_from_curve_param(curve, res, z_s, z_e)
-
-                new_z = v.Position.Z
-
+                # Check Context at this Vertex (Host or Subdiv?)
+                # We raycast at the vertex location to see what is "on top"
+                rz, hit_id = get_surface_info(intersector, v.Position, ray_start_z)
+                off = 0.0
+                if rz is not None:
+                     off = get_subdivision_offset(doc, hit_id)
                 
-
+                # Current State
+                current_base_z = v.Position.Z
+                current_top_z = current_base_z + off
+                
+                # Target State
+                target_top_z = get_z_from_curve_param(curve, res, z_s, z_e)
+                
+                new_base_z = current_base_z
                 is_core = d <= core_rad
 
-                
-
                 if is_core: 
-
-                    new_z = target_z
-
+                    new_base_z = target_top_z - off
                 else:
-
                     t_val = (d - core_rad) / f_int
-
                     t_val = 1.0 if t_val > 1.0 else t_val
-
                     smooth_t = t_val * t_val * (3 - 2 * t_val)
-
-                    new_z = lerp(target_z, new_z, smooth_t)
-
+                    # Blend TOP surfaces
+                    desired_top_z = lerp(target_top_z, current_top_z, smooth_t)
+                    # Convert back to BASE
+                    new_base_z = desired_top_z - off
                 
-
-                if abs(new_z - v.Position.Z) > 0.005:
-
-                    updates.append(XYZ(v.Position.X, v.Position.Y, new_z))
-
+                if abs(new_base_z - v.Position.Z) > 0.005:
+                    updates.append(XYZ(v.Position.X, v.Position.Y, new_base_z))
                     if len(sample_log) < 3:
-
-                        sample_log.append("Pt ({:.1f}, {:.1f}): Z {:.2f} -> {:.2f} (Dist={:.2f}, Core={})".format(
-
-                            v.Position.X, v.Position.Y, v.Position.Z, new_z, d, is_core
-
+                        sample_log.append("Pt ({:.1f}, {:.1f}): Z {:.2f} -> {:.2f} (Off={:.2f})".format(
+                            v.Position.X, v.Position.Y, v.Position.Z, new_base_z, off
                         ))
-
             
-
             modified_count = len(updates)
-
             log.info("Points Identified for Modification: {}".format(modified_count))
-
             if sample_log:
-
                 log.info("Sample Changes:\n" + "\n".join(sample_log))
-
             
-
             for p in updates:
-
                 try: editor.AddPoint(p)
-
                 except: pass
-
             
-
             t2.Commit()
-
         except:
-
             t2.RollBack()
-
             raise
 
-
-
         # Phase 3: Triangulate (Split Lines)
-
         log.info("--- PHASE 3: TRIANGULATE ---")
-
         t3 = Transaction(doc, "Triangulate Path")
-
         t3.Start()
-
         split_lines_count = 0
-
         try:
-
             editor = toposolid.GetSlabShapeEditor() 
-
             editor.Enable()
-
             
-
             all_verts = [v for v in editor.SlabShapeVertices]
-
             search_tol = g_int * 0.25
-
             step_len = g_int
-
             if step_len < 0.1: step_len = 1.0
-
             
-
             l_len = curve.Length
-
             current_len = 0.0
-
             
-
             while current_len <= l_len:
                 norm_param = current_len / l_len
                 if norm_param > 1.0: norm_param = 1.0
@@ -1557,46 +1378,23 @@ def perform_sculpt(state):
                 
                 current_len += step_len
 
-
-
             t3.Commit()
-
             log.info("Triangulation Complete. Split Lines Added: {}".format(split_lines_count))
-
         except:
-
             t3.RollBack()
-
             raise
 
-
-
         tg.Assimilate()
-
-        
-
         log.info("Sculpt Transaction Committed.")
-
-        log.info("Sculpt Complete.\nPoints Added: {}\\nPoints Adjusted: {}".format(added_count, modified_count))
-
+        log.info("Sculpt Complete.\nPoints Added: {}\nPoints Adjusted: {}".format(added_count, modified_count))
         
-
-        # Reset the flag so it's not checked next time
-
         state.reset_mode = False
 
-
-
     except Exception as e:
-
         tg.RollBack()
-
         log.error("Sculpting Failed", "{}\n{}".format(e, traceback.format_exc()))
-
     
-
     finally:
-
         log.show()
 
 def perform_edging(state):
@@ -1608,7 +1406,10 @@ def perform_edging(state):
         w = float(state.width); g = float(state.grid)
         try:
             ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid for Edging")
-            toposolid = doc.GetElement(ref)
+            raw_elem = doc.GetElement(ref)
+            toposolid = resolve_toposolid_host(doc, raw_elem)
+            if toposolid.Id != raw_elem.Id:
+                log.info("Switching to Host Toposolid ID: {}".format(toposolid.Id))
         except: return
     except Exception as e:
         log.error("Invalid inputs for edging.", e)
@@ -1620,11 +1421,16 @@ def perform_edging(state):
     try:
         z_s, z_e = calculate_and_adjust_stakes(state, log)
         
-        ids = List[ElementId]([toposolid.Id])
+        # Initialize Intersector for Raycasting Context
         intersector = None
-        ray_start_z = get_toposolid_max_z(toposolid)
+        ray_start_z = get_toposolid_max_z(toposolid) + 100.0
+        
         if doc.ActiveView.ViewType == ViewType.ThreeD:
+            col = FilteredElementCollector(doc).OfClass(Toposolid).WhereElementIsNotElementType()
+            ids = List[ElementId]([e.Id for e in col])
             intersector = ReferenceIntersector(ids, FindReferenceTarget.Element, doc.ActiveView)
+        else:
+            log.info("Warning: Active view is not 3D. Raycasting for new points might be less accurate.")
         
         edge_offset = w / 2.0
         edge_res = g * 0.5 
@@ -1643,8 +1449,15 @@ def perform_edging(state):
             if res and abs(flatten(v.Position).DistanceTo(flatten(res.XYZPoint)) - edge_offset) < 1.0:
                 vec = (flatten(v.Position) - flatten(res.XYZPoint)).Normalize()
                 exact_xy = flatten(res.XYZPoint) + (vec * edge_offset)
-                exact_z = get_z_from_curve_param(curve, res, z_s, z_e)
-                to_move.append((v, XYZ(exact_xy.X, exact_xy.Y, exact_z)))
+                road_z = get_z_from_curve_param(curve, res, z_s, z_e)
+                
+                # Check Offset at the NEW location
+                t_check = XYZ(exact_xy.X, exact_xy.Y, 0)
+                rz, hit_id = get_surface_info(intersector, t_check, ray_start_z)
+                off = 0.0
+                if rz is not None: off = get_subdivision_offset(doc, hit_id)
+                
+                to_move.append((v, XYZ(exact_xy.X, exact_xy.Y, road_z - off)))
         
         # 2. Add new points along the exact edge
         step_t = edge_res / curve.Length
@@ -1662,11 +1475,14 @@ def perform_edging(state):
             for side in [1.0, -1.0]:
                 offset_vec = normal * (side * edge_offset)
                 final_pt = center_pt + offset_vec
-                final_pt = XYZ(final_pt.X, final_pt.Y, road_z)
                 
-                # Check if this point is actually on the solid's footprint
-                if is_point_on_solid(intersector, final_pt, ray_start_z): 
-                    to_add.append(final_pt)
+                # Raycast check for validity + offset
+                rz, hit_id = get_surface_info(intersector, final_pt, ray_start_z)
+                
+                if rz is not None:
+                    # It hit something valid (Toposolid or Subdiv)
+                    off = get_subdivision_offset(doc, hit_id)
+                    to_add.append(XYZ(final_pt.X, final_pt.Y, road_z - off))
             
             t_val += step_t
             
@@ -1692,7 +1508,7 @@ def perform_edging(state):
                 
         t.Commit()
         tg.Assimilate()
-        log.info("Edging Complete.\nSnapped: {}\\nAdded: {}".format(len(to_move), len(to_add)))
+        log.info("Edging Complete.\nSnapped: {}\nAdded: {}".format(len(to_move), len(to_add)))
         
     except Exception as e:
         tg.RollBack()
@@ -1706,7 +1522,7 @@ def perform_edging(state):
 # perpendicular to the guide curve (Left Point <-> Right Point) using Split Lines.
 # This forces the triangulation to align with the path flow, avoiding diagonal artifacts.
 # WARNING: API-created Split Lines are "User Drawn" and appear as visible "Folding Lines".
-# They cannot be individually hidden via API. Users must hide the "Folding Lines" 
+# They cannot be individually hidden via API. Users must hide the "Folding Lines"
 # subcategory in Visibility/Graphics to make them invisible.
 
 def ensure_grade_stake_family():
