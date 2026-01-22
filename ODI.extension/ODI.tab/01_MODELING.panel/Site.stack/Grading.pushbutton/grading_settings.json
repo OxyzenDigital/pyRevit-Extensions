@@ -1,1 +1,1 @@
-{"win_left": "129.333333333", "mode": "slope", "falloff": "5.0", "grid": "5.0", "slope": "8", "square_ends": true, "win_top": "196.666666667", "width": "28.0"}
+{"grid": "4.0", "width": "30.0", "win_left": "250.0", "slope": "2", "falloff": "5.0", "mode": "slope", "square_ends": true, "win_top": "196.666666667"}
