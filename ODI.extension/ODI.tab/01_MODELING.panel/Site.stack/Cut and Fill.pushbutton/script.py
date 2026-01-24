@@ -4,6 +4,7 @@ Cut and Fill Tool
 Calculates Cut and Fill volumes for Toposolids in the project.
 """
 __title__ = "Cut and Fill"
+__version__ = "1.0"
 __author__ = "Oxyzen Digital"
 
 import json
@@ -42,6 +43,15 @@ class TopoData:
         self.Id = element.Id
         self.Name = element.Name
         
+        # Type Name
+        self.TypeName = ""
+        try:
+            tid = element.GetTypeId()
+            if tid != DB.ElementId.InvalidElementId:
+                etype = doc.GetElement(tid)
+                if etype: self.TypeName = etype.Name
+        except: pass
+        
         # Design Option
         self.DesignOption = "Main Model"
         if element.DesignOption:
@@ -54,9 +64,15 @@ class TopoData:
             if phase:
                 self.Phase = phase.Name
 
+        # Subdivision Check
+        self.IsSubdivision = False
+        if hasattr(element, "HostTopoId") and element.HostTopoId != DB.ElementId.InvalidElementId:
+            self.IsSubdivision = True
+
         # Volumes (Internal = CF)
         self.CutCF = 0.0
         self.FillCF = 0.0
+        self.TotalVolCF = 0.0
         
         # Get Parameters
         # Check for both Toposolid (2024+) and Topography (Legacy) parameter names
@@ -87,6 +103,11 @@ class TopoData:
         
         self.CutCF = get_volume_param(element, cut_bips, ["Cut", "Cut Volume"])
         self.FillCF = get_volume_param(element, fill_bips, ["Fill", "Fill Volume"])
+        
+        # Total Volume (Geometric)
+        p_vol = element.get_Parameter(DB.BuiltInParameter.HOST_VOLUME_COMPUTED)
+        if p_vol and p_vol.HasValue:
+            self.TotalVolCF = p_vol.AsDouble()
             
         self.NetCF = self.CutCF - self.FillCF # Cut is positive removal, Fill is positive addition. Net = Cut - Fill? Or Net Volume change? Usually Net = Fill - Cut (import required) or Cut - Fill (export available). 
         # Let's denote Net as (Cut - Fill). Positive = Export, Negative = Import.
@@ -97,6 +118,8 @@ class TopoData:
     def FillCY(self): return self.FillCF * CF_TO_CY
     @property
     def NetCY(self): return self.NetCF * CF_TO_CY
+    @property
+    def TotalVolCY(self): return self.TotalVolCF * CF_TO_CY
     
     @property
     def CutTon(self): return self.CutCF * CF_TO_MTON
@@ -135,9 +158,11 @@ def main():
 
     # 2. Process Data & Group by Option
     options_map = {}
+    all_data = []
     
     for el in elements:
         t_data = TopoData(el)
+        all_data.append(t_data)
         
         # Filter: Exclude Existing/Ungraded conditions (Zero Cut/Fill)
         if t_data.CutCF < 0.01 and t_data.FillCF < 0.01:
@@ -309,6 +334,32 @@ def main():
     html += '<li><strong>Cost Impact:</strong> "Export Required" implies disposal costs. "Import Required" implies material purchase + haul costs.</li>'
     html += '</ul></div>'
     
+    # --- Raw Data Log ---
+    html += '<div class="analysis-section" style="margin-top: 40px;">'
+    html += '<div class="option-title" style="background-color: #7f8c8d; border-left-color: #95a5a6;">Raw Data Log</div>'
+    html += '<div class="table-container"><table><thead><tr>'
+    html += '<th>Element ID</th><th>Type</th><th>Subdiv?</th>'
+    html += '<th class="num">Cut (C.Y.)</th><th class="num">Fill (C.Y.)</th><th class="num">Net (C.Y.)</th>'
+    html += '<th class="num">Total Vol (C.Y.)</th>'
+    html += '</tr></thead><tbody>'
+
+    for t in all_data:
+        # Highlight Subdivisions
+        row_style = "background-color: #fff3cd;" if t.IsSubdivision else ""
+        eid_val = t.Id.IntegerValue if hasattr(t.Id, "IntegerValue") else t.Id.Value
+        
+        html += '<tr style="{}">'.format(row_style)
+        html += '<td>{}</td>'.format(eid_val)
+        html += '<td>{}</td>'.format(t.TypeName)
+        html += '<td style="text-align:center;">{}</td>'.format("Yes" if t.IsSubdivision else "-")
+        html += '<td class="num">{:,.1f}</td>'.format(t.CutCY)
+        html += '<td class="num">{:,.1f}</td>'.format(t.FillCY)
+        html += '<td class="num">{:,.1f}</td>'.format(t.NetCY)
+        html += '<td class="num" style="font-weight:bold;">{:,.1f}</td>'.format(t.TotalVolCY)
+        html += '</tr>'
+
+    html += '</tbody></table></div></div>'
+
     html += '<script>window.scrollTo(0,0);</script>'
     output.print_html(html)
 
