@@ -4,7 +4,7 @@ Cut and Fill Tool
 Calculates Cut and Fill volumes for Toposolids in the project.
 """
 __title__ = "Cut and Fill"
-__version__ = "2.0"
+__version__ = "2.1"
 __author__ = "Oxyzen Digital"
 
 import json
@@ -157,6 +157,7 @@ def main():
         forms.alert("No Toposolids found in the project.")
         return
 
+
     # 2. Process Data & Group by Option
     options_map = {}
     all_data = []
@@ -290,12 +291,34 @@ def main():
     if max_net_abs == 0: max_net_abs = 1.0
 
     html_body = '<div class="analysis-section"><div class="option-title">Detailed Breakdown</div>'
+    
+    # --- Settings Controls (Embedded JS) ---
+    html_body += '<div style="background:#f8f9fa; padding:15px; border-bottom:1px solid #ddd; font-size:14px;">'
+    
+    # Row 1: Logistics
+    html_body += '<div style="margin-bottom:10px; display:flex; align-items:center; gap:20px;">'
+    html_body += '<strong>Logistics:</strong>'
+    html_body += '<label title="Cubic Yards per Truck">Truck Cap (CY): <input type="number" id="truckCap" value="{}" step="0.5" style="width:60px; padding:4px; border:1px solid #ccc; border-radius:3px;"></label>'.format(TRUCK_CAP_CY)
+    html_body += '<label title="Bank to Loose">Swell Factor: <input type="number" id="swellFactor" value="{}" step="0.05" style="width:60px; padding:4px; border:1px solid #ccc; border-radius:3px;"></label>'.format(FACTOR_SWELL)
+    html_body += '<label title="Loose to Compacted">Compaction Req: <input type="number" id="compactFactor" value="{}" step="0.05" style="width:60px; padding:4px; border:1px solid #ccc; border-radius:3px;"></label>'.format(FACTOR_COMPACTION_REQ)
+    html_body += '</div>'
+
+    # Row 2: Cost
+    html_body += '<div style="display:flex; align-items:center; gap:20px;">'
+    html_body += '<strong>Est. Cost:</strong>'
+    html_body += '<label>Unit Cost: $<input type="number" id="unitCost" value="200.00" style="width:80px; padding:4px; margin-left:5px; border:1px solid #ccc; border-radius:3px;"></label>'
+    html_body += '<label>Basis: <select id="costBasis" style="padding:4px; margin-left:5px; border:1px solid #ccc; border-radius:3px;"><option value="truck">Per Truck Load</option><option value="cy">Per Cubic Yard</option></select></label>'
+    html_body += '</div>'
+    
+    html_body += '</div>' # End settings div
+
     html_body += '<div class="table-container">'
-    html_body += '<table><thead><tr>'
+    html_body += '<table id="breakdownTable"><thead><tr>'
     html_body += '<th>Design Option</th><th>Phase</th>'
     html_body += '<th>Visual Balance</th>'
     html_body += '<th class="num">Cut (C.Y.)</th><th class="num">Fill (C.Y.)</th>'
     html_body += '<th class="num">Net (C.Y.)</th><th class="num">Net Trucks</th>'
+    html_body += '<th class="num">Est. Cost</th>'
     html_body += '</tr></thead><tbody>'
     
     for key in sorted_keys:
@@ -319,10 +342,11 @@ def main():
             bar_html += '<div class="bar-fill fill-bar" style="width:{:.1f}%; background-color: #27ae60 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></div>'.format(pct)
         bar_html += '</div>'
         
-        html_body += '<tr><td><strong>{}</strong></td><td>{}</td>'.format(opt, phase)
+        html_body += '<tr data-cut-cy="{:.2f}" data-fill-cy="{:.2f}" data-net-cy="{:.2f}"><td><strong>{}</strong></td><td>{}</td>'.format(t["cut_cy"], t["fill_cy"], net_cy, opt, phase)
         html_body += '<td>{}</td>'.format(bar_html)
         html_body += '<td class="num">{:,.0f}</td><td class="num">{:,.0f}</td>'.format(t["cut_cy"], t["fill_cy"])
         html_body += '<td class="num" style="{}">{:,.0f}</td><td class="num" style="{}">{:,.1f}</td>'.format(c_style, abs(net_cy), c_style, abs(net_t))
+        html_body += '<td class="num cost-cell">$0.00</td>'
         html_body += '</tr>'
         
     html_body += '</tbody></table></div>'
@@ -333,10 +357,9 @@ def main():
     html_body += '<div class="disclaimer">'
     html_body += '<strong>Assumptions & Notes:</strong><br>'
     html_body += '<ul>'
-    html_body += '<li><strong>Truck Capacity:</strong> Standard 14 CY Dump Truck.</li>'
-    html_body += '<li><strong>Cut (Export):</strong> Based on Bank Volume * 1.25 Swell Factor.</li>'
-    html_body += '<li><strong>Fill (Import):</strong> Based on Compacted Volume * 1.30 Requirement Factor.</li>'
-    html_body += '<li><strong>Cost Impact:</strong> "Export Required" implies disposal costs. "Import Required" implies material purchase + haul costs.</li>'
+    html_body += '<li><strong>Cut (Export):</strong> Based on Bank Volume * Swell Factor.</li>'
+    html_body += '<li><strong>Fill (Import):</strong> Based on Compacted Volume * Compaction Factor.</li>'
+    html_body += '<li id="calcDisclaimer"><strong>Logistics:</strong> Calculating...</li>'
     html_body += '</ul></div>'
     
     # --- Raw Data Log ---
@@ -387,6 +410,86 @@ def main():
     full_html += '<script>var ctx = document.getElementById("logisticsChart").getContext("2d"); var myChart = new Chart(ctx, {});</script>'.format(json.dumps(chart_json))
     
     full_html += html_body
+    
+    # --- Embedded JS for Cost Calculation ---
+    full_html += '''
+<script>
+    (function() {
+        // Inputs
+        var costInput = document.getElementById('unitCost');
+        var basisSelect = document.getElementById('costBasis');
+        var truckCapInput = document.getElementById('truckCap');
+        var swellInput = document.getElementById('swellFactor');
+        var compactInput = document.getElementById('compactFactor');
+        
+        // Elements
+        var table = document.getElementById('breakdownTable');
+        var disclaimer = document.getElementById('calcDisclaimer');
+
+        function updateCalculations() {
+            // Read Values
+            var cost = parseFloat(costInput.value) || 0;
+            var basis = basisSelect.value;
+            var cap = parseFloat(truckCapInput.value) || 14;
+            var swell = parseFloat(swellInput.value) || 1.25;
+            var compact = parseFloat(compactInput.value) || 1.30;
+
+            var rows = table.querySelectorAll('tbody tr');
+            var maxTrucks = 0;
+            var rowData = [];
+            
+            // 1. Calculate Trucks & Find Max for Scaling
+            rows.forEach(function(row) {
+                var cutCy = parseFloat(row.getAttribute('data-cut-cy')) || 0;
+                var fillCy = parseFloat(row.getAttribute('data-fill-cy')) || 0;
+                var netCy = parseFloat(row.getAttribute('data-net-cy')) || 0;
+                
+                var cutTrucks = (cutCy * swell) / cap;
+                var fillTrucks = (fillCy * compact) / cap;
+                var netTrucks = cutTrucks - fillTrucks;
+                
+                if(Math.abs(netTrucks) > maxTrucks) maxTrucks = Math.abs(netTrucks);
+                
+                rowData.push({row: row, netTrucks: netTrucks, netCy: netCy});
+            });
+            
+            if(maxTrucks === 0) maxTrucks = 1;
+
+            // 2. Update DOM
+            rowData.forEach(function(d) {
+                // Update Visual Bar
+                var pct = (Math.abs(d.netTrucks) / maxTrucks) * 50.0;
+                var barHtml = '<div class="visual-center-line"></div>';
+                if(d.netTrucks > 0) barHtml += '<div class="bar-fill cut-bar" style="width:' + pct.toFixed(1) + '%; background-color: #e74c3c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></div>';
+                else if(d.netTrucks < 0) barHtml += '<div class="bar-fill fill-bar" style="width:' + pct.toFixed(1) + '%; background-color: #27ae60 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></div>';
+                d.row.cells[2].querySelector('.visual-bar-container').innerHTML = barHtml;
+
+                // Update Net Trucks Text
+                var tCell = d.row.cells[6];
+                tCell.textContent = Math.abs(d.netTrucks).toFixed(1);
+                tCell.style.color = (d.netTrucks > 0.1) ? '#c0392b' : (d.netTrucks < -0.1 ? '#27ae60' : '#7f8c8d');
+                tCell.style.fontWeight = (Math.abs(d.netTrucks) > 0.1) ? 'bold' : 'normal';
+
+                // Update Cost
+                var qty = (basis === 'truck') ? Math.abs(d.netTrucks) : Math.abs(d.netCy);
+                var total = qty * cost;
+                d.row.querySelector('.cost-cell').textContent = '$' + total.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2});
+            });
+            
+            var basisLabel = (basis === 'truck') ? 'Per Truck Load' : 'Per Cubic Yard';
+            disclaimer.innerHTML = '<strong>Logistics:</strong> ' + cap + ' CY Trucks. Swell: ' + swell + '. Compact: ' + compact + '.<br><strong>Cost:</strong> $' + cost.toFixed(2) + ' ' + basisLabel + '.';
+        }
+
+        if(costInput && basisSelect) {
+            [costInput, basisSelect, truckCapInput, swellInput, compactInput].forEach(function(el) {
+                el.addEventListener('input', updateCalculations);
+                el.addEventListener('change', updateCalculations);
+            });
+            updateCalculations();
+        }
+    })();
+</script>
+'''
     full_html += '</body></html>'
 
     # --- Save to Downloads & Open ---

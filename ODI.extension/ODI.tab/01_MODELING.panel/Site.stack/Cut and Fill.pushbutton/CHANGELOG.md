@@ -1,5 +1,11 @@
 # Changelog - Cut and Fill Tool
 
+## [v2.1] - 2025-01-02
+### Added
+- **Interactive Report:**
+  - **Cost Estimation:** Added real-time cost calculator. Users can input Unit Cost and Basis (Truck/CY) directly in the browser.
+  - **Logistics Settings:** Added controls to adjust Truck Capacity, Swell Factor, and Compaction Factor. The report dynamically recalculates Net Trucks and updates visual balance bars based on these inputs.
+
 ## [v2.0] - 2025-01-02
 ### Changed
 - **Workflow:** Removed the pyRevit output window entirely. The tool now generates the report directly to the user's **Downloads** folder and opens it in the default system browser.
