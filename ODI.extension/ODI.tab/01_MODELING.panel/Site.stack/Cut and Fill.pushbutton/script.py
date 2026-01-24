@@ -4,16 +4,17 @@ Cut and Fill Tool
 Calculates Cut and Fill volumes for Toposolids in the project.
 """
 __title__ = "Cut and Fill"
-__version__ = "1.0"
+__version__ = "2.0"
 __author__ = "Oxyzen Digital"
 
 import json
+import os
+import codecs
+import datetime
 from pyrevit import revit, forms, script
 from pyrevit import DB
-import datetime
 
 doc = revit.doc
-output = script.get_output()
 
 # --- Constants ---
 # Conversion factors
@@ -212,70 +213,74 @@ def main():
     # Sort keys: Main Model first, then Option Name, then Phase
     sorted_keys = sorted(options_map.keys(), key=lambda x: ("" if x[0] == "Main Model" else x[0], x[1]))
     
-    # 3. Render HTML
-    output.close_others()
-    output.resize(1100, 1200)
+    # 3. Prepare HTML Report
     
-    # Load External CSS
+    # --- Prepare CSS ---
     css_content = ""
     css_file = script.get_bundle_file('style.css')
     if css_file:
-        with open(css_file, 'r') as f:
-            css_content = f.read()
-            output.add_style(css_content)
+        # Robust read: try utf-8-sig first (handles BOM), then default
+        try:
+            with codecs.open(css_file, 'r', encoding='utf-8-sig') as f:
+                css_content = f.read()
+        except:
+            with open(css_file, 'r') as f:
+                css_content = f.read()
     
-    # --- Block 1: Header ---
-    html = ''
+    # --- Prepare Header HTML ---
+    html_header = ''
     
-    # Embed CSS directly to ensure it persists during Printing
-    if css_content:
-        html += '<style>' + css_content + '</style>'
-
     now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
 
-    html += '<header>'
-    html += '<div><h1>Earthwork Report</h1><div class="meta">Logistics Analysis</div></div>'
-    html += '<div class="meta" style="text-align:right;">Generated: {}</div>'.format(now_str)
-    html += '</header>'
-    
-    # Print Header & CSS
-    output.print_html(html)
-    
-    # --- Block 2: Chart ---
-    # Note: We print the title in a separate block to avoid unclosed div issues with chart.draw()
-    output.print_html('<div class="analysis-section"><div class="option-title">Grading Trends</div></div>')
-    
-    # Use pyRevit's built-in Charting (Local Resources)
-    chart = output.make_line_chart()
-    chart.options.title = {'display': True, 'text': 'Net Truck Logistics', 'fontSize': 20}
-    chart.options.scales = {'yAxes': [{'ticks': {'beginAtZero': True}}]}
-    chart.options.tooltips = {'mode': 'index', 'intersect': False}
-    chart.options.maintainAspectRatio = True
-    chart.options.aspectRatio = 2
-    chart.options.responsive = True
+    html_header += '<header>'
+    html_header += '<div><h1>Earthwork Report</h1><div class="meta">Logistics Analysis</div></div>'
+    html_header += '<div class="meta" style="text-align:right;">Generated: {}</div>'.format(now_str)
+    html_header += '</header>'
     
     # Inject dummy start/end points (0) to create a "Pile of Dirt" look
-    # Multiline labels for Chart.js (List of Lists)
-    chart.data.labels = [""] + [[k[0], "({})".format(k[1])] for k in sorted_keys] + [""]
-    
-    # Calculate Net Data
+    # Prepare Data for Chart.js
+    labels_raw = [""] + ["{} ({})".format(k[0], k[1]) for k in sorted_keys] + [""]
     net_vals = [options_map[k]["totals"]["net_trucks"] for k in sorted_keys]
-    
-    ds_export = chart.data.new_dataset('Net Export (Trucks Out)')
-    ds_export.data = [0] + [max(0, v) for v in net_vals] + [0]
-    ds_export.set_color(231, 76, 60, 0.5) # Red (Semi-transparent)
-    ds_export.fill = True
-    ds_export.tension = 0.4 # Smooth curve
-    
-    ds_import = chart.data.new_dataset('Net Import (Trucks In)')
-    ds_import.data = [0] + [abs(min(0, v)) for v in net_vals] + [0]
-    ds_import.set_color(39, 174, 96, 0.5) # Green (Semi-transparent)
-    ds_import.fill = True
-    ds_import.tension = 0.4 # Smooth curve
+    data_export = [0] + [max(0, v) for v in net_vals] + [0]
+    data_import = [0] + [abs(min(0, v)) for v in net_vals] + [0]
 
-    chart.draw()
-    
-    # --- Block 3: Table & Footer ---
+    # Standalone Chart Config (Chart.js JSON)
+    chart_json = {
+        "type": "line",
+        "data": {
+            "labels": labels_raw,
+            "datasets": [
+                {
+                    "label": "Net Export (Trucks Out)",
+                    "data": data_export,
+                    "backgroundColor": "rgba(231, 76, 60, 0.5)",
+                    "borderColor": "rgba(231, 76, 60, 1)",
+                    "borderWidth": 1,
+                    "fill": True,
+                    "lineTension": 0.4
+                },
+                {
+                    "label": "Net Import (Trucks In)",
+                    "data": data_import,
+                    "backgroundColor": "rgba(39, 174, 96, 0.5)",
+                    "borderColor": "rgba(39, 174, 96, 1)",
+                    "borderWidth": 1,
+                    "fill": True,
+                    "lineTension": 0.4
+                }
+            ]
+        },
+        "options": {
+            "title": {"display": True, "text": "Net Truck Logistics", "fontSize": 20},
+            "scales": {"yAxes": [{"ticks": {"beginAtZero": True}}]},
+            "tooltips": {"mode": "index", "intersect": False},
+            "maintainAspectRatio": True,
+            "aspectRatio": 2,
+            "responsive": True
+        }
+    }
+
+    # --- Prepare Report Body HTML ---
     # --- The Spreadsheet ---
     # Calculate max NET value for scaling visual bars (Visual Balance)
     max_net_abs = 0.0
@@ -284,14 +289,14 @@ def main():
         max_net_abs = max(max_net_abs, abs(t["net_trucks"]))
     if max_net_abs == 0: max_net_abs = 1.0
 
-    html = '<div class="analysis-section"><div class="option-title">Detailed Breakdown</div>'
-    html += '<div class="table-container">'
-    html += '<table><thead><tr>'
-    html += '<th>Design Option</th><th>Phase</th>'
-    html += '<th>Visual Balance</th>'
-    html += '<th class="num">Cut (C.Y.)</th><th class="num">Fill (C.Y.)</th>'
-    html += '<th class="num">Net (C.Y.)</th><th class="num">Net Trucks</th>'
-    html += '</tr></thead><tbody>'
+    html_body = '<div class="analysis-section"><div class="option-title">Detailed Breakdown</div>'
+    html_body += '<div class="table-container">'
+    html_body += '<table><thead><tr>'
+    html_body += '<th>Design Option</th><th>Phase</th>'
+    html_body += '<th>Visual Balance</th>'
+    html_body += '<th class="num">Cut (C.Y.)</th><th class="num">Fill (C.Y.)</th>'
+    html_body += '<th class="num">Net (C.Y.)</th><th class="num">Net Trucks</th>'
+    html_body += '</tr></thead><tbody>'
     
     for key in sorted_keys:
         opt, phase = key
@@ -307,61 +312,100 @@ def main():
         # Calculate percentage of the HALF width (50%)
         pct = (abs(net_t) / max_net_abs) * 50.0
         
-        bar_html = '<div class="visual-bar-container"><div class="visual-center-line"></div>'
+        bar_html = '<div class="visual-bar-container" style="background-color: #e0e0e0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"><div class="visual-center-line"></div>'
         if net_t > 0:
-            bar_html += '<div class="bar-fill cut-bar" style="width:{:.1f}%;"></div>'.format(pct)
+            bar_html += '<div class="bar-fill cut-bar" style="width:{:.1f}%; background-color: #e74c3c !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></div>'.format(pct)
         elif net_t < 0:
-            bar_html += '<div class="bar-fill fill-bar" style="width:{:.1f}%;"></div>'.format(pct)
+            bar_html += '<div class="bar-fill fill-bar" style="width:{:.1f}%; background-color: #27ae60 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact;"></div>'.format(pct)
         bar_html += '</div>'
         
-        html += '<tr><td><strong>{}</strong></td><td>{}</td>'.format(opt, phase)
-        html += '<td>{}</td>'.format(bar_html)
-        html += '<td class="num">{:,.0f}</td><td class="num">{:,.0f}</td>'.format(t["cut_cy"], t["fill_cy"])
-        html += '<td class="num" style="{}">{:,.0f}</td><td class="num" style="{}">{:,.1f}</td>'.format(c_style, abs(net_cy), c_style, abs(net_t))
-        html += '</tr>'
+        html_body += '<tr><td><strong>{}</strong></td><td>{}</td>'.format(opt, phase)
+        html_body += '<td>{}</td>'.format(bar_html)
+        html_body += '<td class="num">{:,.0f}</td><td class="num">{:,.0f}</td>'.format(t["cut_cy"], t["fill_cy"])
+        html_body += '<td class="num" style="{}">{:,.0f}</td><td class="num" style="{}">{:,.1f}</td>'.format(c_style, abs(net_cy), c_style, abs(net_t))
+        html_body += '</tr>'
         
-    html += '</tbody></table></div>'
-    html += '</div>' # End analysis-section
-    html += '</div>'
+    html_body += '</tbody></table></div>'
+    html_body += '</div>' # End analysis-section
+    html_body += '</div>'
 
     # Disclaimer
-    html += '<div class="disclaimer">'
-    html += '<strong>Assumptions & Notes:</strong><br>'
-    html += '<ul>'
-    html += '<li><strong>Truck Capacity:</strong> Standard 14 CY Dump Truck.</li>'
-    html += '<li><strong>Cut (Export):</strong> Based on Bank Volume * 1.25 Swell Factor.</li>'
-    html += '<li><strong>Fill (Import):</strong> Based on Compacted Volume * 1.30 Requirement Factor.</li>'
-    html += '<li><strong>Cost Impact:</strong> "Export Required" implies disposal costs. "Import Required" implies material purchase + haul costs.</li>'
-    html += '</ul></div>'
+    html_body += '<div class="disclaimer">'
+    html_body += '<strong>Assumptions & Notes:</strong><br>'
+    html_body += '<ul>'
+    html_body += '<li><strong>Truck Capacity:</strong> Standard 14 CY Dump Truck.</li>'
+    html_body += '<li><strong>Cut (Export):</strong> Based on Bank Volume * 1.25 Swell Factor.</li>'
+    html_body += '<li><strong>Fill (Import):</strong> Based on Compacted Volume * 1.30 Requirement Factor.</li>'
+    html_body += '<li><strong>Cost Impact:</strong> "Export Required" implies disposal costs. "Import Required" implies material purchase + haul costs.</li>'
+    html_body += '</ul></div>'
     
     # --- Raw Data Log ---
-    html += '<div class="analysis-section" style="margin-top: 40px;">'
-    html += '<div class="option-title" style="background-color: #7f8c8d; border-left-color: #95a5a6;">Raw Data Log</div>'
-    html += '<div class="table-container"><table><thead><tr>'
-    html += '<th>Element ID</th><th>Type</th><th>Subdiv?</th>'
-    html += '<th class="num">Cut (C.Y.)</th><th class="num">Fill (C.Y.)</th><th class="num">Net (C.Y.)</th>'
-    html += '<th class="num">Total Vol (C.Y.)</th>'
-    html += '</tr></thead><tbody>'
+    html_body += '<div class="analysis-section" style="margin-top: 40px;">'
+    html_body += '<div class="option-title" style="background-color: #7f8c8d; border-left-color: #95a5a6;">Raw Data Log</div>'
+    html_body += '<div class="table-container"><table><thead><tr>'
+    html_body += '<th>Element ID</th><th>Type</th><th>Subdiv?</th>'
+    html_body += '<th class="num">Cut (C.Y.)</th><th class="num">Fill (C.Y.)</th><th class="num">Net (C.Y.)</th>'
+    html_body += '<th class="num">Total Vol (C.Y.)</th>'
+    html_body += '</tr></thead><tbody>'
 
     for t in all_data:
         # Highlight Subdivisions
         row_style = "background-color: #fff3cd;" if t.IsSubdivision else ""
         eid_val = t.Id.IntegerValue if hasattr(t.Id, "IntegerValue") else t.Id.Value
         
-        html += '<tr style="{}">'.format(row_style)
-        html += '<td>{}</td>'.format(eid_val)
-        html += '<td>{}</td>'.format(t.TypeName)
-        html += '<td style="text-align:center;">{}</td>'.format("Yes" if t.IsSubdivision else "-")
-        html += '<td class="num">{:,.1f}</td>'.format(t.CutCY)
-        html += '<td class="num">{:,.1f}</td>'.format(t.FillCY)
-        html += '<td class="num">{:,.1f}</td>'.format(t.NetCY)
-        html += '<td class="num" style="font-weight:bold;">{:,.1f}</td>'.format(t.TotalVolCY)
-        html += '</tr>'
+        html_body += '<tr style="{}">'.format(row_style)
+        html_body += '<td>{}</td>'.format(eid_val)
+        html_body += '<td>{}</td>'.format(t.TypeName)
+        html_body += '<td style="text-align:center;">{}</td>'.format("Yes" if t.IsSubdivision else "-")
+        html_body += '<td class="num">{:,.1f}</td>'.format(t.CutCY)
+        html_body += '<td class="num">{:,.1f}</td>'.format(t.FillCY)
+        html_body += '<td class="num">{:,.1f}</td>'.format(t.NetCY)
+        html_body += '<td class="num" style="font-weight:bold;">{:,.1f}</td>'.format(t.TotalVolCY)
+        html_body += '</tr>'
 
-    html += '</tbody></table></div></div>'
+    html_body += '</tbody></table></div></div>'
 
-    html += '<script>window.scrollTo(0,0);</script>'
-    output.print_html(html)
+    # --- Footer Buttons ---
+    html_body += '<div class="action-footer">'
+    html_body += '<button class="btn" onclick="window.print()">Print Report</button>'
+    html_body += '</div>'
+
+    # --- Construct Full HTML Document ---
+    full_html = "<!DOCTYPE html><html><head>"
+    full_html += '<meta charset="utf-8">'
+    full_html += '<title>Cut & Fill Report</title>'
+    full_html += '<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.9.4/Chart.min.js"></script>'
+    if css_content:
+        full_html += '<style>' + css_content + '</style>'
+    full_html += '</head><body>'
+    
+    full_html += html_header
+    
+    # Chart Section
+    full_html += '<div class="analysis-section"><div class="option-title">Grading Trends</div>'
+    full_html += '<canvas id="logisticsChart"></canvas></div>'
+    full_html += '<script>var ctx = document.getElementById("logisticsChart").getContext("2d"); var myChart = new Chart(ctx, {});</script>'.format(json.dumps(chart_json))
+    
+    full_html += html_body
+    full_html += '</body></html>'
+
+    # --- Save to Downloads & Open ---
+    downloads_path = os.path.join(os.path.expanduser("~"), "Downloads")
+    filename = "CutAndFill_Report_{}.html".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    file_path = os.path.join(downloads_path, filename)
+    
+    try:
+        with codecs.open(file_path, 'w', encoding='utf-8') as f:
+            f.write(full_html)
+        
+        # Open in Default Browser
+        os.startfile(file_path)
+        
+        # Notify User
+        forms.alert("Report generated successfully!\n\nSaved to: {}\nOpened in default browser.".format(filename), title="Success")
+        
+    except Exception as e:
+        forms.alert("Failed to save report: {}".format(e))
 
 if __name__ == '__main__':
     main()

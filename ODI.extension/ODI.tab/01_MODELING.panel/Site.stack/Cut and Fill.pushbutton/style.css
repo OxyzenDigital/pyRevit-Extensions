@@ -14,7 +14,6 @@ body {
 }
 
 @media print {
-    @page { size: letter portrait; margin: 0.5in; }
     body { 
         font-family: 'Segoe UI', sans-serif;
         width: 1000px; /* Enforce fixed width for print scaling */
@@ -23,12 +22,17 @@ body {
         zoom: 0.75; 
         padding: 0;
         margin: 0;
-        -webkit-print-color-adjust: exact; 
-        print-color-adjust: exact; 
+        -webkit-print-color-adjust: exact !important; 
+        print-color-adjust: exact !important; 
+        overflow: visible !important;
     }
     .no-print, .action-footer { display: none !important; }
     h1 { font-size: 30pt !important; }
     .btn { display: none !important; }
+    canvas { 
+        max-width: 100% !important; 
+        height: auto !important; 
+    }
 }
 
 /* Headers */
@@ -56,6 +60,8 @@ h1 { margin: 0; font-weight: 800; font-size: 40px; color: white; text-transform:
     margin-bottom: 20px; 
     border-left: 6px solid #3498db; 
     border-radius: 4px;
+    -webkit-print-color-adjust: exact !important; 
+    print-color-adjust: exact !important;
 }
 
 /* Legend */
@@ -69,7 +75,11 @@ h1 { margin: 0; font-weight: 800; font-size: 40px; color: white; text-transform:
 table { width: 100%; border-collapse: collapse; font-size: 19px; margin-top: 10px; }
 th { background: #fff; color: #555; font-weight: 700; text-align: left; padding: 15px 10px; border-bottom: 3px solid #333; text-transform: uppercase; font-size: 16px; letter-spacing: 0.5px; }
 td { padding: 15px 10px; border-bottom: 1px solid #eee; color: #333; }
-tr:hover td { background: #f8f9fa; }
+tr:hover td { 
+    background: #f8f9fa !important; 
+    -webkit-print-color-adjust: exact !important; 
+    print-color-adjust: exact !important;
+}
 .num { text-align: right; font-family: 'Consolas', 'Monaco', monospace; font-weight: 600; font-size: 20px; }
 
 /* Visual Bars */
@@ -81,13 +91,17 @@ tr:hover td { background: #f8f9fa; }
     background: #e0e0e0; 
     border-radius: 3px; 
     border: 1px solid #ccc;
-    overflow: hidden; 
+    overflow: hidden;
+    -webkit-print-color-adjust: exact !important; 
+    print-color-adjust: exact !important; 
 }
 .visual-center-line {
     position: absolute; left: 50%; top: 0; bottom: 0; width: 2px; background: #bdc3c7; z-index: 5; transform: translateX(-50%);
 }
 .bar-fill { 
     position: absolute; top: 0; bottom: 0; height: 100%; opacity: 0.9; z-index: 10;
+    -webkit-print-color-adjust: exact !important; 
+    print-color-adjust: exact !important;
 }
 .cut-bar { right: 50%; background-color: #e74c3c; border-top-left-radius: 3px; border-bottom-left-radius: 3px; }
 .fill-bar { left: 50%; background-color: #27ae60; border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
