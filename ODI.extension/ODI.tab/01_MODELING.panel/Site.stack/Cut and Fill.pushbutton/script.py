@@ -188,157 +188,16 @@ def main():
     
     # 3. Render HTML
     output.close_others()
-    output.resize(1000, 1200)
+    output.resize(1100, 1000)
     
-    # CSS
-    # Construct a full HTML document to ensure IE Edge mode is strictly enforced
-    html_start = """<!DOCTYPE html>
-    <html>
-    <head>
-    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-    <style>
-        /* Reset & Base */
-        * { box-sizing: border-box; }
-        body { 
-            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif !important; 
-            background-color: #f4f4f4; 
-            padding: 40px; 
-            color: #222; 
-            font-size: 24px !important; 
-            zoom: 100%; /* Force reset zoom level */
-        }
-        .container { max-width: 95%; margin: 0 auto; background: white; padding: 60px; box-shadow: 0 15px 30px rgba(0,0,0,0.1); border-radius: 8px; overflow: hidden; }
-        
-        @media print {
-            @page { size: letter portrait; margin: 0.5cm; }
-            body { 
-                background-color: white; 
-                padding: 0; 
-                font-size: 14pt; 
-                zoom: 0.55; 
-                -webkit-print-color-adjust: exact; 
-                print-color-adjust: exact; 
-            }
-            .container { box-shadow: none; max-width: 100%; padding: 0; margin: 0; border-radius: 0; }
-            .no-print, .action-footer { display: none !important; }
-            .analysis-section { page-break-inside: avoid; }
-            h1 { font-size: 36pt !important; }
-            .btn { display: none !important; }
-        }
-        
-        /* Headers */
-        header { 
-            background-color: #2c3e50; 
-            padding: 50px 60px; 
-            margin: -60px -60px 60px -60px; 
-            border-bottom: 8px solid #34495e; 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center; 
-        }
-        @media print { header { margin: 0 0 40px 0; padding: 40px; } }
-        h1 { margin: 0; font-weight: 800; font-size: 48px !important; color: white !important; text-transform: uppercase; letter-spacing: 2px; line-height: 1.1; }
-        .meta { font-size: 24px !important; color: #bdc3c7 !important; margin-top: 10px; font-weight: 400; }
-        
-        /* Buttons (Bottom Right) - Styled as Ghost Buttons */
-        .action-footer { display: flex; justify-content: flex-end; align-items: center; gap: 20px; margin-top: 80px; padding-top: 40px; border-top: 2px solid #eee; }
-        .btn { 
-            background-color: white; border: 3px solid #2c3e50; padding: 12px 30px; cursor: pointer; 
-            font-size: 20px !important; font-weight: 700; color: #2c3e50 !important;
-            text-decoration: none !important; font-family: inherit; border-radius: 6px;
-            display: inline-block; transition: all 0.2s;
-        }
-        .btn:hover { background-color: #2c3e50; color: white !important; }
-        
-        /* Analysis Card */
-        .analysis-section { margin-bottom: 60px; }
-        .option-title { 
-            background-color: #34495e; 
-            color: white; 
-            padding: 15px 25px; 
-            font-size: 32px !important; 
-            font-weight: 700; 
-            margin-bottom: 30px; 
-            border-left: 10px solid #3498db; 
-            border-radius: 4px;
-        }
-        
-        /* Chart Area */
-        .chart-wrapper { position: relative; width: 100%; margin-bottom: 40px; border: 1px solid #eee; padding: 30px; border-radius: 8px; }
-
-        /* PyRevit Chart Overrides */
-        /* Attempt to constrain the pyrevit generated chart containers if they are too large */
-        div[id^="chart-"] { margin-bottom: 30px; }
-        .pie-grid div[id^="chart-"] { max-width: 400px; margin: 0 auto; }
-
-        /* Legend */
-        .legend-container { display: flex; justify-content: flex-end; margin-bottom: 10px; }
-        .legend { display: flex; gap: 20px; font-size: 16px !important; background: #f9f9f9; padding: 10px 15px; border-radius: 4px; border: 1px solid #eee; }
-        .legend-item { display: flex; align-items: center; font-weight: 600; }
-        .legend-color { width: 16px; height: 16px; margin-right: 8px; border-radius: 2px; }
-        
-        /* Visual Bars in Table - Absolute Positioning (Robust) */
-        .visual-bar-container { 
-            position: relative; 
-            width: 100%; 
-            min-width: 250px; 
-            height: 40px; 
-            background: #e0e0e0; 
-            border-radius: 4px; 
-            border: 1px solid #ccc;
-            overflow: hidden; 
-        }
-        .visual-center-line {
-            position: absolute;
-            left: 50%;
-            top: 0;
-            bottom: 0;
-            width: 2px;
-            background: #bdc3c7;
-            z-index: 5;
-            transform: translateX(-50%);
-        }
-        .bar-fill { 
-            position: absolute;
-            top: 0;
-            bottom: 0;
-            height: 100%; 
-            opacity: 0.9; 
-            z-index: 10;
-        }
-        .cut-bar { 
-            right: 50%; 
-            background-color: #e74c3c; 
-            border-top-left-radius: 4px; 
-            border-bottom-left-radius: 4px; 
-        }
-        .fill-bar { 
-            left: 50%; 
-            background-color: #27ae60; 
-            border-top-right-radius: 4px; 
-            border-bottom-right-radius: 4px; 
-        }
-        
-        /* Spreadsheet Table */
-        .table-container { margin-top: 40px; overflow-x: auto; }
-        table { width: 100%; border-collapse: collapse; font-size: 28px !important; margin-top: 20px; }
-        th { background: #fff; color: #555; font-weight: 700; text-align: left; padding: 30px 25px; border-bottom: 5px solid #333; text-transform: uppercase; font-size: 24px !important; letter-spacing: 1px; }
-        td { padding: 30px 25px; border-bottom: 1px solid #eee; color: #333; }
-        tr:hover td { background: #f8f9fa; }
-        .num { text-align: right; font-family: 'Consolas', 'Monaco', monospace; font-weight: 600; font-size: 36px !important; }
-        
-        /* Disclaimer */
-        .disclaimer { margin-top: 100px; padding-top: 30px; border-top: 2px solid #eee; color: #777; font-size: 16px !important; line-height: 1.8; }
-        .disclaimer strong { color: #333; text-transform: uppercase; font-size: 14px !important; letter-spacing: 1px; }
-        .disclaimer ul { padding-left: 20px; margin-top: 10px; }
-        .disclaimer li { margin-bottom: 4px; }
-    </style>
-    </head>
-    <body>
-    """
+    # Load External CSS
+    css_file = script.get_bundle_file('style.css')
+    if css_file:
+        with open(css_file, 'r') as f:
+            output.add_style(f.read())
     
-    html = html_start + '<div class="container">'
-    
+    # --- Block 1: Header ---
+    html = '<meta http-equiv="X-UA-Compatible" content="IE=edge" />'
     html += '<header>'
     html += '<div><h1>Earthwork Report</h1><div class="meta">Logistics Analysis</div></div>'
     html += '</header>'
@@ -346,8 +205,9 @@ def main():
     # Print Header & CSS
     output.print_html(html)
     
-    # --- Comparative Summary (Dashboard) ---
-    output.print_html('<div class="analysis-section"><div class="option-title">Grading Trends</div>')
+    # --- Block 2: Chart ---
+    # Note: We print the title in a separate block to avoid unclosed div issues with chart.draw()
+    output.print_html('<div class="analysis-section"><div class="option-title">Grading Trends</div></div>')
     
     # Use pyRevit's built-in Charting (Local Resources)
     chart = output.make_line_chart()
@@ -359,7 +219,8 @@ def main():
     chart.options.responsive = True
     
     # Inject dummy start/end points (0) to create a "Pile of Dirt" look
-    chart.data.labels = [""] + ["{} ({})".format(k[0], k[1]) for k in sorted_keys] + [""]
+    # Multiline labels for Chart.js (List of Lists)
+    chart.data.labels = [""] + [[k[0], "({})".format(k[1])] for k in sorted_keys] + [""]
     
     # Calculate Net Data
     net_vals = [options_map[k]["totals"]["net_trucks"] for k in sorted_keys]
@@ -376,11 +237,9 @@ def main():
     ds_import.fill = True
     ds_import.tension = 0.4 # Smooth curve
 
-    output.print_html('<div class="chart-wrapper">')
     chart.draw()
-    output.print_html('</div>')
-    output.print_html('</div>') # End analysis-section
     
+    # --- Block 3: Table & Footer ---
     # --- The Spreadsheet ---
     # Calculate max NET value for scaling visual bars (Visual Balance)
     max_net_abs = 0.0
@@ -439,14 +298,7 @@ def main():
     html += '<li><strong>Cost Impact:</strong> "Export Required" implies disposal costs. "Import Required" implies material purchase + haul costs.</li>'
     html += '</ul></div>'
     
-    # Action Footer
-    html += '<div class="action-footer">'
-    html += '<a href="#" onclick="try{window.print();}catch(e){alert(\'Press Ctrl+P to print.\');} return false;" class="btn no-print">Print Report</a>'
-    html += '</div>'
-    
-    html += '</div>' # End Container
     html += '<script>window.scrollTo(0,0);</script>'
-    html += '</body></html>'
     output.print_html(html)
 
 if __name__ == '__main__':
