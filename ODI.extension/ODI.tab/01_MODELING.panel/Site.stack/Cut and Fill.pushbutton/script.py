@@ -9,6 +9,7 @@ __author__ = "Oxyzen Digital"
 import json
 from pyrevit import revit, forms, script
 from pyrevit import DB
+import datetime
 
 doc = revit.doc
 output = script.get_output()
@@ -188,18 +189,28 @@ def main():
     
     # 3. Render HTML
     output.close_others()
-    output.resize(1100, 1000)
+    output.resize(1100, 1200)
     
     # Load External CSS
+    css_content = ""
     css_file = script.get_bundle_file('style.css')
     if css_file:
         with open(css_file, 'r') as f:
-            output.add_style(f.read())
+            css_content = f.read()
+            output.add_style(css_content)
     
     # --- Block 1: Header ---
-    html = '<meta http-equiv="X-UA-Compatible" content="IE=edge" />'
+    html = ''
+    
+    # Embed CSS directly to ensure it persists during Printing
+    if css_content:
+        html += '<style>' + css_content + '</style>'
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
     html += '<header>'
     html += '<div><h1>Earthwork Report</h1><div class="meta">Logistics Analysis</div></div>'
+    html += '<div class="meta" style="text-align:right;">Generated: {}</div>'.format(now_str)
     html += '</header>'
     
     # Print Header & CSS
