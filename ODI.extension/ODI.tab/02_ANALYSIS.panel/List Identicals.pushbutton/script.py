@@ -1,18 +1,17 @@
 # -*- coding: utf-8 -*-
 """
-Finds and selects duplicate elements that are in the same location.
+Finds and selects duplicate elements based on Revit Warnings.
 
-This script groups elements by their Category, Family, Type, Level, Design Option, and Geometry.
-Groups with more than one element are considered duplicates.
+This script scans the document for 'Identical Instances' warnings and lists the failing elements.
 """
 
 __title__ = 'Find Duplicates'
 __author__ = 'Oxyzen Digital'
-__version__ = '1.0'
+__version__ = '1.1'
 
 
 from Autodesk.Revit.DB import (FilteredElementCollector, BuiltInCategory, 
-                               LocationPoint, LocationCurve, CategoryType, ElementId)
+                               LocationPoint, LocationCurve, CategoryType, ElementId, BuiltInFailures)
 
 from pyrevit import revit, script, forms
 import codecs
@@ -75,80 +74,23 @@ def get_element_location_key(element):
 # --- Main Script ---
 def find_duplicates():
     """Main function to find and report duplicate elements."""
-    # Dictionary to group elements by signature: Key -> List of Elements
-    grouped_elements = defaultdict(list)
+    print("Scanning Revit Warnings...")
     
-    # Use a FilteredElementCollector to get all model elements
-    # We exclude non-model elements like views, templates, etc.
-    collector = FilteredElementCollector(doc).WhereElementIsNotElementType().WhereElementIsViewIndependent()
-
-    # Pre-calculate excluded category IDs
-    excluded_names = [
-        "OST_ProjectInformation",
-        "OST_Sheets",
-        "OST_Views",
-        "OST_Cameras",
-        "OST_CurtainGrids",
-        "OST_CurtainSystems",
-        "OST_CurtainWallMullions",
-        "OST_CurtainWallPanels"
-    ]
-    excluded_ids = set()
-    for name in excluded_names:
-        if hasattr(BuiltInCategory, name):
-            excluded_ids.add(int(getattr(BuiltInCategory, name)))
-
-    print("Analyzing model elements...")
-
-    # Iterate over all collected elements
-    for element in collector:
-        # 1. Basic Validity Checks
-        if not element.Category:
-            continue
+    duplicate_groups = []
+    all_warnings = doc.GetWarnings()
+    target_guid = BuiltInFailures.OverlapFailures.DuplicateInstances.Guid
+    
+    for w in all_warnings:
+        if w.GetFailureDefinitionId().Guid == target_guid:
+            ids = w.GetFailingElements()
+            group = []
+            for eid in ids:
+                el = doc.GetElement(eid)
+                if el:
+                    group.append(el)
             
-        # Filter for Model Categories only (excludes Tags, Sheets, internal data)
-        if element.Category.CategoryType != CategoryType.Model:
-            continue
-            
-        # Exclude specific internal/singleton categories
-        cat_id = get_id_value(element.Category.Id)
-        if cat_id in excluded_ids:
-            continue
-
-        # 2. Geometry Key
-        loc_key = get_element_location_key(element)
-        if not loc_key:
-            continue
-            
-        # 3. Construct Unique Signature
-        try:
-            # A. Category & Type
-            type_id = get_id_value(element.GetTypeId())
-            
-            # B. Level (Vertical Context)
-            level_id = get_id_value(element.LevelId) if hasattr(element, "LevelId") else -1
-            
-            # C. Design Option (Context)
-            design_opt_id = -1
-            if element.DesignOption:
-                design_opt_id = get_id_value(element.DesignOption.Id)
-            
-            # D. Phase (Time Context)
-            phase_id = -1
-            if hasattr(element, "CreatedPhaseId"):
-                phase_id = get_id_value(element.CreatedPhaseId)
-            
-            # Signature Tuple
-            key = (cat_id, type_id, level_id, design_opt_id, phase_id, loc_key)
-
-        except Exception:
-            continue
-            
-        # Add element to the group for this key
-        grouped_elements[key].append(element)
-
-    # Filter for groups that have more than one element (duplicates)
-    duplicate_groups = [grp for grp in grouped_elements.values() if len(grp) > 1]
+            if len(group) > 1:
+                duplicate_groups.append(group)
             
     # --- Reporting Results ---
     if duplicate_groups:
