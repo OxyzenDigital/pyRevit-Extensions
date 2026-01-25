@@ -1,0 +1,238 @@
+/* List Identicals Report Style - Version 1.0 */
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background-color: #bababa;
+    color: #1a202c;
+    margin: 20px;
+    font-size: 16px; /* Moderately large base size for readability */
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+a { color: #3182ce; text-decoration: none; font-weight: 500; transition: all 0.2s; }
+a:hover { color: #2b6cb0; text-decoration: underline; }
+
+/* --- Summary Section --- */
+.report-summary {
+    background-color: #ff9900;
+    color: white;
+    padding: 20px;
+    border-radius: 12px;
+    box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+    margin-bottom: 30px;
+}
+
+.summary-text {
+    font-size: 3em;
+    font-weight: 700;
+    margin-bottom: 8px;
+    line-height: 1;
+}
+
+.tip-text {
+    display: block;
+    font-size: 0.95em;
+    opacity: 0.9;
+    margin-top: 8px;
+    color: #333;
+    font-style: italic;
+}
+
+.tip-text strong { color: rgb(0, 0, 0); font-weight: 700; }
+
+/* --- Category Card --- */
+.category-section {
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    margin-bottom: 30px;
+    border: 1px solid #e2e8f0;
+    overflow: hidden;
+}
+
+/* Header */
+.category-header {
+    background-color: #2d3748;
+    padding: 16px 24px;
+    border-bottom: 1px solid #4a5568;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.category-title {
+    font-size: 1.25em;
+    font-weight: 700;
+    color: #ffffff;
+    display: flex;
+    align-items: center;
+}
+
+.item-count {
+    background-color: rgba(255,255,255,0.15);
+    color: #ffffff;
+    font-size: 0.7em;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 4px 10px;
+    border-radius: 20px;
+    margin-left: 12px;
+    font-weight: 700;
+    vertical-align: middle;
+}
+
+/* --- Header Buttons --- */
+.select-all-wrapper a,
+.select-duplicates-wrapper a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-size: 0.85em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    transition: all 0.2s ease;
+    text-decoration: none !important;
+    line-height: 1;
+}
+
+/* Select All (Secondary) */
+.select-all-wrapper a {
+    background-color: rgba(0,0,0,0.2);
+    border: 1px solid rgba(255,255,255,0.1);
+    color: #ffffff !important;
+}
+.select-all-wrapper a:hover {
+    background-color: rgba(0,0,0,0.3);
+    border-color: rgba(255,255,255,0.2);
+    color: #ffffff !important;
+    transform: translateY(-1px);
+}
+
+/* Select Duplicates (Primary/Danger) */
+.select-duplicates-wrapper a {
+    background-color: #e53e3e;
+    border: 1px solid #fc8181;
+    color: #ffffff !important;
+    margin-left: 12px;
+    box-shadow: 0 2px 4px rgba(229, 62, 62, 0.3);
+}
+.select-duplicates-wrapper a:hover {
+    background-color: #c53030;
+    border-color: #9b2c2c;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 6px rgba(229, 62, 62, 0.4);
+}
+
+/* --- Table --- */
+.category-content {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 1em;
+}
+
+th {
+    background-color: #f8fafc;
+    color: #4a5568;
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.75em;
+    letter-spacing: 0.05em;
+    padding: 16px 24px;
+    text-align: left;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+td {
+    padding: 16px 24px;
+    border-bottom: 1px solid #e2e8f0;
+    color: #1a202c;
+    vertical-align: top;
+}
+
+tr:last-child td { border-bottom: none; }
+tr:hover td { background-color: #fbfdff; }
+
+/* --- ID Groups --- */
+.id-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.id-group a {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.95em;
+    padding: 10px 10px;
+    background-color: #4a5568;
+    color: #ffffff !important;
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid transparent;
+    transition: all 0.15s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+}
+
+.id-group a:hover {
+    background-color: #a0aec0;
+    color: #1a202c !important;
+    border-color: #718096;
+    text-decoration: none;
+}
+
+/* Original Item Highlight */
+.id-original a {
+    background-color: #9ae6b4;
+    color: #22543d !important;
+    border-color: #68d391;
+    font-weight: 700;
+}
+
+/* --- Row Actions --- */
+.row-action {
+    display: block;
+    text-align: center;
+}
+
+.row-action a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 16px;
+    font-size: 0.8em;
+    font-weight: 600;
+    color: #ffffff !important;
+    background-color: #4a5568;
+    border: 1px solid #2b6cb0;
+    border-radius: 6px;
+    transition: all 0.2s;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: center;
+}
+
+.row-action a:hover {
+    background-color: #2b6cb0;
+    color: #ffffff !important;
+    border-color: #2c5282;
+    text-decoration: none;
+}
+
+/* --- Search Input Fix --- */
+input {
+    color: #333 !important;
+    background-color: #fff;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    padding: 8px 12px;
+}
