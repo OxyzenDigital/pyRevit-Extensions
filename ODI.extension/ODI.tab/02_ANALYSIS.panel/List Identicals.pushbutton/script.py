@@ -2,41 +2,72 @@
 """
 Finds and selects duplicate elements that are in the same location.
 
-This script groups elements by their Category, Family, Type, and Location.
+This script groups elements by their Category, Family, Type, Level, Design Option, and Geometry.
 Groups with more than one element are considered duplicates.
 """
 
 __title__ = 'Find Duplicates'
-__author__ = 'Your Name'
+__author__ = 'Oxyzen Digital'
+__version__ = '1.0'
 
 
-from Autodesk.Revit.DB import FilteredElementCollector, BuiltInCategory
-from Autodesk.Revit.UI import TaskDialog
+from Autodesk.Revit.DB import (FilteredElementCollector, BuiltInCategory, 
+                               LocationPoint, LocationCurve, CategoryType, ElementId)
 
-from pyrevit import revit, script
+from pyrevit import revit, script, forms
+import codecs
+from collections import defaultdict
 
-# Get the current Revit document
 doc = revit.doc
 uidoc = revit.uidoc
 
 # --- Functions ---
+def get_id_value(element_id):
+    if hasattr(element_id, "Value"):
+        return element_id.Value
+    return element_id.IntegerValue
+
 def get_element_location_key(element):
     """
-    Creates a string representation of the element's location.
-    For point-based elements, it uses coordinates.
-    For other elements, it uses the center of the bounding box.
+    Creates a robust string representation of the element's geometry.
+    Prioritizes LocationPoint and LocationCurve, falls back to BoundingBox.
     """
-    # Try to get the location point for point-based elements (like families)
-    if hasattr(element, 'Location') and element.Location and hasattr(element.Location, 'Point'):
-        point = element.Location.Point
-        # Format the point to a consistent string with limited precision
-        return "({:.4f}, {:.4f}, {:.4f})".format(point.X, point.Y, point.Z)
+    if not hasattr(element, "Location"):
+        return None
+        
+    loc = element.Location
+    
+    # 1. Point-based (Columns, Furniture, etc.)
+    if isinstance(loc, LocationPoint):
+        pt = loc.Point
+        # Include Rotation to distinguish rotated duplicates
+        try:
+            rot = loc.Rotation
+        except Exception:
+            rot = 0.0
+        return "Pt({:.4f},{:.4f},{:.4f}|{:.4f})".format(pt.X, pt.Y, pt.Z, rot)
 
-    # For elements without a location point (like walls, floors), use the bounding box center
+    # 2. Curve-based (Walls, Beams, Ducts, Pipes)
+    if isinstance(loc, LocationCurve):
+        curve = loc.Curve
+        # Check endpoints
+        try:
+            p0 = curve.GetEndPoint(0)
+            p1 = curve.GetEndPoint(1)
+            return "Crv({:.4f},{:.4f},{:.4f}-{:.4f},{:.4f},{:.4f})".format(
+                p0.X, p0.Y, p0.Z, p1.X, p1.Y, p1.Z
+            )
+        except: pass
+
+    # 3. Fallback: BoundingBox (Floors, Roofs, Generic Models)
+    # Use Min and Max to define exact spatial extent, not just center.
     bounding_box = element.get_BoundingBox(None)
     if bounding_box:
-        center = (bounding_box.Min + bounding_box.Max) / 2
-        return "({:.4f}, {:.4f}, {:.4f})".format(center.X, center.Y, center.Z)
+        min_pt = bounding_box.Min
+        max_pt = bounding_box.Max
+        return "Box({:.4f},{:.4f},{:.4f}-{:.4f},{:.4f},{:.4f})".format(
+            min_pt.X, min_pt.Y, min_pt.Z, max_pt.X, max_pt.Y, max_pt.Z
+        )
 
     # Return None if no location can be determined
     return None
@@ -44,76 +75,232 @@ def get_element_location_key(element):
 # --- Main Script ---
 def find_duplicates():
     """Main function to find and report duplicate elements."""
-    # Dictionary to store element signatures and their IDs
-    elements_dict = {}
-    duplicates = []
+    # Dictionary to group elements by signature: Key -> List of Elements
+    grouped_elements = defaultdict(list)
     
     # Use a FilteredElementCollector to get all model elements
     # We exclude non-model elements like views, templates, etc.
     collector = FilteredElementCollector(doc).WhereElementIsNotElementType().WhereElementIsViewIndependent()
 
+    # Pre-calculate excluded category IDs
+    excluded_names = [
+        "OST_ProjectInformation",
+        "OST_Sheets",
+        "OST_Views",
+        "OST_Cameras",
+        "OST_CurtainGrids",
+        "OST_CurtainSystems",
+        "OST_CurtainWallMullions",
+        "OST_CurtainWallPanels"
+    ]
+    excluded_ids = set()
+    for name in excluded_names:
+        if hasattr(BuiltInCategory, name):
+            excluded_ids.add(int(getattr(BuiltInCategory, name)))
+
     print("Analyzing model elements...")
 
     # Iterate over all collected elements
     for element in collector:
-        # Skip elements that are not valid for this check
-        if not element.Category or not hasattr(element, 'Location'):
-            continue
-
-        location_key = get_element_location_key(element)
-        if not location_key:
+        # 1. Basic Validity Checks
+        if not element.Category:
             continue
             
-        # Create a unique key for the element
-        # This key combines the category, type, and location
+        # Filter for Model Categories only (excludes Tags, Sheets, internal data)
+        if element.Category.CategoryType != CategoryType.Model:
+            continue
+            
+        # Exclude specific internal/singleton categories
+        cat_id = get_id_value(element.Category.Id)
+        if cat_id in excluded_ids:
+            continue
+
+        # 2. Geometry Key
+        loc_key = get_element_location_key(element)
+        if not loc_key:
+            continue
+            
+        # 3. Construct Unique Signature
         try:
-            type_id = element.GetTypeId()
-            element_type = doc.GetElement(type_id)
-            type_name = element_type.Name if hasattr(element_type, 'Name') else str(type_id)
-            family_name = element_type.FamilyName if hasattr(element_type, 'FamilyName') else ''
+            # A. Category & Type
+            type_id = get_id_value(element.GetTypeId())
             
-            key = (element.Category.Name, family_name, type_name, location_key)
+            # B. Level (Vertical Context)
+            level_id = get_id_value(element.LevelId) if hasattr(element, "LevelId") else -1
+            
+            # C. Design Option (Context)
+            design_opt_id = -1
+            if element.DesignOption:
+                design_opt_id = get_id_value(element.DesignOption.Id)
+            
+            # D. Phase (Time Context)
+            phase_id = -1
+            if hasattr(element, "CreatedPhaseId"):
+                phase_id = get_id_value(element.CreatedPhaseId)
+            
+            # Signature Tuple
+            key = (cat_id, type_id, level_id, design_opt_id, phase_id, loc_key)
 
-        except Exception as e:
-            # Some elements might not have all properties, skip them
-            # print("Could not process element {}: {}".format(element.Id, e))
+        except Exception:
             continue
             
-        # If the key is already in the dictionary, it's a duplicate
-        if key in elements_dict:
-            # Check if this is the first time we've found a duplicate for this key
-            if elements_dict[key] not in duplicates:
-                duplicates.append(elements_dict[key])
-            duplicates.append(element.Id)
-        else:
-            # If not, add the element to the dictionary
-            elements_dict[key] = element.Id
+        # Add element to the group for this key
+        grouped_elements[key].append(element)
+
+    # Filter for groups that have more than one element (duplicates)
+    duplicate_groups = [grp for grp in grouped_elements.values() if len(grp) > 1]
             
     # --- Reporting Results ---
-    if duplicates:
-        print("\nFound {} duplicate elements!".format(len(duplicates)))
+    if duplicate_groups:
+        output = script.get_output()
+        output.close_others()
+        output.set_title("Duplicate Elements Report")
+        output.resize(1100, 1100)
         
-        # Select the duplicates in the Revit UI
-        revit.get_selection().set_to(duplicates)
         
-        # Prepare a message for the user
-        dialog = TaskDialog("Duplicates Found")
-        dialog.MainInstruction = "Found {} duplicate elements.".format(len(duplicates))
-        dialog.MainContent = ("The duplicate elements have been selected in the model. "
-                             "Please review them carefully.\n\n"
-                             "You can use the 'Selection Box' (BX) tool to isolate them. "
-                             "It's recommended to use the 'Manage' tab > 'Select by ID' tool to inspect each one before deleting.")
-        dialog.Show()
+        # Inject CSS from external file
+        css_file = script.get_bundle_file('style.css')
+        if css_file:
+            try:
+                with codecs.open(css_file, 'r', encoding='utf-8-sig') as f:
+                    output.add_style(f.read())
+            except:
+                pass
         
-        # Print the IDs of the duplicates
-        print("Selected Duplicate Element IDs:")
-        for elem_id in sorted(list(set(duplicates))): # Use set to get unique IDs
-            print("  - {}".format(elem_id))
+        # Group by Category
+        # category_name -> list of groups (where each group is a list of elements)
+        by_category = defaultdict(list)
+        total_duplicates = 0
+        
+        for group in duplicate_groups:
+            first_el = group[0]
+            cat_name = "Unknown Category"
+            if first_el.Category and first_el.Category.Name:
+                cat_name = first_el.Category.Name
+            else:
+                # Fallback for elements with missing category names (e.g. some curves)
+                cat_name = first_el.GetType().Name.split('.')[-1]
+            
+            by_category[cat_name].append(group)
+            total_duplicates += len(group)
+        
+        # --- Summary Section ---
+        summary_html = """<div class="report-summary">
+            <div class="summary-text">Found {count} duplicate elements.</div>
+            <span class="tip-text"><strong>Tip:</strong> Click 'Select Duplicates' to select redundant elements in Revit, then press <strong>Delete</strong> to purge.</span>
+            <span class="tip-text"><strong>Note:</strong> Switch to a 3D View to ensure all element types can be selected.</span>
+        </div>""".format(count=total_duplicates)
+        
+        output.print_html(summary_html)
+        
+        for cat_name in sorted(by_category.keys()):
+            groups = by_category[cat_name]
+            
+            # Calculate total IDs for this category for "Select All"
+            all_ids_in_cat = [e.Id for grp in groups for e in grp]
+            
+            # Calculate Purgeable IDs (All except first in each group, sorted by ID)
+            purgeable_ids = []
+            for grp in groups:
+                # Sort by ID to ensure we keep the oldest (lowest ID)
+                s_grp = sorted(grp, key=lambda x: get_id_value(x.Id))
+                for e in s_grp[1:]:
+                    purgeable_ids.append(e.Id)
+            
+            # Select All Button
+            btn_link = output.linkify(all_ids_in_cat, title="🔍 Select All")
+            btn_html = '<span class="select-all-wrapper">{}</span>'.format(btn_link)
+            
+            # Select Purgeable Button
+            purge_link = output.linkify(purgeable_ids, title="🔍 Select Duplicates")
+            purge_html = '<span class="select-duplicates-wrapper">{}</span>'.format(purge_link)
+            
+            # Start Table HTML
+            table_html = '<table style="margin:0;"><thead><tr>'
+            table_html += '<th style="width:20%">Duplicate IDs</th><th style="width:15%">Family</th><th style="width:15%">Type</th>'
+            table_html += '<th style="width:10%">Level</th><th style="width:10%">Workset</th><th style="width:15%">Location</th><th style="width:15%">Action</th>'
+            table_html += '</tr></thead><tbody>'
+            
+            for group in groups:
+                # Sort group by ID to ensure deterministic order (Oldest first)
+                group = sorted(group, key=lambda x: get_id_value(x.Id))
+                el = group[0] # Original
+                fam = ""
+                typ = ""
+                try:
+                    type_id = el.GetTypeId()
+                    if type_id != ElementId.InvalidElementId:
+                        etype = doc.GetElement(type_id)
+                        if etype:
+                            fam = etype.FamilyName if hasattr(etype, "FamilyName") else ""
+                            typ = etype.Name if hasattr(etype, "Name") else ""
+                except: pass
+                
+                # Level Info
+                lvl = "-"
+                if hasattr(el, "LevelId") and el.LevelId != ElementId.InvalidElementId:
+                    l_el = doc.GetElement(el.LevelId)
+                    if l_el: lvl = l_el.Name
+                    
+                # Workset Info
+                workset_name = "-"
+                if doc.IsWorkshared:
+                    try:
+                        ws_id = el.WorksetId
+                        ws = doc.GetWorksetTable().GetWorkset(ws_id)
+                        if ws:
+                            workset_name = ws.Name
+                    except:
+                        pass
+                
+                # Create a visual group of ID links
+                id_links = []
+                for i, e in enumerate(group):
+                    lnk = output.linkify(e.Id)
+                    if i == 0:
+                        # Highlight Original
+                        id_links.append('<span class="id-original" title="Original (Oldest)">{}</span>'.format(lnk))
+                    else:
+                        id_links.append(lnk)
+                        
+                ids_html = '<div class="id-group">{}</div>'.format(" ".join(id_links))
+                
+                # Row Action
+                row_dups = [e.Id for e in group[1:]]
+                action_link = output.linkify(row_dups, title="Select Dups")
+                action_html = '<span class="row-action">{}</span>'.format(action_link)
+                
+                # Append Row
+                table_html += "<tr>"
+                table_html += "<td>{}</td>".format(ids_html)
+                table_html += "<td>{}</td>".format(fam)
+                table_html += "<td>{}</td>".format(typ)
+                table_html += "<td>{}</td>".format(lvl)
+                table_html += "<td>{}</td>".format(workset_name)
+                table_html += "<td>{}</td>".format(get_element_location_key(el))
+                table_html += "<td>{}</td>".format(action_html)
+                table_html += "</tr>"
+            
+            table_html += "</tbody></table>"
+            
+            # Wrap in Section Div (Card Style)
+            full_block = '<div class="category-section">'
+            full_block += '<div class="category-header">'
+            full_block += '<div class="category-title">{cat} <span class="item-count">{count} items</span></div>'
+            full_block += '<div>{}{}</div></div>'.format(btn_html, purge_html)
+            full_block += '<div class="category-content">{table}</div>'
+            full_block += '</div>'
+            full_block = full_block.format(cat=cat_name, count=len(all_ids_in_cat), btn=btn_html, table=table_html)
+            
+            output.print_html(full_block)
+            
+        # Scroll to top
+        output.print_html('<script>window.scrollTo(0,0);</script>')
             
     else:
         # If no duplicates are found
-        print("\nNo duplicate elements found in the model. ✅")
-        TaskDialog.Show("Success", "No duplicate elements were found.")
+        print("No duplicates found. Model is clean. \u2705")
+        forms.alert("No duplicate model elements found.", title="Clean")
 
 # --- Run the script ---
 if __name__ == '__main__':
