@@ -10,19 +10,40 @@
             --header-dark: #202124;
             --audit-success: #2e7d32;
             --caution-orange: #ef6c00;
+            
+            --bg-app: #cfd8dc;
+            --bg-panel: #ffffff;
+            --bg-header: #f8f9fa;
+            --bg-browser: #eceff1;
+            --bg-row: #ffffff;
+            --text-main: #000000;
+            --border-color: #ccc;
+            --border-light: #f0f0f0;
         }
 
-        body, html { height: 100%; margin: 0; font-family: var(--ui-font); font-size: 13px; overflow: hidden; background: #cfd8dc; }
+        [data-theme="dark"] {
+            --bg-app: #202124;
+            --bg-panel: #2d2e31;
+            --bg-header: #3c4043;
+            --bg-browser: #35363a;
+            --bg-row: #2d2e31;
+            --text-main: #e8eaed;
+            --border-color: #5f6368;
+            --border-light: #3c4043;
+            --header-dark: #000000;
+        }
+
+        body, html { height: 100%; margin: 0; font-family: var(--ui-font); font-size: 13px; overflow: hidden; background: var(--bg-app); color: var(--text-main); }
         .app-wrapper { display: flex; flex-direction: column; height: 100vh; }
         
         .toolbar {
-            background: #fff; border-bottom: 1px solid #ccc; padding: 10px 20px;
+            background: var(--bg-panel); border-bottom: 1px solid var(--border-color); padding: 10px 20px;
             display: flex; justify-content: space-between; align-items: center; z-index: 100; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
         }
 
         .pane-container { display: flex; flex: 1; overflow: hidden; justify-content: center; align-items: stretch; padding: 10px; gap: 0; }
         
-        .pane { display: flex; flex-direction: column; background: white; overflow: hidden; position: relative; border: 1px solid #999; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .pane { display: flex; flex-direction: column; background: var(--bg-panel); overflow: hidden; position: relative; border: 1px solid #999; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
         .pane.primary { flex: 0 0 50%; z-index: 10; border-radius: 4px; min-width: 450px; }
         .pane.secondary { flex: 1; min-width: 250px; border-radius: 4px; margin: 0 5px; }
 
@@ -30,31 +51,55 @@
         .resizer:hover { background: rgba(0,120,212,0.2); }
         .resizer::after { content: '⋮'; color: #666; font-weight: bold; }
 
-        .pane-header { background: #f8f9fa; border-bottom: 1px solid #ddd; padding: 10px; font-weight: 600; }
+        .pane-header { background: var(--bg-header); border-bottom: 1px solid var(--border-color); padding: 10px; font-weight: 600; }
         .editor-layout { display: flex; flex: 1; overflow: hidden; }
         
-        .section-browser { width: 150px; background: #eceff1; border-right: 1px solid #ddd; overflow-y: auto; font-size: 10px; padding: 5px; flex-shrink: 0; }
-        .browser-header { display: flex; flex-direction: column; gap: 5px; padding-bottom: 5px; border-bottom: 1px solid #ccc; margin-bottom: 8px; }
+        .section-browser { width: 150px; background: var(--bg-browser); border-right: 1px solid var(--border-color); overflow-y: auto; font-size: 10px; padding: 5px; flex-shrink: 0; }
+        .browser-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 5px; border-bottom: 1px solid var(--border-color); margin-bottom: 8px; }
         
         .caution-box { 
             background: #fff3e0; border: 1px solid var(--caution-orange); color: var(--caution-orange);
             padding: 5px; border-radius: 3px; font-size: 9px; margin-top: 5px; cursor: pointer; text-align: center; font-weight: bold;
         }
         .caution-box.disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
+        
+        .header-icon { font-size: 14px; cursor: pointer; opacity: 0.7; transition: opacity 0.2s; user-select: none; }
+        .header-icon:hover { opacity: 1; }
+        .header-icon.disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+        .icon-red { color: #d32f2f; }
+        .icon-blue { color: var(--active-blue); }
 
         .keynote-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; padding-bottom: 50vh; }
         .tree-node { display: flex; flex-direction: column; }
-        .row { display: flex; padding: 5px 10px; align-items: center; cursor: grab; background: #fff; border-bottom: 1px solid #f0f0f0; border-left: 5px solid transparent; transition: border-left 0.3s; }
+        .row { display: flex; padding: 5px 10px; align-items: center; cursor: grab; background: var(--bg-row); border-bottom: 1px solid var(--border-light); border-left: 5px solid transparent; transition: border-left-color 0.3s, opacity 0.3s; }
         .row.is-root { background: var(--header-dark) !important; color: #fff; font-weight: bold; position: sticky; top: 0; z-index: 5; }
-        .row.drag-over-target { background: #e3f2fd; outline: 2px dashed var(--active-blue); }
+        
+        .row.audit-match {
+            opacity: 0.5;
+            border-left-color: var(--audit-success);
+        }
+        .row.audit-match:hover {
+            opacity: 1;
+        }
+        
+        .row.selected-highlight {
+            background-color: rgba(255, 215, 0, 0.15) !important;
+            border-left-color: #fbc02d !important;
+            opacity: 1 !important;
+        }
+        
+        .row.drop-inside { background: rgba(0, 120, 212, 0.15) !important; outline: 2px dashed var(--active-blue); }
+        .row.drop-above { border-top: 2px solid var(--active-blue); }
+        .row.drop-below { border-bottom: 2px solid var(--active-blue); }
 
-        .lvl-container { display: flex; flex-direction: column; padding-left: 20px; border-left: 1px solid #eee; margin-left: 7px; }
-        .toggle { width: 15px; cursor: pointer; font-size: 9px; }
+        .lvl-container { display: flex; flex-direction: column; padding-left: 12px; border-left: 1px solid var(--border-light); margin-left: 4px; }
+        .toggle { width: 15px; cursor: pointer; font-size: 9px; display: inline-block; transition: transform 0.2s; user-select: none; }
+        .collapsed > .row > .toggle { transform: rotate(-90deg); }
         .collapsed > .lvl-container { display: none; }
 
         .key-num-input { font-weight: bold; width: 110px; border: 1px solid transparent; background: transparent; color: inherit; outline: none; }
         .key-desc-input { flex-grow: 1; border: 1px solid transparent; background: transparent; color: inherit; outline: none; padding: 2px 5px; }
-        .key-num-input:focus, .key-desc-input:focus { background: #fff; border-color: var(--active-blue); color: #000; box-shadow: 0 0 3px rgba(0,0,0,0.2); }
+        .key-num-input:focus, .key-desc-input:focus { background: var(--bg-row); border-color: var(--active-blue); color: inherit; box-shadow: 0 0 3px rgba(0,0,0,0.2); }
 
         .btn { border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px; }
         .btn:disabled { background: #ccc !important; opacity: 0.6; cursor: not-allowed; }
@@ -62,62 +107,189 @@
         
         .action-tools { opacity: 0; margin-left: 10px; display: flex; gap: 4px; }
         .row:hover .action-tools { opacity: 1; }
-        .tool-btn { cursor: pointer; font-size: 10px; padding: 2px 5px; border-radius: 3px; border: 1px solid #ddd; background: #fff; color: #333; }
+        .tool-btn { cursor: pointer; font-size: 10px; padding: 2px 5px; border-radius: 3px; border: 1px solid var(--border-color); background: var(--bg-panel); color: inherit; }
         
         .hidden { display: none !important; }
+
+        /* Custom Tooltip */
+        #tooltip {
+            position: fixed;
+            background: var(--bg-header);
+            color: var(--text-main);
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            font-size: 11px;
+            pointer-events: none;
+            opacity: 0;
+            z-index: 9999;
+            transition: opacity 0.15s;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            max-width: 300px;
+        }
+
+        /* Modal */
+        .modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 2000; display: flex; justify-content: center; align-items: center; }
+        .modal-content { background: var(--bg-panel); padding: 20px; border-radius: 4px; border: 1px solid var(--border-color); width: 300px; box-shadow: 0 4px 10px rgba(0,0,0,0.2); }
+        .input-group { margin-bottom: 10px; }
+        .input-group label { display: block; margin-bottom: 5px; font-size: 11px; opacity: 0.8; }
+        .input-group input { width: 100%; padding: 5px; background: var(--bg-row); border: 1px solid var(--border-color); color: var(--text-main); outline: none; box-sizing: border-box; }
+        .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }
     </style>
 </head>
 <body>
 
 <div class="app-wrapper">
+    <div id="tooltip"></div>
     <div class="toolbar">
         <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT</div>
-        <input type="text" id="globalSearch" placeholder="Deep Search Numbers or Content..." onkeyup="ViewModel.search(this.value)" style="width:400px; padding:8px; border:1px solid #ccc; border-radius:20px; outline:none;">
+        <input type="text" id="globalSearch" placeholder="Deep Search Numbers or Content..." onkeyup="ViewModel.search(this.value)" style="width:400px; padding:8px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:20px; outline:none;">
         <div>
-            <button class="btn" style="background:#546e7a; color:white;" onclick="ViewModel.addPane()">+ COMPARISON</button>
-            <button id="auditBtn" class="btn" style="background:var(--active-blue); color:white;" disabled onclick="ViewModel.runAudit()">RUN COORDINATION AUDIT</button>
+            <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main); margin-right:10px;" onclick="ViewModel.openFindReplace()" title="Find and Replace text in descriptions">Find & Replace</button>
+            <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main); margin-right:10px;" onclick="AppState.toggleDarkMode()" title="Toggle Light/Dark Theme">🌗 Theme</button>
+            <button class="btn" style="background:#546e7a; color:white;" onclick="ViewModel.addPane()" title="Add a secondary pane for file comparison">+ COMPARISON</button>
+            <button id="auditBtn" class="btn" style="background:var(--active-blue); color:white;" disabled onclick="ViewModel.runAudit()" title="Highlight rows with matching descriptions across panes">RUN COORDINATION AUDIT</button>
         </div>
     </div>
     <div class="pane-container" id="paneBox"></div>
+    
+    <div id="findReplaceModal" class="modal hidden">
+        <div class="modal-content">
+            <h3 style="margin-top:0; margin-bottom:15px;">Find & Replace</h3>
+            <div class="input-group">
+                <label>Find:</label>
+                <input type="text" id="findInput" placeholder="Text to find...">
+            </div>
+            <div class="input-group">
+                <label>Replace with:</label>
+                <input type="text" id="replaceInput" placeholder="Replacement text...">
+            </div>
+            <div class="modal-actions">
+                <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main);" onclick="ViewModel.closeFindReplace()">Cancel</button>
+                <button class="btn btn-save" style="width:auto;" onclick="ViewModel.executeReplace()">Replace All</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
 /**
- * MODEL: Data Store
+ * STATE MANAGEMENT SECTION
+ * Centralized store for all application data and UI states to ensure persistence.
+ * 
+ * FEATURE REGISTRY:
+ * - Pane Management: Dynamic creation of Editor/Reference panes.
+ * - File I/O: Read tab-delimited txt, Export modified txt.
+ * - Tree Visualization: Hierarchical rendering based on Parent Key.
+ * - CRUD: Update Key/Desc, Add Sibling, Delete Item.
+ * - Drag & Drop: Re-parenting items via UI.
+ * - Renumbering: Auto-sequence children keys.
+ * - Audit: Visual comparison between panes.
+ * - Search: Deep filtering of tree nodes.
  */
-const Model = {
-    panes: {}, // [id]: [[key, desc, parent]]
+const AppState = {
+    // 1. Data Store (The Content)
+    // Structure: { [paneId]: Array<[Key, Description, ParentKey]> }
+    panes: {}, 
+
+    // 2. UI State (The Interface)
+    ui: {
+        primaryPaneId: null,     // ID of the main editing pane
+        dirtyStatus: {},         // { [paneId]: boolean } - Tracks unsaved changes
+        darkMode: localStorage.getItem('odi-dark-mode') !== 'false',
+    },
+
+    // 3. Interaction State (Transient)
+    drag: {
+        key: null,               // Key being dragged
+        sourcePaneId: null       // Pane ID where drag started
+    },
+    
+    recentFiles: JSON.parse(localStorage.getItem('odi-recent-files') || '[]'),
+
+    // --- State Helpers ---
+    registerPane(id, isPrimary = false) {
+        this.panes[id] = null;
+        this.ui.dirtyStatus[id] = false;
+        if (isPrimary) this.ui.primaryPaneId = id;
+    },
+
+    setDirty(id, status = true) {
+        this.ui.dirtyStatus[id] = status;
+        const btn = document.getElementById(`save-${id}`);
+        if (btn) btn.disabled = !status;
+        
+        // Handle renumber button state
+        if (id === this.ui.primaryPaneId) {
+            const renumBtn = document.getElementById('renum-btn');
+            if (renumBtn) renumBtn.classList.toggle('disabled', !status);
+        }
+    },
+
+    toggleDarkMode() {
+        this.ui.darkMode = !this.ui.darkMode;
+        document.documentElement.setAttribute('data-theme', this.ui.darkMode ? 'dark' : 'light');
+        localStorage.setItem('odi-dark-mode', this.ui.darkMode);
+    },
+
+    initTheme() {
+        if (this.ui.darkMode) document.documentElement.setAttribute('data-theme', 'dark');
+    },
+
+    addRecentFile(name, content) {
+        // Remove existing if present to move to top
+        this.recentFiles = this.recentFiles.filter(f => f.name !== name);
+        // Add to front
+        this.recentFiles.unshift({ name, content, date: new Date().toLocaleString() });
+        // Limit to 5
+        if (this.recentFiles.length > 5) this.recentFiles.pop();
+        localStorage.setItem('odi-recent-files', JSON.stringify(this.recentFiles));
+        this.updateRecentUI();
+    },
+
+    updateRecentUI() {
+        Object.keys(this.panes).forEach(id => {
+            const sel = document.getElementById(`recent-${id}`);
+            if (sel) ViewModel.renderRecentList(sel);
+        });
+    }
 };
 
 /**
  * VIEWMODEL: State & Interaction logic
  */
 const ViewModel = {
-    isDirty: {},
-    primaryId: null,
-    draggedKey: null,
-    draggedPaneId: null,
-
     addPane(isPrimary = false) {
         const id = Date.now() + Math.floor(Math.random() * 100);
-        this.isDirty[id] = false;
-        if (isPrimary) this.primaryId = id;
+        AppState.registerPane(id, isPrimary);
 
         const paneHtml = `
             <div class="pane ${isPrimary ? 'primary' : 'secondary'}" id="pane-${id}">
                 <div class="pane-header">
-                    <span style="font-size:10px; opacity:0.7;">${isPrimary ? 'PRIMARY EDITOR' : 'REFERENCE'}</span>
-                    <input type="file" id="file-${id}" onchange="ViewModel.handleFileSelect(this, ${id})" style="display:block; margin-top:5px;">
-                    <button id="save-${id}" class="btn btn-save" disabled onclick="ViewModel.exportFile(${id})">SAVE .TXT</button>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+                        <span style="font-size:10px; opacity:0.7;">${isPrimary ? 'PRIMARY EDITOR' : 'REFERENCE'}</span>
+                        <div style="display:flex; gap:5px;">
+                            <span class="tool-btn" onclick="ViewModel.toggleAll(${id}, true)" title="Expand All">Expand All</span>
+                            <span class="tool-btn" onclick="ViewModel.toggleAll(${id}, false)" title="Collapse All">Collapse All</span>
+                        </div>
+                    </div>
+                    <div id="current-file-${id}" style="font-size:11px; font-weight:bold; color:var(--active-blue); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">[No File Loaded]</div>
+                    <input type="file" id="file-${id}" onchange="ViewModel.handleFileSelect(this, ${id})" style="display:block; width:100%;" title="Load a keynote .txt file">
+                    <select id="recent-${id}" onchange="ViewModel.loadRecent(this, ${id})" style="display:block; width:100%; margin-top:5px; padding:4px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:3px;" title="Load a recently opened file">
+                        <option value="">Load Recent...</option>
+                    </select>
+                    <button id="save-${id}" class="btn btn-save" disabled onclick="ViewModel.exportFile(${id})" title="Save changes to a new .txt file">SAVE .TXT</button>
                 </div>
                 <div class="editor-layout">
                     ${isPrimary ? `
                         <div class="section-browser">
                             <div class="browser-header">
                                 <span>DIVISIONS</span>
-                                <span style="cursor:pointer; color:var(--active-blue); font-size:14px;" onclick="ViewModel.addDivision(${id})">+</span>
+                                <div style="display:flex; gap:8px;">
+                                    <span id="renum-btn" class="header-icon icon-red disabled" onclick="ViewModel.renumber(${id})" title="Renumber Sequence">&#x21bb;</span>
+                                    <span class="header-icon icon-blue" onclick="ViewModel.addDivision(${id})" title="Add Division">+</span>
+                                </div>
                             </div>
-                            <div id="renum-btn" class="caution-box disabled" onclick="ViewModel.renumber(${id})">⚠ RENUMBER SEQUENCE</div>
                             <div id="browser-list-${id}"></div>
                         </div>` : ''}
                     <div class="keynote-scroll" id="s${id}"><div id="tree${id}"></div></div>
@@ -137,7 +309,44 @@ const ViewModel = {
             container.insertAdjacentHTML('beforeend', paneHtml);
         }
         this.setupPaneDragDrop(id);
+        this.renderRecentList(document.getElementById(`recent-${id}`));
         return id;
+    },
+
+    toggleAll(id, expand) {
+        const tree = document.getElementById(`tree${id}`);
+        if (!tree) return;
+        const nodes = tree.querySelectorAll('.tree-node');
+        nodes.forEach(node => {
+            if (node.querySelector('.toggle')) {
+                node.classList.toggle('collapsed', !expand);
+            }
+        });
+    },
+
+    renderRecentList(select) {
+        if (!select) return;
+        select.innerHTML = '<option value="">Load Recent...</option>';
+        AppState.recentFiles.forEach((f, i) => {
+            const opt = document.createElement('option');
+            opt.value = i;
+            opt.text = `${f.name} (${f.date})`;
+            select.appendChild(opt);
+        });
+    },
+
+    loadRecent(select, id) {
+        const idx = select.value;
+        if (idx === "") return;
+        const fileData = AppState.recentFiles[idx];
+        if (fileData) {
+            AppState.panes[id] = fileData.content.split(/\r?\n/).map(l => l.split('\t')).filter(a => a.length >= 2);
+            this.render(id);
+            document.getElementById(`current-file-${id}`).innerText = fileData.name;
+            this.validateAuditState();
+            document.getElementById(`file-${id}`).value = ""; 
+        }
+        select.value = "";
     },
 
     handleFileSelect(input, id) { if (input.files[0]) this.processFile(input.files[0], id); },
@@ -145,7 +354,10 @@ const ViewModel = {
     processFile(file, id) {
         const reader = new FileReader();
         reader.onload = (e) => {
-            Model.panes[id] = e.target.result.split(/\r?\n/).map(l => l.split('\t')).filter(a => a.length >= 2);
+            const content = e.target.result;
+            AppState.addRecentFile(file.name, content);
+            AppState.panes[id] = content.split(/\r?\n/).map(l => l.split('\t')).filter(a => a.length >= 2);
+            document.getElementById(`current-file-${id}`).innerText = file.name;
             this.render(id);
             this.validateAuditState();
         };
@@ -155,7 +367,7 @@ const ViewModel = {
     render(id) {
         const container = document.getElementById(`tree${id}`);
         container.innerHTML = '';
-        const data = Model.panes[id];
+        const data = AppState.panes[id];
         if (!data) return;
 
         const nodesMap = new Map();
@@ -166,17 +378,23 @@ const ViewModel = {
             else roots.push(node);
         });
 
+        // Sort nodes alphanumerically
+        const sorter = (a, b) => a.key.localeCompare(b.key, undefined, { numeric: true, sensitivity: 'base' });
+        roots.sort(sorter);
+        nodesMap.forEach(n => n.children.sort(sorter));
+
         const buildNode = (node) => {
             const isRoot = !node.parent;
+            const hasChildren = node.children.length > 0;
             const div = document.createElement('div'); div.className = 'tree-node';
             div.innerHTML = `
-                <div class="row ${isRoot ? 'is-root' : ''}" data-key="${node.key}" draggable="true">
-                    ${node.children.length ? '<span class="toggle" onclick="this.parentElement.parentElement.classList.toggle(\'collapsed\')">▼</span>' : '<span style="width:15px"></span>'}
+                <div class="row ${isRoot ? 'is-root' : ''}" data-key="${node.key}" draggable="true" onclick="ViewModel.syncScroll(${id}, '${node.key}')">
+                    ${hasChildren ? '<span class="toggle" onclick="this.parentElement.parentElement.classList.toggle(\'collapsed\')">▼</span>' : '<span style="width:15px"></span>'}
                     <input class="key-num-input" value="${node.key}" onchange="ViewModel.updateData(${id}, '${node.key}', 0, this.value)">
                     <input class="key-desc-input" value="${node.desc}" onchange="ViewModel.updateData(${id}, '${node.key}', 1, this.value)">
                     <div class="action-tools">
-                        <span class="tool-btn" onclick="ViewModel.addSibling(${id}, '${node.key}', '${node.parent}')">+ Sib</span>
-                        <span class="tool-btn" style="color:#d32f2f" onclick="ViewModel.deleteItem(${id}, '${node.key}')">✕</span>
+                        <span class="tool-btn" onclick="ViewModel.addSibling(${id}, '${node.key}', '${node.parent}')" title="Add a new sibling keynote">+ Sib</span>
+                        <span class="tool-btn" style="color:#d32f2f" onclick="ViewModel.deleteItem(${id}, '${node.key}')" title="Delete this keynote and all its children">✕</span>
                     </div>
                 </div>
                 <div class="lvl-container"></div>`;
@@ -189,36 +407,78 @@ const ViewModel = {
             return div;
         };
         roots.forEach(r => container.appendChild(buildNode(r)));
-        if (id === this.primaryId) this.updateBrowser(id);
+        if (id === AppState.ui.primaryPaneId) this.updateBrowser(id);
+    },
+
+    syncScroll(srcId, key) {
+        document.querySelectorAll('.row.selected-highlight').forEach(r => r.classList.remove('selected-highlight'));
+
+        // Get Source Description from Data Store
+        const srcItem = AppState.panes[srcId]?.find(r => r[0].trim() === key);
+        if (!srcItem) return;
+        const targetDesc = srcItem[1].toLowerCase().trim();
+
+        Object.keys(AppState.panes).forEach(pId => {
+            const tree = document.getElementById(`tree${pId}`);
+            if (!tree) return;
+
+            // Find all data items in this pane that match the description
+            const matches = AppState.panes[pId].filter(r => r[1].toLowerCase().trim() === targetDesc);
+            
+            let scrolledToPane = false;
+            matches.forEach(m => {
+                const matchKey = m[0].trim();
+                const targetRow = tree.querySelector(`.row[data-key="${matchKey}"]`);
+                
+                if (targetRow) {
+                    targetRow.classList.add('selected-highlight');
+                    
+                    // Expand parents to ensure visibility
+                    let p = targetRow.closest('.tree-node').parentElement.closest('.tree-node');
+                    while (p) {
+                        p.classList.remove('collapsed');
+                        p = p.parentElement.closest('.tree-node');
+                    }
+
+                    // Scroll to the first match in this pane
+                    if (!scrolledToPane) {
+                        targetRow.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        scrolledToPane = true;
+                    }
+                }
+            });
+        });
     },
 
     updateData(id, key, col, val) {
-        Model.panes[id].forEach(r => {
+        AppState.panes[id].forEach(r => {
             if (r[0].trim() === key) r[col] = val;
             if (col === 0 && r[2]?.trim() === key) r[2] = val;
         });
-        this.markDirty(id);
-    },
-
-    markDirty(id) {
-        this.isDirty[id] = true;
-        document.getElementById(`save-${id}`).disabled = false;
-        if (id === this.primaryId) document.getElementById('renum-btn').classList.remove('disabled');
+        AppState.setDirty(id, true);
     },
 
     validateAuditState() {
-        const loaded = Object.keys(Model.panes).filter(id => Model.panes[id]).length;
+        const loaded = Object.keys(AppState.panes).filter(id => AppState.panes[id]).length;
         document.getElementById('auditBtn').disabled = (loaded < 2);
     },
 
     runAudit() {
-        document.querySelectorAll('.row').forEach(r => r.style.borderLeft = "5px solid transparent");
-        const ids = Object.keys(Model.panes);
+        // Reset all rows first by removing the audit class
+        document.querySelectorAll('.row').forEach(r => r.classList.remove('audit-match'));
+
+        const ids = Object.keys(AppState.panes);
         ids.forEach(tId => {
-            const others = ids.filter(id => id != tId).flatMap(id => Model.panes[id].map(r => r[1].toLowerCase().trim()));
+            // Create a Set of descriptions from all other panes for efficient lookup
+            const otherDescriptions = new Set(
+                ids.filter(id => id != tId && AppState.panes[id])
+                   .flatMap(id => AppState.panes[id].map(r => r[1].toLowerCase().trim()))
+            );
+
             document.querySelectorAll(`#tree${tId} .row:not(.is-root)`).forEach(row => {
-                if (others.includes(row.querySelector('.key-desc-input').value.toLowerCase().trim())) {
-                    row.style.borderLeft = "5px solid var(--audit-success)";
+                const desc = row.querySelector('.key-desc-input').value.toLowerCase().trim();
+                if (otherDescriptions.has(desc)) {
+                    row.classList.add('audit-match');
                 }
             });
         });
@@ -226,34 +486,166 @@ const ViewModel = {
 
     search(term) {
         const t = term.toLowerCase().trim();
-        document.querySelectorAll('.tree-node').forEach(node => {
-            const match = node.querySelector('.row').innerText.toLowerCase().includes(t);
-            node.classList.toggle('hidden', t !== "" && !match);
-            if (match && t !== "") {
+        const allNodes = document.querySelectorAll('.tree-node');
+        
+        if (t === "") {
+            allNodes.forEach(n => n.classList.remove('hidden'));
+            return;
+        }
+
+        const visibleNodes = new Set();
+
+        // 1. Find direct matches and collect all related nodes (ancestors and descendants)
+        allNodes.forEach(node => {
+            const row = node.querySelector('.row');
+            const keyVal = row.querySelector('.key-num-input').value;
+            const descVal = row.querySelector('.key-desc-input').value;
+            
+            if ((keyVal + " " + descVal).toLowerCase().includes(t)) {
+                // A match is found, add it to the visible set
+                visibleNodes.add(node);
+
+                // 2. Add all its ancestors and expand them
                 let p = node.parentElement.closest('.tree-node');
-                while (p) { p.classList.remove('hidden', 'collapsed'); p = p.parentElement.closest('.tree-node'); }
+                while (p) {
+                    visibleNodes.add(p);
+                    p.classList.remove('collapsed');
+                    p = p.parentElement.closest('.tree-node');
+                }
+
+                // 3. Add all its descendants
+                node.querySelectorAll('.tree-node').forEach(descendant => {
+                    visibleNodes.add(descendant);
+                });
             }
+        });
+
+        // 4. Apply visibility based on the collected set
+        allNodes.forEach(node => {
+            node.classList.toggle('hidden', !visibleNodes.has(node));
         });
     },
 
+    deleteItem(id, key) {
+        if (!confirm(`Are you sure you want to delete '${key}'?\n(This will also delete all child items)`)) return;
+
+        const toDelete = new Set([key]);
+        let foundNew = true;
+        while (foundNew) {
+            foundNew = false;
+            AppState.panes[id].forEach(r => {
+                const k = r[0].trim();
+                const p = (r[2] || "").trim();
+                if (toDelete.has(p) && !toDelete.has(k)) {
+                    toDelete.add(k);
+                    foundNew = true;
+                }
+            });
+        }
+        AppState.panes[id] = AppState.panes[id].filter(r => !toDelete.has(r[0].trim()));
+        AppState.setDirty(id, true);
+        this.render(id);
+    },
+
     addSibling(id, key, parent) {
-        const lastNum = key.match(/(\d+)$/);
-        const newKey = lastNum ? key.replace(/(\d+)$/, (parseInt(lastNum[0]) + 1).toString().padStart(lastNum[0].length, '0')) : key + "_new";
-        Model.panes[id].push([newKey, "New Sibling Item", parent]);
-        this.markDirty(id); this.render(id);
+        const suggested = this.suggestNextKey(id, parent);
+        const newKey = prompt("Add Sibling - Enter Key Number:", suggested);
+        if (newKey) {
+            if (this.checkKeyExists(id, newKey)) return alert("Key already exists!");
+            AppState.panes[id].push([newKey, "New Sibling Item", parent]);
+            AppState.setDirty(id, true); this.render(id);
+        }
+    },
+
+    suggestNextKey(id, parentKey, excludeKey) {
+        // Find all siblings, excluding the one being moved (to avoid self-reference in progression)
+        const siblings = AppState.panes[id].filter(r => {
+            const p = (r[2] || "").trim();
+            const k = r[0].trim();
+            return p === (parentKey || "").trim() && k !== excludeKey;
+        });
+
+        if (siblings.length === 0) {
+            // No siblings? If root, default 01. If child, Parent.01
+            return parentKey ? `${parentKey}.01` : "01";
+        }
+        // Try to increment the last sibling's key
+        const lastKey = siblings[siblings.length - 1][0].trim();
+        const match = lastKey.match(/(\d+)$/); // Find trailing number
+        if (match) {
+            const numStr = match[1];
+            const nextNum = parseInt(numStr) + 1;
+            // Reassemble key preserving padding
+            return lastKey.substring(0, match.index) + nextNum.toString().padStart(numStr.length, '0');
+        }
+        return lastKey + "_new";
+    },
+
+    checkKeyExists(id, key) {
+        return AppState.panes[id].some(r => r[0].trim() === key);
+    },
+
+    updateKeyAndParent(id, oldKey, newKey, newParent) {
+        // 1. Update the item itself
+        const item = AppState.panes[id].find(r => r[0].trim() === oldKey);
+        if (item) {
+            item[0] = newKey;
+            item[2] = newParent;
+        }
+        
+        // 2. Recursive update for children (Parent Pointer AND Key Prefix)
+        if (oldKey !== newKey) {
+            const updateChildren = (pOld, pNew) => {
+                AppState.panes[id].forEach(r => {
+                    if ((r[2] || "").trim() === pOld) {
+                        r[2] = pNew; // Update parent pointer
+                        
+                        // Update Key if it inherits prefix (Standard Hierarchy)
+                        const k = r[0].trim();
+                        if (k.startsWith(pOld)) {
+                            const kNew = pNew + k.substring(pOld.length);
+                            r[0] = kNew;
+                            updateChildren(k, kNew); // Recurse
+                        }
+                    }
+                });
+            };
+            updateChildren(oldKey, newKey);
+        }
+        AppState.setDirty(id, true); this.render(id);
     },
 
     renumber(id) {
         const pk = prompt("Target Parent Key to sequence children (e.g. 22 11 16):");
         if (!pk) return;
-        const children = Model.panes[id].filter(r => r[2]?.trim() === pk);
+        const children = AppState.panes[id].filter(r => r[2]?.trim() === pk);
         children.forEach((c, i) => {
             const old = c[0].trim();
             const newK = `${pk}.${(i + 1).toString().padStart(2, '0')}`;
             c[0] = newK;
-            Model.panes[id].forEach(r => { if(r[2]?.trim() === old) r[2] = newK; });
+            AppState.panes[id].forEach(r => { if(r[2]?.trim() === old) r[2] = newK; });
         });
-        this.markDirty(id); this.render(id);
+        AppState.setDirty(id, true); this.render(id);
+    },
+
+    copyChildren(srcId, targetId, srcParentKey, targetParentKey) {
+        const children = AppState.panes[srcId].filter(r => (r[2] || "").trim() === srcParentKey);
+        children.forEach(child => {
+            const k = child[0].trim();
+            // Try to map key prefix to maintain hierarchy logic
+            let newK = k;
+            if (k.startsWith(srcParentKey)) {
+                newK = targetParentKey + k.substring(srcParentKey.length);
+            } else {
+                // Fallback logic if prefix doesn't match strictly
+                newK = targetParentKey + "." + k.split('.').pop();
+            }
+            
+            if (!this.checkKeyExists(targetId, newK)) {
+                AppState.panes[targetId].push([newK, child[1], targetParentKey]);
+                this.copyChildren(srcId, targetId, k, newK);
+            }
+        });
     },
 
     setupResizer(h, p, isL) {
@@ -279,17 +671,90 @@ const ViewModel = {
     },
 
     setupRowDragDrop(row, id, key) {
-        row.ondragstart = (e) => { this.draggedKey = key; this.draggedPaneId = id; e.stopPropagation(); };
-        row.ondragover = (e) => { e.preventDefault(); row.classList.add('drag-over-target'); e.stopPropagation(); };
-        row.ondragleave = () => row.classList.remove('drag-over-target');
+        row.ondragstart = (e) => { AppState.drag.key = key; AppState.drag.sourcePaneId = id; e.stopPropagation(); };
+        
+        row.ondragover = (e) => { 
+            e.preventDefault(); e.stopPropagation();
+            
+            // 1. Restrict Drop to Primary Pane Only (Modify Primary Only)
+            if (id !== AppState.ui.primaryPaneId) {
+                e.dataTransfer.dropEffect = 'none';
+                return;
+            }
+
+            const rect = row.getBoundingClientRect();
+            const relY = e.clientY - rect.top;
+            const h = rect.height;
+            
+            // Clear classes
+            row.classList.remove('drop-above', 'drop-below', 'drop-inside');
+            
+            // Determine Zone: Top 25% (Above), Bottom 25% (Below), Middle (Inside)
+            if (relY < h * 0.25) row.classList.add('drop-above');
+            else if (relY > h * 0.75) row.classList.add('drop-below');
+            else row.classList.add('drop-inside');
+        };
+
+        row.ondragleave = () => row.classList.remove('drop-above', 'drop-below', 'drop-inside');
+        
         row.ondrop = (e) => {
-            e.preventDefault(); e.stopPropagation(); row.classList.remove('drag-over-target');
-            if (this.draggedKey && this.draggedPaneId === id && this.draggedKey !== key) {
-                const item = Model.panes[id].find(d => d[0].trim() === this.draggedKey);
-                if (item) { 
-                    item[2] = key; 
-                    if (!item[0].includes('.')) item[0] = key + ".01";
-                    this.markDirty(id); this.render(id);
+            e.preventDefault(); e.stopPropagation(); 
+            
+            // 1. Restrict Drop to Primary Pane Only
+            if (id !== AppState.ui.primaryPaneId) return;
+
+            const zone = row.classList.contains('drop-above') ? 'above' : 
+                         row.classList.contains('drop-below') ? 'below' : 'inside';
+            row.classList.remove('drop-above', 'drop-below', 'drop-inside');
+
+            const srcId = AppState.drag.sourcePaneId;
+            const draggedKey = AppState.drag.key;
+
+            if (draggedKey && (srcId === id ? draggedKey !== key : true)) {
+                // Determine New Parent based on Zone
+                let newParent = "";
+                if (zone === 'inside') newParent = key; // Become child
+                else {
+                    // Become sibling (Above/Below) -> Use target's parent
+                    const targetItem = AppState.panes[id].find(r => r[0].trim() === key);
+                    if (targetItem) newParent = (targetItem[2] || "").trim();
+                }
+
+                // CASE A: Internal Move (Re-parenting within Primary)
+                if (srcId === id) {
+                    const suggested = this.suggestNextKey(id, newParent, draggedKey);
+                    const finalKey = prompt(`Move '${draggedKey}' to parent '${newParent || "ROOT"}'?\n\nConfirm or Edit New Key:`, suggested);
+                    
+                    if (finalKey) {
+                        if (finalKey !== draggedKey && this.checkKeyExists(id, finalKey)) return alert("Key already exists!");
+                        this.updateKeyAndParent(id, draggedKey, finalKey, newParent);
+                    }
+                }
+                // CASE B: Cross-Pane Copy (Reference -> Primary)
+                else {
+                    const srcItem = AppState.panes[srcId].find(r => r[0].trim() === draggedKey);
+                    if (!srcItem) return;
+                    
+                    // Suggest Key (Check for collision in target)
+                    let suggested = draggedKey;
+                    if (this.checkKeyExists(id, suggested)) suggested = this.suggestNextKey(id, newParent);
+
+                    const finalKey = prompt(`Copy '${draggedKey}' from Reference?\nParent: '${newParent || "ROOT"}'\n\nConfirm Key:`, suggested);
+                    
+                    if (finalKey) {
+                        if (this.checkKeyExists(id, finalKey)) return alert("Key already exists in target!");
+                        
+                        // Add Item
+                        AppState.panes[id].push([finalKey, srcItem[1], newParent]);
+                        
+                        // Optional Deep Copy
+                        if (confirm(`Copy children of '${draggedKey}' as well?`)) {
+                            this.copyChildren(srcId, id, draggedKey, finalKey);
+                        }
+
+                        AppState.setDirty(id, true); 
+                        this.render(id);
+                    }
                 }
             }
         };
@@ -298,27 +763,95 @@ const ViewModel = {
     updateBrowser(id) {
         const list = document.getElementById(`browser-list-${id}`);
         list.innerHTML = '';
-        Model.panes[id].filter(r => !r[2] || r[2].trim() === "").forEach(div => {
+        AppState.panes[id].filter(r => !r[2] || r[2].trim() === "").forEach(div => {
             const el = document.createElement('div'); el.className = 'browser-item';
             el.innerText = div[0];
             el.onclick = () => {
                 const target = document.querySelector(`#tree${id} .row[data-key="${div[0]}"]`);
-                if(target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                if(target) target.scrollIntoView({ behavior: 'smooth', block: 'center' });
             };
             list.appendChild(el);
         });
     },
 
     exportFile(id) {
-        const content = Model.panes[id].map(r => r.join('\t')).join('\n');
+        const content = AppState.panes[id].map(r => r.join('\t')).join('\n');
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([content], {type:'text/plain'}));
         a.download = "Revised_Database.txt"; a.click();
-        this.isDirty[id] = false; document.getElementById(`save-${id}`).disabled = true;
+        AppState.setDirty(id, false);
+    },
+
+    openFindReplace() {
+        document.getElementById('findReplaceModal').classList.remove('hidden');
+        document.getElementById('findInput').focus();
+    },
+
+    closeFindReplace() {
+        document.getElementById('findReplaceModal').classList.add('hidden');
+    },
+
+    executeReplace() {
+        const findText = document.getElementById('findInput').value;
+        const replaceText = document.getElementById('replaceInput').value;
+        const id = AppState.ui.primaryPaneId;
+
+        if (!findText) { alert("Please enter text to find."); return; }
+        if (!id || !AppState.panes[id]) return;
+
+        let count = 0;
+        AppState.panes[id].forEach(r => {
+            if (r[1].includes(findText)) {
+                r[1] = r[1].split(findText).join(replaceText);
+                count++;
+            }
+        });
+
+        if (count > 0) {
+            AppState.setDirty(id, true);
+            this.render(id);
+            alert(`Replaced ${count} occurrences.`);
+            this.closeFindReplace();
+        } else {
+            alert('No matches found.');
+        }
     }
 };
 
+// --- Global Tooltip Logic ---
+document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('[title]');
+    if (target) {
+        const title = target.getAttribute('title');
+        if (title) {
+            target.setAttribute('data-title', title);
+            target.removeAttribute('title');
+            const tip = document.getElementById('tooltip');
+            tip.innerText = title;
+            tip.style.opacity = '1';
+            tip.style.left = (e.clientX + 12) + 'px';
+            tip.style.top = (e.clientY + 12) + 'px';
+        }
+    }
+});
+document.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('[data-title]');
+    if (target) {
+        target.setAttribute('title', target.getAttribute('data-title'));
+        target.removeAttribute('data-title');
+        document.getElementById('tooltip').style.opacity = '0';
+    }
+});
+document.addEventListener('mousemove', (e) => {
+    const tip = document.getElementById('tooltip');
+    if (tip.style.opacity === '1') {
+        tip.style.left = (e.clientX + 12) + 'px';
+        tip.style.top = (e.clientY + 12) + 'px';
+    }
+});
+
 ViewModel.addPane(true);
+AppState.initTheme();
 </script>
 </body>
 </html>
