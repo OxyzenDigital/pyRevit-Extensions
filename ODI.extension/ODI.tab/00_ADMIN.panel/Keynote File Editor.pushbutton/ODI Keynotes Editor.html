@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Oxyzen Digital | Keynote Master Architect</title>
+    <style>
+        :root {
+            --ui-font: "Segoe UI", Tahoma, sans-serif;
+            --active-blue: #0078d4;
+            --header-dark: #202124;
+            --audit-success: #2e7d32;
+            --caution-orange: #ef6c00;
+        }
+
+        body, html { height: 100%; margin: 0; font-family: var(--ui-font); font-size: 13px; overflow: hidden; background: #cfd8dc; }
+        .app-wrapper { display: flex; flex-direction: column; height: 100vh; }
+        
+        .toolbar {
+            background: #fff; border-bottom: 1px solid #ccc; padding: 10px 20px;
+            display: flex; justify-content: space-between; align-items: center; z-index: 100; box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+
+        .pane-container { display: flex; flex: 1; overflow: hidden; justify-content: center; align-items: stretch; padding: 10px; gap: 0; }
+        
+        .pane { display: flex; flex-direction: column; background: white; overflow: hidden; position: relative; border: 1px solid #999; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .pane.primary { flex: 0 0 50%; z-index: 10; border-radius: 4px; min-width: 450px; }
+        .pane.secondary { flex: 1; min-width: 250px; border-radius: 4px; margin: 0 5px; }
+
+        .resizer { width: 10px; cursor: col-resize; background: transparent; z-index: 20; display: flex; align-items: center; justify-content: center; }
+        .resizer:hover { background: rgba(0,120,212,0.2); }
+        .resizer::after { content: '⋮'; color: #666; font-weight: bold; }
+
+        .pane-header { background: #f8f9fa; border-bottom: 1px solid #ddd; padding: 10px; font-weight: 600; }
+        .editor-layout { display: flex; flex: 1; overflow: hidden; }
+        
+        .section-browser { width: 150px; background: #eceff1; border-right: 1px solid #ddd; overflow-y: auto; font-size: 10px; padding: 5px; flex-shrink: 0; }
+        .browser-header { display: flex; flex-direction: column; gap: 5px; padding-bottom: 5px; border-bottom: 1px solid #ccc; margin-bottom: 8px; }
+        
+        .caution-box { 
+            background: #fff3e0; border: 1px solid var(--caution-orange); color: var(--caution-orange);
+            padding: 5px; border-radius: 3px; font-size: 9px; margin-top: 5px; cursor: pointer; text-align: center; font-weight: bold;
+        }
+        .caution-box.disabled { opacity: 0.5; cursor: not-allowed; filter: grayscale(1); }
+
+        .keynote-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; padding-bottom: 50vh; }
+        .tree-node { display: flex; flex-direction: column; }
+        .row { display: flex; padding: 5px 10px; align-items: center; cursor: grab; background: #fff; border-bottom: 1px solid #f0f0f0; border-left: 5px solid transparent; transition: border-left 0.3s; }
+        .row.is-root { background: var(--header-dark) !important; color: #fff; font-weight: bold; position: sticky; top: 0; z-index: 5; }
+        .row.drag-over-target { background: #e3f2fd; outline: 2px dashed var(--active-blue); }
+
+        .lvl-container { display: flex; flex-direction: column; padding-left: 20px; border-left: 1px solid #eee; margin-left: 7px; }
+        .toggle { width: 15px; cursor: pointer; font-size: 9px; }
+        .collapsed > .lvl-container { display: none; }
+
+        .key-num-input { font-weight: bold; width: 110px; border: 1px solid transparent; background: transparent; color: inherit; outline: none; }
+        .key-desc-input { flex-grow: 1; border: 1px solid transparent; background: transparent; color: inherit; outline: none; padding: 2px 5px; }
+        .key-num-input:focus, .key-desc-input:focus { background: #fff; border-color: var(--active-blue); color: #000; box-shadow: 0 0 3px rgba(0,0,0,0.2); }
+
+        .btn { border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px; }
+        .btn:disabled { background: #ccc !important; opacity: 0.6; cursor: not-allowed; }
+        .btn-save { background: #2e7d32; color: white; width: 100%; margin-top: 5px; }
+        
+        .action-tools { opacity: 0; margin-left: 10px; display: flex; gap: 4px; }
+        .row:hover .action-tools { opacity: 1; }
+        .tool-btn { cursor: pointer; font-size: 10px; padding: 2px 5px; border-radius: 3px; border: 1px solid #ddd; background: #fff; color: #333; }
+        
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+<div class="app-wrapper">
+    <div class="toolbar">
+        <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT</div>
+        <input type="text" id="globalSearch" placeholder="Deep Search Numbers or Content..." onkeyup="ViewModel.search(this.value)" style="width:400px; padding:8px; border:1px solid #ccc; border-radius:20px; outline:none;">
+        <div>
+            <button class="btn" style="background:#546e7a; color:white;" onclick="ViewModel.addPane()">+ COMPARISON</button>
+            <button id="auditBtn" class="btn" style="background:var(--active-blue); color:white;" disabled onclick="ViewModel.runAudit()">RUN COORDINATION AUDIT</button>
+        </div>
+    </div>
+    <div class="pane-container" id="paneBox"></div>
+</div>
+
+<script>
+/**
+ * MODEL: Data Store
+ */
+const Model = {
+    panes: {}, // [id]: [[key, desc, parent]]
+};
+
+/**
+ * VIEWMODEL: State & Interaction logic
+ */
+const ViewModel = {
+    isDirty: {},
+    primaryId: null,
+    draggedKey: null,
+    draggedPaneId: null,
+
+    addPane(isPrimary = false) {
+        const id = Date.now() + Math.floor(Math.random() * 100);
+        this.isDirty[id] = false;
+        if (isPrimary) this.primaryId = id;
+
+        const paneHtml = `
+            <div class="pane ${isPrimary ? 'primary' : 'secondary'}" id="pane-${id}">
+                <div class="pane-header">
+                    <span style="font-size:10px; opacity:0.7;">${isPrimary ? 'PRIMARY EDITOR' : 'REFERENCE'}</span>
+                    <input type="file" id="file-${id}" onchange="ViewModel.handleFileSelect(this, ${id})" style="display:block; margin-top:5px;">
+                    <button id="save-${id}" class="btn btn-save" disabled onclick="ViewModel.exportFile(${id})">SAVE .TXT</button>
+                </div>
+                <div class="editor-layout">
+                    ${isPrimary ? `
+                        <div class="section-browser">
+                            <div class="browser-header">
+                                <span>DIVISIONS</span>
+                                <span style="cursor:pointer; color:var(--active-blue); font-size:14px;" onclick="ViewModel.addDivision(${id})">+</span>
+                            </div>
+                            <div id="renum-btn" class="caution-box disabled" onclick="ViewModel.renumber(${id})">⚠ RENUMBER SEQUENCE</div>
+                            <div id="browser-list-${id}"></div>
+                        </div>` : ''}
+                    <div class="keynote-scroll" id="s${id}"><div id="tree${id}"></div></div>
+                </div>
+            </div>`;
+
+        const container = document.getElementById('paneBox');
+        if (isPrimary) {
+            const L = document.createElement('div'); L.className = 'resizer';
+            const R = document.createElement('div'); R.className = 'resizer';
+            container.appendChild(L); 
+            container.insertAdjacentHTML('beforeend', paneHtml);
+            container.appendChild(R);
+            this.setupResizer(L, container.querySelector('.primary'), true);
+            this.setupResizer(R, container.querySelector('.primary'), false);
+        } else {
+            container.insertAdjacentHTML('beforeend', paneHtml);
+        }
+        this.setupPaneDragDrop(id);
+        return id;
+    },
+
+    handleFileSelect(input, id) { if (input.files[0]) this.processFile(input.files[0], id); },
+
+    processFile(file, id) {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            Model.panes[id] = e.target.result.split(/\r?\n/).map(l => l.split('\t')).filter(a => a.length >= 2);
+            this.render(id);
+            this.validateAuditState();
+        };
+        reader.readAsText(file);
+    },
+
+    render(id) {
+        const container = document.getElementById(`tree${id}`);
+        container.innerHTML = '';
+        const data = Model.panes[id];
+        if (!data) return;
+
+        const nodesMap = new Map();
+        data.forEach(item => nodesMap.set(item[0].trim(), { key: item[0].trim(), desc: item[1].trim(), parent: (item[2] || "").trim(), children: [] }));
+        const roots = [];
+        nodesMap.forEach(node => {
+            if (node.parent && nodesMap.has(node.parent)) nodesMap.get(node.parent).children.push(node);
+            else roots.push(node);
+        });
+
+        const buildNode = (node) => {
+            const isRoot = !node.parent;
+            const div = document.createElement('div'); div.className = 'tree-node';
+            div.innerHTML = `
+                <div class="row ${isRoot ? 'is-root' : ''}" data-key="${node.key}" draggable="true">
+                    ${node.children.length ? '<span class="toggle" onclick="this.parentElement.parentElement.classList.toggle(\'collapsed\')">▼</span>' : '<span style="width:15px"></span>'}
+                    <input class="key-num-input" value="${node.key}" onchange="ViewModel.updateData(${id}, '${node.key}', 0, this.value)">
+                    <input class="key-desc-input" value="${node.desc}" onchange="ViewModel.updateData(${id}, '${node.key}', 1, this.value)">
+                    <div class="action-tools">
+                        <span class="tool-btn" onclick="ViewModel.addSibling(${id}, '${node.key}', '${node.parent}')">+ Sib</span>
+                        <span class="tool-btn" style="color:#d32f2f" onclick="ViewModel.deleteItem(${id}, '${node.key}')">✕</span>
+                    </div>
+                </div>
+                <div class="lvl-container"></div>`;
+            
+            const row = div.querySelector('.row');
+            this.setupRowDragDrop(row, id, node.key);
+
+            const childBox = div.querySelector('.lvl-container');
+            node.children.forEach(c => childBox.appendChild(buildNode(c)));
+            return div;
+        };
+        roots.forEach(r => container.appendChild(buildNode(r)));
+        if (id === this.primaryId) this.updateBrowser(id);
+    },
+
+    updateData(id, key, col, val) {
+        Model.panes[id].forEach(r => {
+            if (r[0].trim() === key) r[col] = val;
+            if (col === 0 && r[2]?.trim() === key) r[2] = val;
+        });
+        this.markDirty(id);
+    },
+
+    markDirty(id) {
+        this.isDirty[id] = true;
+        document.getElementById(`save-${id}`).disabled = false;
+        if (id === this.primaryId) document.getElementById('renum-btn').classList.remove('disabled');
+    },
+
+    validateAuditState() {
+        const loaded = Object.keys(Model.panes).filter(id => Model.panes[id]).length;
+        document.getElementById('auditBtn').disabled = (loaded < 2);
+    },
+
+    runAudit() {
+        document.querySelectorAll('.row').forEach(r => r.style.borderLeft = "5px solid transparent");
+        const ids = Object.keys(Model.panes);
+        ids.forEach(tId => {
+            const others = ids.filter(id => id != tId).flatMap(id => Model.panes[id].map(r => r[1].toLowerCase().trim()));
+            document.querySelectorAll(`#tree${tId} .row:not(.is-root)`).forEach(row => {
+                if (others.includes(row.querySelector('.key-desc-input').value.toLowerCase().trim())) {
+                    row.style.borderLeft = "5px solid var(--audit-success)";
+                }
+            });
+        });
+    },
+
+    search(term) {
+        const t = term.toLowerCase().trim();
+        document.querySelectorAll('.tree-node').forEach(node => {
+            const match = node.querySelector('.row').innerText.toLowerCase().includes(t);
+            node.classList.toggle('hidden', t !== "" && !match);
+            if (match && t !== "") {
+                let p = node.parentElement.closest('.tree-node');
+                while (p) { p.classList.remove('hidden', 'collapsed'); p = p.parentElement.closest('.tree-node'); }
+            }
+        });
+    },
+
+    addSibling(id, key, parent) {
+        const lastNum = key.match(/(\d+)$/);
+        const newKey = lastNum ? key.replace(/(\d+)$/, (parseInt(lastNum[0]) + 1).toString().padStart(lastNum[0].length, '0')) : key + "_new";
+        Model.panes[id].push([newKey, "New Sibling Item", parent]);
+        this.markDirty(id); this.render(id);
+    },
+
+    renumber(id) {
+        const pk = prompt("Target Parent Key to sequence children (e.g. 22 11 16):");
+        if (!pk) return;
+        const children = Model.panes[id].filter(r => r[2]?.trim() === pk);
+        children.forEach((c, i) => {
+            const old = c[0].trim();
+            const newK = `${pk}.${(i + 1).toString().padStart(2, '0')}`;
+            c[0] = newK;
+            Model.panes[id].forEach(r => { if(r[2]?.trim() === old) r[2] = newK; });
+        });
+        this.markDirty(id); this.render(id);
+    },
+
+    setupResizer(h, p, isL) {
+        h.onmousedown = (e) => {
+            const sW = p.offsetWidth; const sX = e.clientX;
+            document.onmousemove = (me) => p.style.flex = `0 0 ${isL ? sW - (me.clientX - sX) : sW + (me.clientX - sX)}px`;
+            document.onmouseup = () => document.onmousemove = null;
+        };
+    },
+
+    setupPaneDragDrop(id) {
+        const p = document.getElementById(`pane-${id}`);
+        p.ondragover = (e) => e.preventDefault();
+        p.ondrop = (e) => {
+            e.preventDefault();
+            if (e.dataTransfer.files.length > 0) {
+                const f = e.dataTransfer.files[0];
+                const dt = new DataTransfer(); dt.items.add(f);
+                document.getElementById(`file-${id}`).files = dt.files;
+                this.processFile(f, id);
+            }
+        };
+    },
+
+    setupRowDragDrop(row, id, key) {
+        row.ondragstart = (e) => { this.draggedKey = key; this.draggedPaneId = id; e.stopPropagation(); };
+        row.ondragover = (e) => { e.preventDefault(); row.classList.add('drag-over-target'); e.stopPropagation(); };
+        row.ondragleave = () => row.classList.remove('drag-over-target');
+        row.ondrop = (e) => {
+            e.preventDefault(); e.stopPropagation(); row.classList.remove('drag-over-target');
+            if (this.draggedKey && this.draggedPaneId === id && this.draggedKey !== key) {
+                const item = Model.panes[id].find(d => d[0].trim() === this.draggedKey);
+                if (item) { 
+                    item[2] = key; 
+                    if (!item[0].includes('.')) item[0] = key + ".01";
+                    this.markDirty(id); this.render(id);
+                }
+            }
+        };
+    },
+
+    updateBrowser(id) {
+        const list = document.getElementById(`browser-list-${id}`);
+        list.innerHTML = '';
+        Model.panes[id].filter(r => !r[2] || r[2].trim() === "").forEach(div => {
+            const el = document.createElement('div'); el.className = 'browser-item';
+            el.innerText = div[0];
+            el.onclick = () => {
+                const target = document.querySelector(`#tree${id} .row[data-key="${div[0]}"]`);
+                if(target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            };
+            list.appendChild(el);
+        });
+    },
+
+    exportFile(id) {
+        const content = Model.panes[id].map(r => r.join('\t')).join('\n');
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([content], {type:'text/plain'}));
+        a.download = "Revised_Database.txt"; a.click();
+        this.isDirty[id] = false; document.getElementById(`save-${id}`).disabled = true;
+    }
+};
+
+ViewModel.addPane(true);
+</script>
+</body>
+</html>
