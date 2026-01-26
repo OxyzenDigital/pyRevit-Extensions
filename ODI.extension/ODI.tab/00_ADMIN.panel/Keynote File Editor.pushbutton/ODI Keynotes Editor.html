@@ -7,13 +7,13 @@
         :root {
             --ui-font: "Segoe UI", Tahoma, sans-serif;
             --active-blue: #0078d4;
-            --header-dark: #202124;
+            --header-dark: #3a3a3a;
             --audit-success: #2e7d32;
             --caution-orange: #ef6c00;
             
             --bg-app: #cfd8dc;
             --bg-panel: #ffffff;
-            --bg-header: #f8f9fa;
+            --bg-header: #3c3e3f;
             --bg-browser: #eceff1;
             --bg-row: #ffffff;
             --text-main: #000000;
@@ -83,9 +83,14 @@
         }
         
         .row.selected-highlight {
-            background-color: rgba(255, 215, 0, 0.15) !important;
-            border-left-color: #fbc02d !important;
+            background-color: rgba(255, 0, 0, 0.15);
+            border-left-color: #d32f2f !important;
             opacity: 1 !important;
+        }
+
+        .row.is-root.selected-highlight {
+            /* Keep dark background for readability, add border/shadow for selection visibility */
+            box-shadow: inset 0 0 0 1px #d32f2f;
         }
         
         .row.drop-inside { background: rgba(0, 120, 212, 0.15) !important; outline: 2px dashed var(--active-blue); }
@@ -99,7 +104,7 @@
 
         .key-num-input { font-weight: bold; width: 110px; border: 1px solid transparent; background: transparent; color: inherit; outline: none; }
         .key-desc-input { flex-grow: 1; border: 1px solid transparent; background: transparent; color: inherit; outline: none; padding: 2px 5px; }
-        .key-num-input:focus, .key-desc-input:focus { background: var(--bg-row); border-color: var(--active-blue); color: inherit; box-shadow: 0 0 3px rgba(0,0,0,0.2); }
+        .key-num-input:focus, .key-desc-input:focus { background: var(--bg-row); border-color: var(--active-blue); color: var(--text-main); box-shadow: 0 0 3px rgba(0,0,0,0.2); }
 
         .btn { border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px; }
         .btn:disabled { background: #ccc !important; opacity: 0.6; cursor: not-allowed; }
@@ -135,12 +140,46 @@
         .input-group label { display: block; margin-bottom: 5px; font-size: 11px; opacity: 0.8; }
         .input-group input { width: 100%; padding: 5px; background: var(--bg-row); border: 1px solid var(--border-color); color: var(--text-main); outline: none; box-sizing: border-box; }
         .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px; }
+
+        /* File Info Box */
+        .file-info-box {
+            background: var(--active-blue);
+            color: #fff;
+            padding: 6px 8px;
+            border-radius: 4px;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .file-name { font-weight: bold; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; }
+        .locate-btn { cursor: pointer; margin-left: 8px; font-size: 14px; opacity: 0.9; line-height: 1; }
+        .locate-btn:hover { opacity: 1; transform: scale(1.1); }
+
+        /* Toast Notification */
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--header-dark);
+            color: #fff;
+            padding: 10px 20px;
+            border-radius: 5px;
+            z-index: 10000;
+            opacity: 0;
+            transition: opacity 0.5s, bottom 0.5s;
+            pointer-events: none;
+        }
+        .toast.show { opacity: 1; bottom: 40px; }
     </style>
 </head>
 <body>
 
 <div class="app-wrapper">
     <div id="tooltip"></div>
+    <div id="toast-notification" class="toast"></div>
     <div class="toolbar">
         <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT</div>
         <input type="text" id="globalSearch" placeholder="Deep Search Numbers or Content..." onkeyup="ViewModel.search(this.value)" style="width:400px; padding:8px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:20px; outline:none;">
@@ -191,6 +230,7 @@ const AppState = {
     // 1. Data Store (The Content)
     // Structure: { [paneId]: Array<[Key, Description, ParentKey]> }
     panes: {}, 
+    paneMeta: {}, // { [paneId]: { filePath: String } }
 
     // 2. UI State (The Interface)
     ui: {
@@ -210,6 +250,7 @@ const AppState = {
     // --- State Helpers ---
     registerPane(id, isPrimary = false) {
         this.panes[id] = null;
+        this.paneMeta[id] = { filePath: null };
         this.ui.dirtyStatus[id] = false;
         if (isPrimary) this.ui.primaryPaneId = id;
     },
@@ -236,11 +277,11 @@ const AppState = {
         if (this.ui.darkMode) document.documentElement.setAttribute('data-theme', 'dark');
     },
 
-    addRecentFile(name, content) {
+    addRecentFile(name, path, content) {
         // Remove existing if present to move to top
         this.recentFiles = this.recentFiles.filter(f => f.name !== name);
         // Add to front
-        this.recentFiles.unshift({ name, content, date: new Date().toLocaleString() });
+        this.recentFiles.unshift({ name, path, content, date: new Date().toLocaleString() });
         // Limit to 5
         if (this.recentFiles.length > 5) this.recentFiles.pop();
         localStorage.setItem('odi-recent-files', JSON.stringify(this.recentFiles));
@@ -271,9 +312,13 @@ const ViewModel = {
                         <div style="display:flex; gap:5px;">
                             <span class="tool-btn" onclick="ViewModel.toggleAll(${id}, true)" title="Expand All">Expand All</span>
                             <span class="tool-btn" onclick="ViewModel.toggleAll(${id}, false)" title="Collapse All">Collapse All</span>
+                            ${!isPrimary ? `<span class="tool-btn" style="color:#d32f2f" onclick="ViewModel.removePane(${id})" title="Close Pane">✕</span>` : ''}
                         </div>
                     </div>
-                    <div id="current-file-${id}" style="font-size:11px; font-weight:bold; color:var(--active-blue); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">[No File Loaded]</div>
+                    <div class="file-info-box">
+                        <span id="current-file-${id}" class="file-name">[No File Loaded]</span>
+                        <span class="locate-btn" onclick="ViewModel.locateFile(${id})" title="Locate in Explorer">📂</span>
+                    </div>
                     <input type="file" id="file-${id}" onchange="ViewModel.handleFileSelect(this, ${id})" style="display:block; width:100%;" title="Load a keynote .txt file">
                     <select id="recent-${id}" onchange="ViewModel.loadRecent(this, ${id})" style="display:block; width:100%; margin-top:5px; padding:4px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:3px;" title="Load a recently opened file">
                         <option value="">Load Recent...</option>
@@ -313,6 +358,46 @@ const ViewModel = {
         return id;
     },
 
+    showToast(message) {
+        const toast = document.getElementById('toast-notification');
+        toast.innerText = message;
+        toast.classList.add('show');
+        setTimeout(() => {
+            toast.classList.remove('show');
+        }, 3000);
+    },
+
+    locateFile(id) {
+        const meta = AppState.paneMeta[id];
+        const path = (meta && meta.filePath) ? meta.filePath : document.getElementById(`current-file-${id}`).innerText;
+        
+        if (!path || path.includes("[No File Loaded]")) return;
+        
+        const isFullPath = path.includes('/') || path.includes('\\');
+        
+        navigator.clipboard.writeText(path).then(() => {
+            this.showToast(isFullPath ? `Full Path copied: ${path}` : `Filename copied (Browser hides full path): ${path}`);
+        }).catch(err => {
+            console.error('Failed to copy filename: ', err);
+            this.showToast('Error copying filename.');
+        });
+    },
+
+    removePane(id) {
+        if (id === AppState.ui.primaryPaneId) {
+            alert("Cannot close the Primary Editor pane.");
+            return;
+        }
+        const pane = document.getElementById(`pane-${id}`);
+        if (pane) pane.remove();
+        delete AppState.panes[id];
+        delete AppState.paneMeta[id];
+        delete AppState.ui.dirtyStatus[id];
+        document.querySelectorAll('.row.audit-match').forEach(r => r.classList.remove('audit-match'));
+        document.querySelectorAll('.row.selected-highlight').forEach(r => r.classList.remove('selected-highlight'));
+        this.validateAuditState();
+    },
+
     toggleAll(id, expand) {
         const tree = document.getElementById(`tree${id}`);
         if (!tree) return;
@@ -342,7 +427,11 @@ const ViewModel = {
         if (fileData) {
             AppState.panes[id] = fileData.content.split(/\r?\n/).map(l => l.split('\t')).filter(a => a.length >= 2);
             this.render(id);
-            document.getElementById(`current-file-${id}`).innerText = fileData.name;
+            
+            const path = fileData.path || fileData.name;
+            AppState.paneMeta[id].filePath = path;
+            this.updateFileInfo(id, fileData.name, path);
+            
             this.validateAuditState();
             document.getElementById(`file-${id}`).value = ""; 
         }
@@ -355,13 +444,25 @@ const ViewModel = {
         const reader = new FileReader();
         reader.onload = (e) => {
             const content = e.target.result;
-            AppState.addRecentFile(file.name, content);
+            
+            // Smart Path Resolution
+            let path = file.path || file.name; // file.path works in some environments (Electron/NW.js), usually undefined in Chrome
+
+            AppState.paneMeta[id].filePath = path;
+            AppState.addRecentFile(file.name, path, content);
             AppState.panes[id] = content.split(/\r?\n/).map(l => l.split('\t')).filter(a => a.length >= 2);
-            document.getElementById(`current-file-${id}`).innerText = file.name;
+            
+            this.updateFileInfo(id, file.name, path);
             this.render(id);
             this.validateAuditState();
         };
         reader.readAsText(file);
+    },
+
+    updateFileInfo(id, name, path) {
+        const el = document.getElementById(`current-file-${id}`);
+        el.innerText = name;
+        el.title = path; // Show full path on hover
     },
 
     render(id) {
@@ -565,16 +666,59 @@ const ViewModel = {
             return p === (parentKey || "").trim() && k !== excludeKey;
         });
 
+        // Helper to parse key into segments (dot or space)
+        const parseKey = (k) => k.split(/[\.\s]+/);
+        const joinChar = (k) => k.includes('.') ? '.' : ' ';
+
         if (siblings.length === 0) {
-            // No siblings? If root, default 01. If child, Parent.01
-            return parentKey ? `${parentKey}.01` : "01";
+            // Case: First Child - Try to adapt dragged key to new parent structure
+            if (excludeKey && parentKey) {
+                const pParts = parseKey(parentKey);
+                const kParts = parseKey(excludeKey);
+                const sep = joinChar(parentKey);
+                
+                // Scenario A: Deeper Level (e.g. Parent "10", Child "10.01")
+                if (kParts.length > pParts.length) {
+                    // Append the suffix from the dragged key to the new parent
+                    const suffix = kParts.slice(pParts.length).join(sep);
+                    if (suffix) return parentKey + sep + suffix;
+                }
+                
+                // Scenario B: Same Level / Division Change (e.g. Parent "09 00 00", Dragged "08 10 00")
+                // Intent: Become "09 10 00"
+                if (kParts.length === pParts.length && kParts.length > 0) {
+                    // Heuristic: If first segment differs (Division change), adopt new parent's division
+                    if (pParts[0] !== kParts[0]) {
+                        const newParts = [...kParts];
+                        newParts[0] = pParts[0];
+                        return newParts.join(sep);
+                    }
+                }
+            }
+            // Fallback default
+            return parentKey ? (parentKey.includes(' ') ? `${parentKey} 01` : `${parentKey}.01`) : "01";
         }
-        // Try to increment the last sibling's key
+        
+        // Sort siblings to find the true last key (ensure numerical order)
+        siblings.sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' }));
+
         const lastKey = siblings[siblings.length - 1][0].trim();
         const match = lastKey.match(/(\d+)$/); // Find trailing number
         if (match) {
             const numStr = match[1];
-            const nextNum = parseInt(numStr) + 1;
+            let step = 1;
+            
+            // Detect Step Size (e.g. 10, 20 -> 30)
+            if (siblings.length >= 2) {
+                const prevKey = siblings[siblings.length - 2][0].trim();
+                const prevMatch = prevKey.match(/(\d+)$/);
+                if (prevMatch) {
+                    const diff = parseInt(numStr) - parseInt(prevMatch[1]);
+                    if (diff > 0) step = diff;
+                }
+            }
+
+            const nextNum = parseInt(numStr) + step;
             // Reassemble key preserving padding
             return lastKey.substring(0, match.index) + nextNum.toString().padStart(numStr.length, '0');
         }
@@ -628,6 +772,45 @@ const ViewModel = {
         AppState.setDirty(id, true); this.render(id);
     },
 
+    // Helper to get the last logically ordered sibling key under a parent
+    // This will be used to compare against the draggedKey
+    getLastLogicalSiblingKey(paneId, parentKey, excludeKey = null) {
+        const siblings = AppState.panes[paneId].filter(r => {
+            const p = (r[2] || "").trim();
+            const k = r[0].trim();
+            return p === (parentKey || "").trim() && k !== excludeKey;
+        });
+        if (siblings.length === 0) return null;
+        siblings.sort((a, b) => a[0].localeCompare(b[0], undefined, { numeric: true, sensitivity: 'base' }));
+        return siblings[siblings.length - 1][0].trim();
+    },
+
+    isKeyCompatibleWithParent(key, parentKey) {
+        if (!parentKey) return true; // Root level, always compatible
+        
+        const k = key.trim();
+        const p = parentKey.trim();
+
+        // Direct child: key starts with parentKey.
+        if (k.startsWith(p + ".") || k.startsWith(p + " ")) return true;
+
+        // CSI / MasterFormat Logic (Significant Digits)
+        // e.g. Parent "03 00 00" (Sig: 03) is compatible with "03 10 00"
+        const getSig = (str) => {
+            const parts = str.split(/[\.\s]+/);
+            const sig = [];
+            for (let part of parts) {
+                if (parseInt(part) !== 0) sig.push(part);
+                else break; 
+            }
+            return sig.join(str.includes('.') ? '.' : ' ');
+        };
+        
+        const pSig = getSig(p);
+        if (pSig && k.startsWith(pSig)) return true;
+
+        return false;
+    },
     copyChildren(srcId, targetId, srcParentKey, targetParentKey) {
         const children = AppState.panes[srcId].filter(r => (r[2] || "").trim() === srcParentKey);
         children.forEach(child => {
@@ -720,14 +903,49 @@ const ViewModel = {
                     if (targetItem) newParent = (targetItem[2] || "").trim();
                 }
 
+                // Calculate Suggested Key (Next Logical in Target)
+                const exclude = (srcId === id) ? draggedKey : null;
+                const suggested = this.suggestNextKey(id, newParent, exclude);
+                
+                // Check if draggedKey is already present in target pane
+                const draggedKeyExistsInTarget = this.checkKeyExists(id, draggedKey);
+
+                let autoAccept = false;
+                if (!draggedKeyExistsInTarget) { // Only auto-accept if key is not already taken
+                    const lastLogicalSiblingKey = this.getLastLogicalSiblingKey(id, newParent, exclude);
+                    
+                    // Check if the draggedKey is structurally compatible with the new parent
+                    const isCompatible = this.isKeyCompatibleWithParent(draggedKey, newParent);
+
+                    if (isCompatible) {
+                        if (lastLogicalSiblingKey === null) {
+                            // No siblings, so it's the first child, and compatible. Auto-accept.
+                            autoAccept = true;
+                        } else {
+                            // Has siblings. Auto-accept if it's numerically greater than the last sibling.
+                            const comparison = draggedKey.localeCompare(lastLogicalSiblingKey, undefined, { numeric: true, sensitivity: 'base' });
+                            autoAccept = (comparison > 0);
+                        }
+                    }
+                }
+
                 // CASE A: Internal Move (Re-parenting within Primary)
                 if (srcId === id) {
-                    const suggested = this.suggestNextKey(id, newParent, draggedKey);
-                    const finalKey = prompt(`Move '${draggedKey}' to parent '${newParent || "ROOT"}'?\n\nConfirm or Edit New Key:`, suggested);
-                    
-                    if (finalKey) {
-                        if (finalKey !== draggedKey && this.checkKeyExists(id, finalKey)) return alert("Key already exists!");
-                        this.updateKeyAndParent(id, draggedKey, finalKey, newParent);
+                    if (autoAccept) {
+                        this.updateKeyAndParent(id, draggedKey, draggedKey, newParent);
+                    } else {
+                        const hasChildren = AppState.panes[id].some(r => (r[2] || "").trim() === draggedKey);
+                        let moveMessage = `Move '${draggedKey}' to parent '${newParent || "ROOT"}'?`;
+                        if (hasChildren) {
+                            moveMessage = `Move section '${draggedKey}' and all its children to parent '${newParent || "ROOT"}'?`;
+                        }
+                        moveMessage += `\n\nConfirm or Edit New Key:`; // Always prompt with suggested if not auto-accepted
+                        const finalKey = prompt(moveMessage, suggested);
+                        
+                        if (finalKey) {
+                            if (finalKey !== draggedKey && this.checkKeyExists(id, finalKey)) return alert("Key already exists!");
+                            this.updateKeyAndParent(id, draggedKey, finalKey, newParent);
+                        }
                     }
                 }
                 // CASE B: Cross-Pane Copy (Reference -> Primary)
@@ -735,11 +953,12 @@ const ViewModel = {
                     const srcItem = AppState.panes[srcId].find(r => r[0].trim() === draggedKey);
                     if (!srcItem) return;
                     
-                    // Suggest Key (Check for collision in target)
-                    let suggested = draggedKey;
-                    if (this.checkKeyExists(id, suggested)) suggested = this.suggestNextKey(id, newParent);
-
-                    const finalKey = prompt(`Copy '${draggedKey}' from Reference?\nParent: '${newParent || "ROOT"}'\n\nConfirm Key:`, suggested);
+                    let finalKey = null;
+                    if (autoAccept) {
+                        finalKey = draggedKey;
+                    } else {
+                        finalKey = prompt(`Copy '${draggedKey}' from Reference?\nParent: '${newParent || "ROOT"}'\n\nConfirm Key:`, suggested);
+                    }
                     
                     if (finalKey) {
                         if (this.checkKeyExists(id, finalKey)) return alert("Key already exists in target!");
@@ -747,8 +966,9 @@ const ViewModel = {
                         // Add Item
                         AppState.panes[id].push([finalKey, srcItem[1], newParent]);
                         
-                        // Optional Deep Copy
-                        if (confirm(`Copy children of '${draggedKey}' as well?`)) {
+                        // Auto-copy children if it's a section (Has children in source)
+                        const hasChildren = AppState.panes[srcId].some(r => (r[2] || "").trim() === draggedKey);
+                        if (hasChildren) {
                             this.copyChildren(srcId, id, draggedKey, finalKey);
                         }
 
