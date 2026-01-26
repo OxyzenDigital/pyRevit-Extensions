@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Oxyzen Digital | Keynote Master Architect</title>
+    <title>Oxyzen Digital | Keynote Master Architect v1.1.1</title>
     <style>
         :root {
             --ui-font: "Segoe UI", Tahoma, sans-serif;
@@ -65,7 +65,7 @@
         
         .header-icon { font-size: 14px; cursor: pointer; opacity: 0.7; transition: opacity 0.2s; user-select: none; }
         .header-icon:hover { opacity: 1; }
-        .header-icon.disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+        .header-icon.disabled { opacity: 0.3; cursor: not-allowed; }
         .icon-red { color: #d32f2f; }
         .icon-blue { color: var(--active-blue); }
 
@@ -93,9 +93,14 @@
             box-shadow: inset 0 0 0 1px #d32f2f;
         }
         
-        .row.drop-inside { background: rgba(0, 120, 212, 0.15) !important; outline: 2px dashed var(--active-blue); }
-        .row.drop-above { border-top: 2px solid var(--active-blue); }
-        .row.drop-below { border-bottom: 2px solid var(--active-blue); }
+        .row.drop-inside { background: rgba(0, 120, 212, 0.25) !important; outline: 2px dashed var(--active-blue); }
+        .row.drop-above { border-top: 3px solid var(--caution-orange); background: linear-gradient(to bottom, rgba(239, 108, 0, 0.2), transparent); }
+        .row.drop-below { border-bottom: 3px solid var(--caution-orange); background: linear-gradient(to top, rgba(239, 108, 0, 0.2), transparent); }
+        .row.drop-merge { 
+            background: repeating-linear-gradient(45deg, rgba(76, 175, 80, 0.1), rgba(76, 175, 80, 0.1) 10px, rgba(76, 175, 80, 0.2) 10px, rgba(76, 175, 80, 0.2) 20px) !important; 
+            outline: 2px dashed #2e7d32; 
+            border-color: #2e7d32 !important; 
+        }
 
         .lvl-container { display: flex; flex-direction: column; padding-left: 12px; border-left: 1px solid var(--border-light); margin-left: 4px; }
         .toggle { width: 15px; cursor: pointer; font-size: 9px; display: inline-block; transition: transform 0.2s; user-select: none; }
@@ -181,10 +186,12 @@
     <div id="tooltip"></div>
     <div id="toast-notification" class="toast"></div>
     <div class="toolbar">
-        <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT</div>
+        <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT <span style="font-size:10px; opacity:0.5; margin-left:5px;">v1.1.1</span></div>
         <input type="text" id="globalSearch" placeholder="Deep Search Numbers or Content..." onkeyup="ViewModel.search(this.value)" style="width:400px; padding:8px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:20px; outline:none;">
         <div>
+            <button id="undoBtn" class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main); margin-right:10px; opacity:0.5;" disabled onclick="AppState.undo()" title="Undo last action">↶ Undo</button>
             <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main); margin-right:10px;" onclick="ViewModel.openFindReplace()" title="Find and Replace text in descriptions">Find & Replace</button>
+            <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main); margin-right:10px;" onclick="ViewModel.openChangeCase()" title="Change text case (Upper, Lower, Title, Sentence)">Aa Case</button>
             <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main); margin-right:10px;" onclick="AppState.toggleDarkMode()" title="Toggle Light/Dark Theme">🌗 Theme</button>
             <button class="btn" style="background:#546e7a; color:white;" onclick="ViewModel.addPane()" title="Add a secondary pane for file comparison">+ COMPARISON</button>
             <button id="auditBtn" class="btn" style="background:var(--active-blue); color:white;" disabled onclick="ViewModel.runAudit()" title="Highlight rows with matching descriptions across panes">RUN COORDINATION AUDIT</button>
@@ -209,6 +216,32 @@
             </div>
         </div>
     </div>
+
+    <div id="changeCaseModal" class="modal hidden">
+        <div class="modal-content">
+            <h3 style="margin-top:0; margin-bottom:15px;">Change Text Case</h3>
+            <div class="input-group">
+                <label>Scope:</label>
+                <select id="caseScope" style="width:100%; padding:5px; background:var(--bg-row); color:var(--text-main); border:1px solid var(--border-color);">
+                    <option value="global">Entire File</option>
+                    <option value="selected">Selected Section & Children</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label>Target Format:</label>
+                <select id="caseType" style="width:100%; padding:5px; background:var(--bg-row); color:var(--text-main); border:1px solid var(--border-color);">
+                    <option value="upper">UPPERCASE</option>
+                    <option value="lower">lowercase</option>
+                    <option value="title">Title Case</option>
+                    <option value="sentence">Sentence case</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main);" onclick="ViewModel.closeChangeCase()">Cancel</button>
+                <button class="btn btn-save" style="width:auto;" onclick="ViewModel.executeChangeCase()">Apply</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -230,6 +263,7 @@ const AppState = {
     // 1. Data Store (The Content)
     // Structure: { [paneId]: Array<[Key, Description, ParentKey]> }
     panes: {}, 
+    history: [], // Undo Stack
     paneMeta: {}, // { [paneId]: { filePath: String } }
 
     // 2. UI State (The Interface)
@@ -259,12 +293,6 @@ const AppState = {
         this.ui.dirtyStatus[id] = status;
         const btn = document.getElementById(`save-${id}`);
         if (btn) btn.disabled = !status;
-        
-        // Handle renumber button state
-        if (id === this.ui.primaryPaneId) {
-            const renumBtn = document.getElementById('renum-btn');
-            if (renumBtn) renumBtn.classList.toggle('disabled', !status);
-        }
     },
 
     toggleDarkMode() {
@@ -293,6 +321,34 @@ const AppState = {
             const sel = document.getElementById(`recent-${id}`);
             if (sel) ViewModel.renderRecentList(sel);
         });
+    },
+
+    snapshot() {
+        const state = {
+            panes: JSON.parse(JSON.stringify(this.panes)),
+            dirtyStatus: JSON.parse(JSON.stringify(this.ui.dirtyStatus))
+        };
+        this.history.push(state);
+        if (this.history.length > 50) this.history.shift();
+        this.updateUndoUI();
+    },
+
+    undo() {
+        if (this.history.length === 0) return;
+        const prevState = this.history.pop();
+        this.panes = prevState.panes;
+        this.ui.dirtyStatus = prevState.dirtyStatus;
+        Object.keys(this.ui.dirtyStatus).forEach(id => this.setDirty(id, this.ui.dirtyStatus[id]));
+        Object.keys(this.panes).forEach(id => ViewModel.render(id));
+        this.updateUndoUI();
+    },
+
+    updateUndoUI() {
+        const btn = document.getElementById('undoBtn');
+        if (btn) {
+            btn.disabled = this.history.length === 0;
+            btn.style.opacity = this.history.length === 0 ? 0.5 : 1;
+        }
     }
 };
 
@@ -331,7 +387,7 @@ const ViewModel = {
                             <div class="browser-header">
                                 <span>DIVISIONS</span>
                                 <div style="display:flex; gap:8px;">
-                                    <span id="renum-btn" class="header-icon icon-red disabled" onclick="ViewModel.renumber(${id})" title="Renumber Sequence">&#x21bb;</span>
+                                    <span id="renum-btn" class="header-icon icon-red" onclick="ViewModel.renumber(${id})" title="Renumber Sequence">&#x21bb;</span>
                                     <span class="header-icon icon-blue" onclick="ViewModel.addDivision(${id})" title="Add Division">+</span>
                                 </div>
                             </div>
@@ -552,6 +608,7 @@ const ViewModel = {
     },
 
     updateData(id, key, col, val) {
+        AppState.snapshot();
         AppState.panes[id].forEach(r => {
             if (r[0].trim() === key) r[col] = val;
             if (col === 0 && r[2]?.trim() === key) r[2] = val;
@@ -630,6 +687,7 @@ const ViewModel = {
     deleteItem(id, key) {
         if (!confirm(`Are you sure you want to delete '${key}'?\n(This will also delete all child items)`)) return;
 
+        AppState.snapshot();
         const toDelete = new Set([key]);
         let foundNew = true;
         while (foundNew) {
@@ -648,11 +706,26 @@ const ViewModel = {
         this.render(id);
     },
 
+    addDivision(id) {
+        const key = prompt("Enter New Division Key (e.g. 'SHEET-NOTES'):");
+        if (!key) return;
+        if (this.checkKeyExists(id, key)) return alert("Key already exists!");
+        
+        const desc = prompt("Enter Description:", "New Division");
+        if (desc === null) return;
+        
+        AppState.snapshot();
+        AppState.panes[id].push([key, desc, ""]);
+        AppState.setDirty(id, true);
+        this.render(id);
+    },
+
     addSibling(id, key, parent) {
         const suggested = this.suggestNextKey(id, parent);
         const newKey = prompt("Add Sibling - Enter Key Number:", suggested);
         if (newKey) {
             if (this.checkKeyExists(id, newKey)) return alert("Key already exists!");
+            AppState.snapshot();
             AppState.panes[id].push([newKey, "New Sibling Item", parent]);
             AppState.setDirty(id, true); this.render(id);
         }
@@ -760,14 +833,99 @@ const ViewModel = {
     },
 
     renumber(id) {
-        const pk = prompt("Target Parent Key to sequence children (e.g. 22 11 16):");
-        if (!pk) return;
+        const selectedRow = document.querySelector(`#tree${id} .row.selected-highlight`);
+        if (!selectedRow) {
+            alert("Please select a parent section in the tree to renumber.");
+            return;
+        }
+        const pk = selectedRow.getAttribute('data-key').trim();
+
+        // CSI Check: Alert if it looks like MasterFormat (e.g. 03 10 00)
+        if (/^\d{2}[\s\.]\d{2}/.test(pk)) {
+            alert("Action Cancelled: CSI MasterFormat sections should not be auto-renumbered.");
+            return;
+        }
+
+        if (!confirm(`Renumber all children of '${pk}'?\nThis will overwrite existing keys.`)) return;
+
+        AppState.snapshot();
         const children = AppState.panes[id].filter(r => r[2]?.trim() === pk);
+        if (children.length === 0) {
+            alert("No children found for this parent key.");
+            return;
+        }
+
+        // Determine Format Logic (Intuition)
+        let format = "01";
+        let sep = ".";
+        
+        const firstChildKey = children[0][0].trim();
+        let suffix = firstChildKey;
+        
+        if (firstChildKey.startsWith(pk)) {
+            const remainder = firstChildKey.substring(pk.length);
+            const match = remainder.match(/^([\.\s]+)(.*)/);
+            if (match) {
+                sep = match[1];
+                suffix = match[2];
+            } else if (remainder.length > 0) {
+                suffix = remainder;
+                sep = "";
+            }
+        }
+
+        if (/^\d+$/.test(suffix)) {
+            if (suffix.length > 1 && suffix.startsWith('0')) format = "01";
+            else format = "1";
+        } else if (/^[A-Z]$/.test(suffix)) {
+            format = "A";
+        } else if (/^[A-Z]+\d+$/.test(suffix)) {
+            const match = suffix.match(/^([A-Z]+)(\d+)$/);
+            format = match[1] + (match[2].startsWith('0') && match[2].length > 1 ? "01" : "1");
+        } else {
+            const userFmt = prompt(`Detected mixed/unknown format (e.g. '${suffix}').\nEnter start sequence (e.g. '01', '1', 'A', 'A1'):`, "01");
+            if (!userFmt) return;
+            format = userFmt;
+        }
+
         children.forEach((c, i) => {
             const old = c[0].trim();
-            const newK = `${pk}.${(i + 1).toString().padStart(2, '0')}`;
-            c[0] = newK;
-            AppState.panes[id].forEach(r => { if(r[2]?.trim() === old) r[2] = newK; });
+            let newSuffix = "";
+            const idx = i + 1;
+
+            if (format === "01") {
+                newSuffix = idx.toString().padStart(2, '0');
+            } else if (format === "1") {
+                newSuffix = idx.toString();
+            } else if (format === "A") {
+                const getAlpha = (n) => {
+                    let s = "";
+                    while (n > 0) {
+                        let rem = (n - 1) % 26;
+                        s = String.fromCharCode(65 + rem) + s;
+                        n = Math.floor((n - 1) / 26);
+                    }
+                    return s;
+                };
+                newSuffix = getAlpha(idx);
+            } else {
+                const match = format.match(/^([A-Z]+)(\d+)$/);
+                if (match) {
+                    const pfx = match[1];
+                    const numTemplate = match[2];
+                    const isPadded = numTemplate.startsWith('0');
+                    const len = Math.max(numTemplate.length, 2); 
+                    newSuffix = pfx + (isPadded ? idx.toString().padStart(len, '0') : idx.toString());
+                } else {
+                    newSuffix = idx.toString().padStart(2, '0');
+                }
+            }
+
+            const newK = `${pk}${sep}${newSuffix}`;
+            if (old !== newK) {
+                c[0] = newK;
+                AppState.panes[id].forEach(r => { if(r[2]?.trim() === old) r[2] = newK; });
+            }
         });
         AppState.setDirty(id, true); this.render(id);
     },
@@ -826,8 +984,8 @@ const ViewModel = {
             
             if (!this.checkKeyExists(targetId, newK)) {
                 AppState.panes[targetId].push([newK, child[1], targetParentKey]);
-                this.copyChildren(srcId, targetId, k, newK);
             }
+            this.copyChildren(srcId, targetId, k, newK);
         });
     },
 
@@ -860,9 +1018,24 @@ const ViewModel = {
             e.preventDefault(); e.stopPropagation();
             
             // 1. Restrict Drop to Primary Pane Only (Modify Primary Only)
-            if (id !== AppState.ui.primaryPaneId) {
+            if (String(id) !== String(AppState.ui.primaryPaneId)) {
                 e.dataTransfer.dropEffect = 'none';
                 return;
+            }
+
+            // Check for Merge Condition
+            const srcId = AppState.drag.sourcePaneId;
+            const draggedKey = AppState.drag.key;
+            let isMergePrediction = false;
+
+            if (srcId && String(srcId) !== String(id) && draggedKey) {
+                 const existing = AppState.panes[id].find(r => r[0].trim() === draggedKey);
+                 if (existing) {
+                     const srcItem = AppState.panes[srcId].find(r => r[0].trim() === draggedKey);
+                     if (srcItem && srcItem[1].trim().toLowerCase() === existing[1].trim().toLowerCase()) {
+                         isMergePrediction = true;
+                     }
+                 }
             }
 
             const rect = row.getBoundingClientRect();
@@ -870,30 +1043,33 @@ const ViewModel = {
             const h = rect.height;
             
             // Clear classes
-            row.classList.remove('drop-above', 'drop-below', 'drop-inside');
+            row.classList.remove('drop-above', 'drop-below', 'drop-inside', 'drop-merge');
             
-            // Determine Zone: Top 25% (Above), Bottom 25% (Below), Middle (Inside)
-            if (relY < h * 0.25) row.classList.add('drop-above');
-            else if (relY > h * 0.75) row.classList.add('drop-below');
-            else row.classList.add('drop-inside');
+            if (isMergePrediction) {
+                row.classList.add('drop-merge');
+            } else {
+                if (relY < h * 0.25) row.classList.add('drop-above');
+                else if (relY > h * 0.75) row.classList.add('drop-below');
+                else row.classList.add('drop-inside');
+            }
         };
 
-        row.ondragleave = () => row.classList.remove('drop-above', 'drop-below', 'drop-inside');
+        row.ondragleave = () => row.classList.remove('drop-above', 'drop-below', 'drop-inside', 'drop-merge');
         
         row.ondrop = (e) => {
             e.preventDefault(); e.stopPropagation(); 
             
             // 1. Restrict Drop to Primary Pane Only
-            if (id !== AppState.ui.primaryPaneId) return;
+            if (String(id) !== String(AppState.ui.primaryPaneId)) return;
 
             const zone = row.classList.contains('drop-above') ? 'above' : 
                          row.classList.contains('drop-below') ? 'below' : 'inside';
-            row.classList.remove('drop-above', 'drop-below', 'drop-inside');
+            row.classList.remove('drop-above', 'drop-below', 'drop-inside', 'drop-merge');
 
             const srcId = AppState.drag.sourcePaneId;
             const draggedKey = AppState.drag.key;
 
-            if (draggedKey && (srcId === id ? draggedKey !== key : true)) {
+            if (draggedKey && (String(srcId) === String(id) ? draggedKey !== key : true)) {
                 // Determine New Parent based on Zone
                 let newParent = "";
                 if (zone === 'inside') newParent = key; // Become child
@@ -903,78 +1079,63 @@ const ViewModel = {
                     if (targetItem) newParent = (targetItem[2] || "").trim();
                 }
 
-                // Calculate Suggested Key (Next Logical in Target)
-                const exclude = (srcId === id) ? draggedKey : null;
-                const suggested = this.suggestNextKey(id, newParent, exclude);
-                
-                // Check if draggedKey is already present in target pane
-                const draggedKeyExistsInTarget = this.checkKeyExists(id, draggedKey);
+                // Capture Scroll Position
+                const scrollContainer = document.getElementById(`s${id}`);
+                const savedScrollTop = scrollContainer ? scrollContainer.scrollTop : 0;
 
-                let autoAccept = false;
-                if (!draggedKeyExistsInTarget) { // Only auto-accept if key is not already taken
-                    const lastLogicalSiblingKey = this.getLastLogicalSiblingKey(id, newParent, exclude);
-                    
-                    // Check if the draggedKey is structurally compatible with the new parent
-                    const isCompatible = this.isKeyCompatibleWithParent(draggedKey, newParent);
+                let finalKey = draggedKey;
+                let proceed = true;
 
-                    if (isCompatible) {
-                        if (lastLogicalSiblingKey === null) {
-                            // No siblings, so it's the first child, and compatible. Auto-accept.
-                            autoAccept = true;
+                // Check Duplicates (Only for Cross-Pane, as Internal Move preserves key)
+                let isMerge = false;
+                if (String(srcId) !== String(id)) {
+                    const existing = AppState.panes[id].find(r => r[0].trim() === finalKey);
+                    if (existing) {
+                        const srcItem = AppState.panes[srcId].find(r => r[0].trim() === draggedKey);
+                        if (srcItem && srcItem[1].trim().toLowerCase() === existing[1].trim().toLowerCase()) {
+                            isMerge = true;
+                            if (existing[1] !== srcItem[1]) {
+                                existing[1] = srcItem[1]; // Update case/content
+                                AppState.setDirty(id, true);
+                            }
                         } else {
-                            // Has siblings. Auto-accept if it's numerically greater than the last sibling.
-                            const comparison = draggedKey.localeCompare(lastLogicalSiblingKey, undefined, { numeric: true, sensitivity: 'base' });
-                            autoAccept = (comparison > 0);
+                            const suggested = this.suggestNextKey(id, newParent);
+                            finalKey = prompt(`Key '${draggedKey}' already exists in target (Description mismatch).\nEnter new key:`, suggested);
+                            if (!finalKey) proceed = false;
+                            else if (this.checkKeyExists(id, finalKey)) {
+                                alert("Key already exists!");
+                                proceed = false;
+                            }
                         }
                     }
                 }
 
-                // CASE A: Internal Move (Re-parenting within Primary)
-                if (srcId === id) {
-                    if (autoAccept) {
+                if (proceed) {
+                    AppState.snapshot();
+                    if (String(srcId) === String(id)) {
+                        // Internal Move
                         this.updateKeyAndParent(id, draggedKey, draggedKey, newParent);
                     } else {
-                        const hasChildren = AppState.panes[id].some(r => (r[2] || "").trim() === draggedKey);
-                        let moveMessage = `Move '${draggedKey}' to parent '${newParent || "ROOT"}'?`;
-                        if (hasChildren) {
-                            moveMessage = `Move section '${draggedKey}' and all its children to parent '${newParent || "ROOT"}'?`;
-                        }
-                        moveMessage += `\n\nConfirm or Edit New Key:`; // Always prompt with suggested if not auto-accepted
-                        const finalKey = prompt(moveMessage, suggested);
-                        
-                        if (finalKey) {
-                            if (finalKey !== draggedKey && this.checkKeyExists(id, finalKey)) return alert("Key already exists!");
-                            this.updateKeyAndParent(id, draggedKey, finalKey, newParent);
-                        }
-                    }
-                }
-                // CASE B: Cross-Pane Copy (Reference -> Primary)
-                else {
-                    const srcItem = AppState.panes[srcId].find(r => r[0].trim() === draggedKey);
-                    if (!srcItem) return;
-                    
-                    let finalKey = null;
-                    if (autoAccept) {
-                        finalKey = draggedKey;
-                    } else {
-                        finalKey = prompt(`Copy '${draggedKey}' from Reference?\nParent: '${newParent || "ROOT"}'\n\nConfirm Key:`, suggested);
-                    }
-                    
-                    if (finalKey) {
-                        if (this.checkKeyExists(id, finalKey)) return alert("Key already exists in target!");
-                        
-                        // Add Item
-                        AppState.panes[id].push([finalKey, srcItem[1], newParent]);
-                        
-                        // Auto-copy children if it's a section (Has children in source)
-                        const hasChildren = AppState.panes[srcId].some(r => (r[2] || "").trim() === draggedKey);
-                        if (hasChildren) {
-                            this.copyChildren(srcId, id, draggedKey, finalKey);
-                        }
+                        // Cross-Pane Copy
+                        const srcItem = AppState.panes[srcId].find(r => r[0].trim() === draggedKey);
+                        if (srcItem) {
+                            if (!isMerge) {
+                                AppState.panes[id].push([finalKey, srcItem[1], newParent]);
+                            }
+                            
+                            // Copy children
+                            const hasChildren = AppState.panes[srcId].some(r => (r[2] || "").trim() === draggedKey);
+                            if (hasChildren) {
+                                this.copyChildren(srcId, id, draggedKey, finalKey);
+                            }
 
-                        AppState.setDirty(id, true); 
-                        this.render(id);
+                            AppState.setDirty(id, true); 
+                            this.render(id);
+                        }
                     }
+                    
+                    // Restore Scroll Position
+                    if (scrollContainer) setTimeout(() => scrollContainer.scrollTop = savedScrollTop, 0);
                 }
             }
         };
@@ -1019,6 +1180,7 @@ const ViewModel = {
         if (!findText) { alert("Please enter text to find."); return; }
         if (!id || !AppState.panes[id]) return;
 
+        AppState.snapshot();
         let count = 0;
         AppState.panes[id].forEach(r => {
             if (r[1].includes(findText)) {
@@ -1033,7 +1195,82 @@ const ViewModel = {
             alert(`Replaced ${count} occurrences.`);
             this.closeFindReplace();
         } else {
+            AppState.history.pop(); AppState.updateUndoUI();
             alert('No matches found.');
+        }
+    },
+
+    openChangeCase() {
+        document.getElementById('changeCaseModal').classList.remove('hidden');
+    },
+
+    closeChangeCase() {
+        document.getElementById('changeCaseModal').classList.add('hidden');
+    },
+
+    executeChangeCase() {
+        const scope = document.getElementById('caseScope').value;
+        const type = document.getElementById('caseType').value;
+        const id = AppState.ui.primaryPaneId;
+        
+        if (!id || !AppState.panes[id]) return;
+
+        let targetIndices = new Set();
+        
+        if (scope === 'selected') {
+            const selectedRow = document.querySelector(`#tree${id} .row.selected-highlight`);
+            if (!selectedRow) {
+                alert("No section selected. Please select a row first or choose 'Entire File'.");
+                return;
+            }
+            const rootKey = selectedRow.getAttribute('data-key').trim();
+            
+            // Build Parent Map for traversal
+            const childrenMap = {};
+            AppState.panes[id].forEach(r => {
+                const p = (r[2] || "").trim();
+                if (!childrenMap[p]) childrenMap[p] = [];
+                childrenMap[p].push(r[0].trim());
+            });
+
+            const collectKeys = (k) => {
+                let keys = [k];
+                if (childrenMap[k]) childrenMap[k].forEach(childKey => keys = keys.concat(collectKeys(childKey)));
+                return keys;
+            };
+            
+            const keysToUpdate = new Set(collectKeys(rootKey));
+            AppState.panes[id].forEach((r, idx) => { if (keysToUpdate.has(r[0].trim())) targetIndices.add(idx); });
+        } else {
+            AppState.panes[id].forEach((_, idx) => targetIndices.add(idx));
+        }
+
+        AppState.snapshot();
+        let count = 0;
+        targetIndices.forEach(idx => {
+            const r = AppState.panes[id][idx];
+            const oldText = r[1];
+            let newText = oldText;
+            
+            if (type === 'upper') newText = oldText.toUpperCase();
+            else if (type === 'lower') newText = oldText.toLowerCase();
+            else if (type === 'title') newText = oldText.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+            else if (type === 'sentence' && oldText.length > 0) newText = oldText.charAt(0).toUpperCase() + oldText.slice(1).toLowerCase();
+            
+            if (newText !== oldText) {
+                r[1] = newText;
+                count++;
+            }
+        });
+
+        if (count > 0) {
+            AppState.setDirty(id, true);
+            this.render(id);
+            alert(`Updated ${count} items.`);
+            this.closeChangeCase();
+        } else {
+            AppState.history.pop(); AppState.updateUndoUI();
+            alert('No changes needed.');
         }
     }
 };
