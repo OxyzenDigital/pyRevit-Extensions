@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Oxyzen Digital | Keynote Master Architect v1.1.1</title>
+    <title>Oxyzen Digital | Keynote Master Architect v1.2</title>
     <style>
         :root {
             --ui-font: "Segoe UI", Tahoma, sans-serif;
@@ -186,7 +186,7 @@
     <div id="tooltip"></div>
     <div id="toast-notification" class="toast"></div>
     <div class="toolbar">
-        <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT <span style="font-size:10px; opacity:0.5; margin-left:5px;">v1.1.1</span></div>
+        <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT <span style="font-size:10px; opacity:0.5; margin-left:5px;">v1.2</span></div>
         <input type="text" id="globalSearch" placeholder="Deep Search Numbers or Content..." onkeyup="ViewModel.search(this.value)" style="width:400px; padding:8px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:20px; outline:none;">
         <div>
             <button id="undoBtn" class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main); margin-right:10px; opacity:0.5;" disabled onclick="AppState.undo()" title="Undo last action">↶ Undo</button>
@@ -217,14 +217,26 @@
         </div>
     </div>
 
+    <div id="manageRecentModal" class="modal hidden">
+        <div class="modal-content" style="width:400px;">
+            <h3 style="margin-top:0; margin-bottom:15px;">Manage Recent Files</h3>
+            <div id="recentListContainer" style="max-height:300px; overflow-y:auto; margin-bottom:15px; border:1px solid var(--border-color); border-radius:3px; background:var(--bg-row);">
+                <!-- Items go here -->
+            </div>
+            <div class="modal-actions">
+                <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main);" onclick="ViewModel.closeManageRecent()">Close</button>
+            </div>
+        </div>
+    </div>
+
     <div id="changeCaseModal" class="modal hidden">
         <div class="modal-content">
             <h3 style="margin-top:0; margin-bottom:15px;">Change Text Case</h3>
             <div class="input-group">
                 <label>Scope:</label>
                 <select id="caseScope" style="width:100%; padding:5px; background:var(--bg-row); color:var(--text-main); border:1px solid var(--border-color);">
-                    <option value="global">Entire File</option>
                     <option value="selected">Selected Section & Children</option>
+                    <option value="global">Entire File</option>
                 </select>
             </div>
             <div class="input-group">
@@ -270,6 +282,7 @@ const AppState = {
     ui: {
         primaryPaneId: null,     // ID of the main editing pane
         dirtyStatus: {},         // { [paneId]: boolean } - Tracks unsaved changes
+        collapsedKeys: {},       // { [paneId]: Set<string> } - Tracks collapsed nodes
         darkMode: localStorage.getItem('odi-dark-mode') !== 'false',
     },
 
@@ -286,6 +299,7 @@ const AppState = {
         this.panes[id] = null;
         this.paneMeta[id] = { filePath: null };
         this.ui.dirtyStatus[id] = false;
+        this.ui.collapsedKeys[id] = new Set();
         if (isPrimary) this.ui.primaryPaneId = id;
     },
 
@@ -326,8 +340,12 @@ const AppState = {
     snapshot() {
         const state = {
             panes: JSON.parse(JSON.stringify(this.panes)),
-            dirtyStatus: JSON.parse(JSON.stringify(this.ui.dirtyStatus))
+            dirtyStatus: JSON.parse(JSON.stringify(this.ui.dirtyStatus)),
+            collapsedKeys: {}
         };
+        Object.keys(this.ui.collapsedKeys).forEach(id => {
+            state.collapsedKeys[id] = Array.from(this.ui.collapsedKeys[id]);
+        });
         this.history.push(state);
         if (this.history.length > 50) this.history.shift();
         this.updateUndoUI();
@@ -338,6 +356,10 @@ const AppState = {
         const prevState = this.history.pop();
         this.panes = prevState.panes;
         this.ui.dirtyStatus = prevState.dirtyStatus;
+        this.ui.collapsedKeys = {};
+        Object.keys(prevState.collapsedKeys).forEach(id => {
+            this.ui.collapsedKeys[id] = new Set(prevState.collapsedKeys[id]);
+        });
         Object.keys(this.ui.dirtyStatus).forEach(id => this.setDirty(id, this.ui.dirtyStatus[id]));
         Object.keys(this.panes).forEach(id => ViewModel.render(id));
         this.updateUndoUI();
@@ -376,9 +398,10 @@ const ViewModel = {
                         <span class="locate-btn" onclick="ViewModel.locateFile(${id})" title="Locate in Explorer">📂</span>
                     </div>
                     <input type="file" id="file-${id}" onchange="ViewModel.handleFileSelect(this, ${id})" style="display:block; width:100%;" title="Load a keynote .txt file">
-                    <select id="recent-${id}" onchange="ViewModel.loadRecent(this, ${id})" style="display:block; width:100%; margin-top:5px; padding:4px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:3px;" title="Load a recently opened file">
-                        <option value="">Load Recent...</option>
-                    </select>
+                    <div style="display:flex; gap:5px; margin-top:5px; align-items:center;">
+                        <select id="recent-${id}" onchange="ViewModel.loadRecent(this, ${id})" style="flex:1; padding:4px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:3px;" title="Load a recently opened file"><option value="">Load Recent...</option></select>
+                        <button class="tool-btn" onclick="ViewModel.openManageRecent()" title="Manage Recent Files" style="height:26px; width:26px; display:flex; align-items:center; justify-content:center;">⚙</button>
+                    </div>
                     <button id="save-${id}" class="btn btn-save" disabled onclick="ViewModel.exportFile(${id})" title="Save changes to a new .txt file">SAVE .TXT</button>
                 </div>
                 <div class="editor-layout">
@@ -449,20 +472,76 @@ const ViewModel = {
         delete AppState.panes[id];
         delete AppState.paneMeta[id];
         delete AppState.ui.dirtyStatus[id];
+        delete AppState.ui.collapsedKeys[id];
         document.querySelectorAll('.row.audit-match').forEach(r => r.classList.remove('audit-match'));
         document.querySelectorAll('.row.selected-highlight').forEach(r => r.classList.remove('selected-highlight'));
         this.validateAuditState();
     },
 
     toggleAll(id, expand) {
-        const tree = document.getElementById(`tree${id}`);
-        if (!tree) return;
-        const nodes = tree.querySelectorAll('.tree-node');
-        nodes.forEach(node => {
-            if (node.querySelector('.toggle')) {
-                node.classList.toggle('collapsed', !expand);
+        const set = AppState.ui.collapsedKeys[id];
+        if (expand) {
+            set.clear();
+        } else {
+            if (AppState.panes[id]) {
+                const parents = new Set();
+                AppState.panes[id].forEach(r => {
+                    const p = (r[2] || "").trim();
+                    if (p) parents.add(p);
+                });
+                parents.forEach(p => set.add(p));
             }
+        }
+        this.render(id);
+    },
+
+    toggleNode(id, key) {
+        const set = AppState.ui.collapsedKeys[id];
+        if (set.has(key)) set.delete(key);
+        else set.add(key);
+        
+        const row = document.querySelector(`#tree${id} .row[data-key="${key}"]`);
+        if (row) {
+            row.closest('.tree-node').classList.toggle('collapsed');
+        }
+    },
+
+    openManageRecent() {
+        this.renderManageRecentList();
+        document.getElementById('manageRecentModal').classList.remove('hidden');
+    },
+
+    closeManageRecent() {
+        document.getElementById('manageRecentModal').classList.add('hidden');
+    },
+
+    renderManageRecentList() {
+        const container = document.getElementById('recentListContainer');
+        container.innerHTML = '';
+        if (AppState.recentFiles.length === 0) {
+            container.innerHTML = '<div style="padding:10px; opacity:0.6; font-style:italic;">No recent files.</div>';
+            return;
+        }
+        
+        AppState.recentFiles.forEach((f, i) => {
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:8px; border-bottom:1px solid var(--border-light);';
+            row.innerHTML = `
+                <div style="overflow:hidden; margin-right:10px;">
+                    <div style="font-weight:bold; font-size:11px;">${f.name}</div>
+                    <div style="font-size:10px; opacity:0.7; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${f.path}">${f.path}</div>
+                </div>
+                <button class="tool-btn" style="color:#d32f2f; min-width:20px;" onclick="ViewModel.removeRecentItem(${i})" title="Remove from list">✕</button>
+            `;
+            container.appendChild(row);
         });
+    },
+
+    removeRecentItem(index) {
+        AppState.recentFiles.splice(index, 1);
+        localStorage.setItem('odi-recent-files', JSON.stringify(AppState.recentFiles));
+        this.renderManageRecentList();
+        AppState.updateRecentUI();
     },
 
     renderRecentList(select) {
@@ -481,7 +560,14 @@ const ViewModel = {
         if (idx === "") return;
         const fileData = AppState.recentFiles[idx];
         if (fileData) {
-            AppState.panes[id] = fileData.content.split(/\r?\n/).map(l => l.split('\t')).filter(a => a.length >= 2);
+            AppState.panes[id] = fileData.content.split(/\r?\n/).map((l, i) => {
+                const parts = l.split('\t');
+                if (parts.length >= 2) return parts;
+                if (String(id) === String(AppState.ui.primaryPaneId)) return null;
+                const t = l.trim();
+                return t ? [`UNF-${(i+1).toString().padStart(4,'0')}`, t, ""] : null;
+            }).filter(x => x);
+            AppState.ui.collapsedKeys[id] = new Set();
             this.render(id);
             
             const path = fileData.path || fileData.name;
@@ -506,7 +592,14 @@ const ViewModel = {
 
             AppState.paneMeta[id].filePath = path;
             AppState.addRecentFile(file.name, path, content);
-            AppState.panes[id] = content.split(/\r?\n/).map(l => l.split('\t')).filter(a => a.length >= 2);
+            AppState.panes[id] = content.split(/\r?\n/).map((l, i) => {
+                const parts = l.split('\t');
+                if (parts.length >= 2) return parts;
+                if (String(id) === String(AppState.ui.primaryPaneId)) return null;
+                const t = l.trim();
+                return t ? [`UNF-${(i+1).toString().padStart(4,'0')}`, t, ""] : null;
+            }).filter(x => x);
+            AppState.ui.collapsedKeys[id] = new Set();
             
             this.updateFileInfo(id, file.name, path);
             this.render(id);
@@ -543,10 +636,11 @@ const ViewModel = {
         const buildNode = (node) => {
             const isRoot = !node.parent;
             const hasChildren = node.children.length > 0;
-            const div = document.createElement('div'); div.className = 'tree-node';
+            const isCollapsed = AppState.ui.collapsedKeys[id].has(node.key);
+            const div = document.createElement('div'); div.className = `tree-node ${isCollapsed ? 'collapsed' : ''}`;
             div.innerHTML = `
                 <div class="row ${isRoot ? 'is-root' : ''}" data-key="${node.key}" draggable="true" onclick="ViewModel.syncScroll(${id}, '${node.key}')">
-                    ${hasChildren ? '<span class="toggle" onclick="this.parentElement.parentElement.classList.toggle(\'collapsed\')">▼</span>' : '<span style="width:15px"></span>'}
+                    ${hasChildren ? `<span class="toggle" onclick="ViewModel.toggleNode(${id}, '${node.key}')">▼</span>` : '<span style="width:15px"></span>'}
                     <input class="key-num-input" value="${node.key}" onchange="ViewModel.updateData(${id}, '${node.key}', 0, this.value)">
                     <input class="key-desc-input" value="${node.desc}" onchange="ViewModel.updateData(${id}, '${node.key}', 1, this.value)">
                     <div class="action-tools">
@@ -808,6 +902,12 @@ const ViewModel = {
         if (item) {
             item[0] = newKey;
             item[2] = newParent;
+            
+            const set = AppState.ui.collapsedKeys[id];
+            if (set && set.has(oldKey)) {
+                set.delete(oldKey);
+                set.add(newKey);
+            }
         }
         
         // 2. Recursive update for children (Parent Pointer AND Key Prefix)
@@ -822,6 +922,12 @@ const ViewModel = {
                         if (k.startsWith(pOld)) {
                             const kNew = pNew + k.substring(pOld.length);
                             r[0] = kNew;
+                            
+                            const set = AppState.ui.collapsedKeys[id];
+                            if (set && set.has(k)) {
+                                set.delete(k);
+                                set.add(kNew);
+                            }
                             updateChildren(k, kNew); // Recurse
                         }
                     }
@@ -924,6 +1030,12 @@ const ViewModel = {
             const newK = `${pk}${sep}${newSuffix}`;
             if (old !== newK) {
                 c[0] = newK;
+                
+                const set = AppState.ui.collapsedKeys[id];
+                if (set && set.has(old)) {
+                    set.delete(old);
+                    set.add(newK);
+                }
                 AppState.panes[id].forEach(r => { if(r[2]?.trim() === old) r[2] = newK; });
             }
         });
@@ -1015,6 +1127,14 @@ const ViewModel = {
         row.ondragstart = (e) => { AppState.drag.key = key; AppState.drag.sourcePaneId = id; e.stopPropagation(); };
         
         row.ondragover = (e) => { 
+            // 0. Reject Files explicitly on rows
+            if (e.dataTransfer.types.includes("Files")) {
+                e.dataTransfer.dropEffect = 'none';
+                e.preventDefault(); 
+                e.stopPropagation();
+                return;
+            }
+
             e.preventDefault(); e.stopPropagation();
             
             // 1. Restrict Drop to Primary Pane Only (Modify Primary Only)
@@ -1057,6 +1177,12 @@ const ViewModel = {
         row.ondragleave = () => row.classList.remove('drop-above', 'drop-below', 'drop-inside', 'drop-merge');
         
         row.ondrop = (e) => {
+            // 0. Reject Files explicitly
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                e.preventDefault(); e.stopPropagation();
+                return;
+            }
+
             e.preventDefault(); e.stopPropagation(); 
             
             // 1. Restrict Drop to Primary Pane Only
@@ -1089,22 +1215,36 @@ const ViewModel = {
                 // Check Duplicates (Only for Cross-Pane, as Internal Move preserves key)
                 let isMerge = false;
                 if (String(srcId) !== String(id)) {
-                    const existing = AppState.panes[id].find(r => r[0].trim() === finalKey);
-                    if (existing) {
+                    if (draggedKey.startsWith('UNF-')) {
+                        const suggested = this.suggestNextKey(id, newParent);
                         const srcItem = AppState.panes[srcId].find(r => r[0].trim() === draggedKey);
-                        if (srcItem && srcItem[1].trim().toLowerCase() === existing[1].trim().toLowerCase()) {
-                            isMerge = true;
-                            if (existing[1] !== srcItem[1]) {
-                                existing[1] = srcItem[1]; // Update case/content
-                                AppState.setDirty(id, true);
-                            }
-                        } else {
-                            const suggested = this.suggestNextKey(id, newParent);
-                            finalKey = prompt(`Key '${draggedKey}' already exists in target (Description mismatch).\nEnter new key:`, suggested);
-                            if (!finalKey) proceed = false;
-                            else if (this.checkKeyExists(id, finalKey)) {
-                                alert("Key already exists!");
-                                proceed = false;
+                        const desc = srcItem ? srcItem[1] : "";
+                        const trunc = desc.length > 40 ? desc.substring(0, 40) + "..." : desc;
+                        
+                        finalKey = prompt(`Importing Raw Text: "${trunc}"\nTarget Parent: ${newParent || "ROOT"}\n\nAssign New Key:`, suggested);
+                        if (!finalKey) proceed = false;
+                        else if (this.checkKeyExists(id, finalKey)) {
+                            alert("Key already exists!");
+                            proceed = false;
+                        }
+                    } else {
+                        const existing = AppState.panes[id].find(r => r[0].trim() === finalKey);
+                        if (existing) {
+                            const srcItem = AppState.panes[srcId].find(r => r[0].trim() === draggedKey);
+                            if (srcItem && srcItem[1].trim().toLowerCase() === existing[1].trim().toLowerCase()) {
+                                isMerge = true;
+                                if (existing[1] !== srcItem[1]) {
+                                    existing[1] = srcItem[1]; // Update case/content
+                                    AppState.setDirty(id, true);
+                                }
+                            } else {
+                                const suggested = this.suggestNextKey(id, newParent);
+                                finalKey = prompt(`Key '${draggedKey}' already exists in target (Description mismatch).\nEnter new key:`, suggested);
+                                if (!finalKey) proceed = false;
+                                else if (this.checkKeyExists(id, finalKey)) {
+                                    alert("Key already exists!");
+                                    proceed = false;
+                                }
                             }
                         }
                     }
@@ -1159,7 +1299,31 @@ const ViewModel = {
         const content = AppState.panes[id].map(r => r.join('\t')).join('\n');
         const a = document.createElement('a');
         a.href = URL.createObjectURL(new Blob([content], {type:'text/plain'}));
-        a.download = "Revised_Database.txt"; a.click();
+        
+        let fileName = "Revised_Database.txt";
+        const meta = AppState.paneMeta[id];
+        let originalPath = (meta && meta.filePath) ? meta.filePath : null;
+        
+        if (!originalPath) {
+             const uiName = document.getElementById(`current-file-${id}`).innerText;
+             if (uiName && !uiName.includes("[No File Loaded]")) originalPath = uiName;
+        }
+
+        if (originalPath) {
+            let name = originalPath.split(/[\\/]/).pop();
+            let namePart = name;
+            let extPart = ".txt";
+            const lastDot = name.lastIndexOf('.');
+            if (lastDot > 0) {
+                namePart = name.substring(0, lastDot);
+                extPart = name.substring(lastDot);
+            }
+            const now = new Date();
+            const ts = now.getFullYear() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0') + "_" + String(now.getHours()).padStart(2,'0') + String(now.getMinutes()).padStart(2,'0') + String(now.getSeconds()).padStart(2,'0');
+            fileName = `${namePart}_${ts}${extPart}`;
+        }
+        
+        a.download = fileName; a.click();
         AppState.setDirty(id, false);
     },
 
