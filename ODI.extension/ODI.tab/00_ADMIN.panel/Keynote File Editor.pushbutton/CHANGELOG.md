@@ -1,5 +1,18 @@
 # Changelog - Keynote File Editor
 
+## [v1.1.0] - 2025-01-02
+### Enhancements
+- **Smart Drag & Drop:**
+  - Added logic to detect CSI/MasterFormat numbering patterns.
+  - Implemented auto-accept for moves that fit the target sequence or pattern.
+  - Added step detection for renumbering suggestions.
+- **UI Improvements:**
+  - Updated selection highlight to red for better visibility.
+  - Improved contrast for Root Nodes in Light/Dark themes.
+  - Added "File Info Box" with a "Locate" button to copy filenames.
+  - Added Toast notifications for user feedback.
+  - Added "Close Pane" button for secondary panes.
+
 ## [v1.0.0] - 2025-01-02
 ### Initial Release
 - **Core Functionality:**
