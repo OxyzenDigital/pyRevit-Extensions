@@ -1,5 +1,28 @@
 # Changelog - Keynote File Editor
 
+## [v1.3] - 2025-01-03
+### Added
+- **Renumbering Suite:**
+  - **Modal Interface:** New dedicated UI for renumbering with options for Separator, Style (Numeric, Alpha, Alphanumeric), and Start Index.
+  - **Contextual Actions:** Added "Num" button to parent rows for quick renumbering of specific branches.
+  - **Safety Checks:** Implemented collision detection to prevent duplicate keys during renumbering.
+  - **Root Support:** Added ability to renumber root-level Divisions.
+- **Tree Management:**
+  - **Flatten Command:** Added "Flat" button to promote all children of a node to be siblings.
+  - **Hierarchy Validation:** Added visual warning (⚠) for keys that do not match their parent's prefix structure.
+- **Input Validation:**
+  - **Real-time Feedback:** Key input turns red if the value is empty or a duplicate.
+  - **Cascading Rename:** Renaming a parent key now automatically updates the prefix of all child keys to maintain hierarchy.
+
+### Changed
+- **Text Editing:**
+  - Converted description inputs to auto-resizing textareas to support multi-line text wrapping.
+  - Added `Escape` key handler to revert edits.
+  - Fixed drag-and-drop interference when selecting text in inputs.
+- **UI/UX:**
+  - Updated application title to v1.3.
+  - Improved visibility of action buttons in Light Theme.
+
 ## [v1.2] - 2025-01-02
 ### Added
 - **Undo Functionality:** Added a global Undo button to revert destructive actions (Drag & Drop, Renumber, Delete, Text Edits).
