@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Oxyzen Digital | Keynote Master Architect v1.2</title>
+    <title>Oxyzen Digital | Keynote Master Architect v1.3</title>
     <style>
         :root {
             --ui-font: "Segoe UI", Tahoma, sans-serif;
@@ -71,7 +71,7 @@
 
         .keynote-scroll { flex: 1; overflow-y: auto; scroll-behavior: smooth; padding-bottom: 50vh; }
         .tree-node { display: flex; flex-direction: column; }
-        .row { display: flex; padding: 5px 10px; align-items: center; cursor: grab; background: var(--bg-row); border-bottom: 1px solid var(--border-light); border-left: 5px solid transparent; transition: border-left-color 0.3s, opacity 0.3s; }
+        .row { display: flex; padding: 5px 10px; align-items: flex-start; cursor: grab; background: var(--bg-row); border-bottom: 1px solid var(--border-light); border-left: 5px solid transparent; transition: border-left-color 0.3s, opacity 0.3s; }
         .row.is-root { background: var(--header-dark) !important; color: #fff; font-weight: bold; position: sticky; top: 0; z-index: 5; }
         
         .row.audit-match {
@@ -80,6 +80,11 @@
         }
         .row.audit-match:hover {
             opacity: 1;
+        }
+        
+        .hierarchy-warning {
+            color: var(--caution-orange);
+            margin-left: 5px; cursor: help; font-size: 11px;
         }
         
         .row.selected-highlight {
@@ -107,8 +112,8 @@
         .collapsed > .row > .toggle { transform: rotate(-90deg); }
         .collapsed > .lvl-container { display: none; }
 
-        .key-num-input { font-weight: bold; width: 110px; border: 1px solid transparent; background: transparent; color: inherit; outline: none; }
-        .key-desc-input { flex-grow: 1; border: 1px solid transparent; background: transparent; color: inherit; outline: none; padding: 2px 5px; }
+        .key-num-input { font-weight: bold; width: 110px; border: 1px solid transparent; background: transparent; color: inherit; outline: none; margin-top: 2px; }
+        .key-desc-input { flex-grow: 1; border: 1px solid transparent; background: transparent; color: inherit; outline: none; padding: 2px 5px; resize: none; overflow: hidden; min-height: 18px; font-family: inherit; font-size: inherit; line-height: 1.4; }
         .key-num-input:focus, .key-desc-input:focus { background: var(--bg-row); border-color: var(--active-blue); color: var(--text-main); box-shadow: 0 0 3px rgba(0,0,0,0.2); }
 
         .btn { border: none; padding: 6px 12px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 11px; }
@@ -186,7 +191,7 @@
     <div id="tooltip"></div>
     <div id="toast-notification" class="toast"></div>
     <div class="toolbar">
-        <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT <span style="font-size:10px; opacity:0.5; margin-left:5px;">v1.2</span></div>
+        <div style="font-weight: bold;">OXYZEN DIGITAL | ARCHITECT <span style="font-size:10px; opacity:0.5; margin-left:5px;">v1.3</span></div>
         <input type="text" id="globalSearch" placeholder="Deep Search Numbers or Content..." onkeyup="ViewModel.search(this.value)" style="width:400px; padding:8px; border:1px solid var(--border-color); background:var(--bg-panel); color:var(--text-main); border-radius:20px; outline:none;">
         <div>
             <button id="undoBtn" class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main); margin-right:10px; opacity:0.5;" disabled onclick="AppState.undo()" title="Undo last action">↶ Undo</button>
@@ -251,6 +256,45 @@
             <div class="modal-actions">
                 <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main);" onclick="ViewModel.closeChangeCase()">Cancel</button>
                 <button class="btn btn-save" style="width:auto;" onclick="ViewModel.executeChangeCase()">Apply</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="renumModal" class="modal hidden">
+        <div class="modal-content">
+            <h3 style="margin-top:0; margin-bottom:15px;">Renumber Sequence</h3>
+            <div style="margin-bottom:10px; font-size:11px; opacity:0.8;">
+                Parent Key: <strong id="renumParentKey"></strong><br>
+                Child Count: <span id="renumChildCount"></span>
+            </div>
+            <div class="input-group">
+                <label>Separator:</label>
+                <select id="renumSep" onchange="ViewModel.updateRenumberPreview()" style="width:100%; padding:5px; background:var(--bg-row); color:var(--text-main); border:1px solid var(--border-color);">
+                    <option value=".">Dot (.)</option>
+                    <option value="-">Dash (-)</option>
+                    <option value=" ">Space ( )</option>
+                    <option value="">None</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label>Style:</label>
+                <select id="renumStyle" onchange="ViewModel.updateRenumberPreview()" style="width:100%; padding:5px; background:var(--bg-row); color:var(--text-main); border:1px solid var(--border-color);">
+                    <option value="01">Numeric (01, 02...)</option>
+                    <option value="1">Numeric (1, 2...)</option>
+                    <option value="A">Alpha (A, B...)</option>
+                    <option value="A1">Alphanumeric (A1, A2...)</option>
+                </select>
+            </div>
+            <div class="input-group">
+                <label>Start At:</label>
+                <input type="number" id="renumStart" value="1" min="0" onchange="ViewModel.updateRenumberPreview()" style="width:100%; padding:5px; background:var(--bg-row); color:var(--text-main); border:1px solid var(--border-color);">
+            </div>
+            <div style="margin:15px 0; padding:10px; background:var(--bg-browser); border-radius:4px; font-family:monospace;">
+                Preview: <span id="renumPreview" style="font-weight:bold; color:var(--active-blue);"></span>
+            </div>
+            <div class="modal-actions">
+                <button class="btn" style="background:transparent; border:1px solid var(--border-color); color:var(--text-main);" onclick="ViewModel.closeRenumberModal()">Cancel</button>
+                <button class="btn btn-save" style="width:auto;" onclick="ViewModel.executeRenumber()">Apply</button>
             </div>
         </div>
     </div>
@@ -410,7 +454,6 @@ const ViewModel = {
                             <div class="browser-header">
                                 <span>DIVISIONS</span>
                                 <div style="display:flex; gap:8px;">
-                                    <span id="renum-btn" class="header-icon icon-red" onclick="ViewModel.renumber(${id})" title="Renumber Sequence">&#x21bb;</span>
                                     <span class="header-icon icon-blue" onclick="ViewModel.addDivision(${id})" title="Add Division">+</span>
                                 </div>
                             </div>
@@ -637,14 +680,25 @@ const ViewModel = {
             const isRoot = !node.parent;
             const hasChildren = node.children.length > 0;
             const isCollapsed = AppState.ui.collapsedKeys[id].has(node.key);
+            
+            // Hierarchy Check: Does Key start with Parent Key?
+            // Skip check for Roots or CSI-like keys (00 00 00) to avoid noise
+            let hierarchyWarn = "";
+            if (!isRoot && !node.key.startsWith(node.parent) && !/^\d{2}[\s\.]\d{2}/.test(node.key)) {
+                hierarchyWarn = `<span class="hierarchy-warning" title="Hierarchy Mismatch:\nKey '${node.key}' does not start with Parent Key '${node.parent}'.\nRevit allows this, but it breaks sorting logic.">⚠</span>`;
+            }
+
             const div = document.createElement('div'); div.className = `tree-node ${isCollapsed ? 'collapsed' : ''}`;
             div.innerHTML = `
                 <div class="row ${isRoot ? 'is-root' : ''}" data-key="${node.key}" draggable="true" onclick="ViewModel.syncScroll(${id}, '${node.key}')">
-                    ${hasChildren ? `<span class="toggle" onclick="ViewModel.toggleNode(${id}, '${node.key}')">▼</span>` : '<span style="width:15px"></span>'}
-                    <input class="key-num-input" value="${node.key}" onchange="ViewModel.updateData(${id}, '${node.key}', 0, this.value)">
-                    <input class="key-desc-input" value="${node.desc}" onchange="ViewModel.updateData(${id}, '${node.key}', 1, this.value)">
+                    ${hasChildren ? `<span class="toggle" style="margin-top:4px;" onclick="ViewModel.toggleNode(${id}, '${node.key}')">▼</span>` : '<span style="width:15px"></span>'}
+                    <input class="key-num-input" value="${node.key}" draggable="true" ondragstart="event.preventDefault(); event.stopPropagation()" oninput="ViewModel.validateKeyInput(this, ${id}, '${node.key}')" onchange="ViewModel.commitKeyChange(this, ${id}, '${node.key}')" onkeydown="if(event.key==='Enter'){this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue; this.style.backgroundColor=''; this.blur();}">
+                    ${hierarchyWarn}
+                    <textarea class="key-desc-input" rows="1" draggable="true" ondragstart="event.preventDefault(); event.stopPropagation()" onkeydown="if(event.key==='Enter'){event.preventDefault(); this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue; this.style.height='auto'; this.style.height=this.scrollHeight+'px'; this.blur();}" onchange="ViewModel.updateData(${id}, '${node.key}', 1, this.value)" oninput="this.style.height='';this.style.height=this.scrollHeight+'px'">${node.desc}</textarea>
                     <div class="action-tools">
-                        <span class="tool-btn" onclick="ViewModel.addSibling(${id}, '${node.key}', '${node.parent}')" title="Add a new sibling keynote">+ Sib</span>
+                        ${hasChildren ? `<span class="tool-btn" onclick="ViewModel.flatten(${id}, '${node.key}')" title="Promote children to this level">Flat</span>` : ''}
+                        ${(hasChildren && !/^\d{2}[\s\.]\d{2}/.test(node.key)) ? `<span class="tool-btn" onclick="ViewModel.renumber(${id}, '${node.key}')" title="Renumber children">Num</span>` : ''}
+                        <span class="tool-btn" style="color:var(--active-blue)" onclick="ViewModel.addSibling(${id}, '${node.key}', '${node.parent}')" title="Add a new sibling keynote">+ Sib</span>
                         <span class="tool-btn" style="color:#d32f2f" onclick="ViewModel.deleteItem(${id}, '${node.key}')" title="Delete this keynote and all its children">✕</span>
                     </div>
                 </div>
@@ -658,6 +712,8 @@ const ViewModel = {
             return div;
         };
         roots.forEach(r => container.appendChild(buildNode(r)));
+        // Auto-resize textareas after render
+        container.querySelectorAll('textarea.key-desc-input').forEach(t => { t.style.height = 'auto'; t.style.height = t.scrollHeight + 'px'; });
         if (id === AppState.ui.primaryPaneId) this.updateBrowser(id);
     },
 
@@ -776,6 +832,31 @@ const ViewModel = {
         allNodes.forEach(node => {
             node.classList.toggle('hidden', !visibleNodes.has(node));
         });
+    },
+
+    flatten(id, key) {
+        if (!confirm(`Flatten children of '${key}'?\nThey will become siblings of '${key}'.`)) return;
+        
+        AppState.snapshot();
+        const node = AppState.panes[id].find(r => r[0].trim() === key);
+        if (!node) return;
+        const newParent = (node[2] || "").trim();
+        
+        let count = 0;
+        AppState.panes[id].forEach(r => {
+            if ((r[2] || "").trim() === key) {
+                r[2] = newParent;
+                count++;
+            }
+        });
+        
+        if (count > 0) {
+            AppState.setDirty(id, true);
+            this.render(id);
+        } else {
+            AppState.history.pop();
+            AppState.updateUndoUI();
+        }
     },
 
     deleteItem(id, key) {
@@ -897,11 +978,33 @@ const ViewModel = {
     },
 
     updateKeyAndParent(id, oldKey, newKey, newParent) {
+        // 0. Pre-flight Collision Check for Cascading Renames
+        if (oldKey !== newKey) {
+            const collisions = [];
+            const predictCollisions = (pOld, pNew) => {
+                AppState.panes[id].forEach(r => {
+                    if ((r[2] || "").trim() === pOld) {
+                        const k = r[0].trim();
+                        if (k.startsWith(pOld)) {
+                            const kNew = pNew + k.substring(pOld.length);
+                            if (this.checkKeyExists(id, kNew)) collisions.push(kNew);
+                            predictCollisions(k, kNew);
+                        }
+                    }
+                });
+            };
+            predictCollisions(oldKey, newKey);
+            if (collisions.length > 0) {
+                alert(`Cannot rename '${oldKey}' to '${newKey}'.\n\nThis would cause ${collisions.length} collision(s) in child items:\n(e.g. '${collisions[0]}')\n\nAction cancelled.`);
+                return false;
+            }
+        }
+
         // 1. Update the item itself
         const item = AppState.panes[id].find(r => r[0].trim() === oldKey);
         if (item) {
             item[0] = newKey;
-            item[2] = newParent;
+            if (newParent !== undefined) item[2] = newParent;
             
             const set = AppState.ui.collapsedKeys[id];
             if (set && set.has(oldKey)) {
@@ -936,110 +1039,213 @@ const ViewModel = {
             updateChildren(oldKey, newKey);
         }
         AppState.setDirty(id, true); this.render(id);
+        return true;
     },
 
-    renumber(id) {
-        const selectedRow = document.querySelector(`#tree${id} .row.selected-highlight`);
-        if (!selectedRow) {
-            alert("Please select a parent section in the tree to renumber.");
-            return;
-        }
-        const pk = selectedRow.getAttribute('data-key').trim();
+    renumber(id, key) {
+        let pk = "";
+        let children = [];
+        let isRoot = false;
 
-        // CSI Check: Alert if it looks like MasterFormat (e.g. 03 10 00)
-        if (/^\d{2}[\s\.]\d{2}/.test(pk)) {
-            alert("Action Cancelled: CSI MasterFormat sections should not be auto-renumbered.");
-            return;
+        if (key) {
+            pk = key;
+        } else {
+            const selectedRow = document.querySelector(`#tree${id} .row.selected-highlight`);
+            if (selectedRow) {
+                pk = selectedRow.getAttribute('data-key').trim();
+            } else {
+                isRoot = true;
+            }
         }
 
-        if (!confirm(`Renumber all children of '${pk}'?\nThis will overwrite existing keys.`)) return;
+        if (!isRoot) {
+            children = AppState.panes[id].filter(r => r[2]?.trim() === pk);
+            if (children.length === 0) {
+                alert("No children found for this parent key.");
+                return;
+            }
+            // CSI Warning (Soft check)
+            if (/^\d{2}[\s\.]\d{2}/.test(pk)) {
+                if(!confirm("Warning: This looks like a CSI MasterFormat section.\nRenumbering might break standard conventions.\nContinue?")) return;
+            }
+        } else {
+            if (!confirm("No parent section selected.\nThis is the Top-Tier Parent (Root).\n\nDo you want to renumber the Divisions themselves?")) return;
+            children = AppState.panes[id].filter(r => !r[2] || r[2].trim() === "");
+            if (children.length === 0) {
+                alert("No root items found.");
+                return;
+            }
+        }
+
+        // Populate Modal
+        document.getElementById('renumParentKey').innerText = pk || "[ROOT]";
+        document.getElementById('renumParentKey').setAttribute('data-value', pk);
+        document.getElementById('renumChildCount').innerText = children.length;
+        document.getElementById('renumStart').value = 1;
+        document.getElementById('renumSep').value = ''; // Reset
+        
+        // Try to detect existing separator from first child
+        if (children.length > 0) {
+            const firstChild = children[0][0].trim();
+            if (pk && firstChild.startsWith(pk)) {
+                const remainder = firstChild.substring(pk.length);
+                if (remainder.startsWith('.')) document.getElementById('renumSep').value = '.';
+                else if (remainder.startsWith('-')) document.getElementById('renumSep').value = '-';
+                else if (remainder.startsWith(' ')) document.getElementById('renumSep').value = ' ';
+            }
+        }
+
+        this.updateRenumberPreview();
+        document.getElementById('renumModal').classList.remove('hidden');
+    },
+
+    closeRenumberModal() {
+        document.getElementById('renumModal').classList.add('hidden');
+    },
+
+    updateRenumberPreview() {
+        const pk = document.getElementById('renumParentKey').getAttribute('data-value') || "";
+        const sep = document.getElementById('renumSep').value;
+        const style = document.getElementById('renumStyle').value;
+        const start = parseInt(document.getElementById('renumStart').value) || 1;
+        
+        const gen = (idx) => {
+            if (style === '1' || style === 'A1') return idx.toString();
+            if (style === '01') return idx.toString().padStart(2, '0');
+            if (style === 'A') {
+                let s = ""; let n = Math.max(1, idx);
+                while (n > 0) {
+                    let rem = (n - 1) % 26;
+                    s = String.fromCharCode(65 + rem) + s;
+                    n = Math.floor((n - 1) / 26);
+                }
+                return s;
+            }
+            return idx.toString();
+        };
+
+        const ex1 = `${pk}${sep}${gen(start)}`;
+        const ex2 = `${pk}${sep}${gen(start + 1)}`;
+        document.getElementById('renumPreview').innerText = `${ex1}, ${ex2}...`;
+    },
+
+    executeRenumber() {
+        const id = AppState.ui.primaryPaneId;
+        const pk = document.getElementById('renumParentKey').getAttribute('data-value') || "";
+        const sep = document.getElementById('renumSep').value;
+        const style = document.getElementById('renumStyle').value;
+        const start = parseInt(document.getElementById('renumStart').value) || 0;
 
         AppState.snapshot();
-        const children = AppState.panes[id].filter(r => r[2]?.trim() === pk);
-        if (children.length === 0) {
-            alert("No children found for this parent key.");
-            return;
-        }
+        
+        const children = AppState.panes[id].filter(r => (r[2] || "").trim() === pk);
+        
+        // Safety Check: Detect Collisions with keys OUTSIDE the group being renumbered
+        const childKeys = new Set(children.map(c => c[0].trim()));
+        const otherKeys = new Set(AppState.panes[id].filter(r => !childKeys.has(r[0].trim())).map(r => r[0].trim()));
+        
+        let collisions = [];
+        
+        // Pre-calculate updates to check for collisions
+        const updates = children.map((c, i) => {
+            const idx = start + i;
+            let suffix = "";
+            
+            if (style === '1' || style === 'A1') suffix = idx.toString();
+            else if (style === '01') suffix = idx.toString().padStart(2, '0');
+            else if (style === 'A') {
+                const n = Math.max(1, idx);
+                let s = ""; let temp = n;
+                while (temp > 0) {
+                    let rem = (temp - 1) % 26;
+                    s = String.fromCharCode(65 + rem) + s;
+                    temp = Math.floor((temp - 1) / 26);
+                }
+                suffix = s;
+            }
 
-        // Determine Format Logic (Intuition)
-        let format = "01";
-        let sep = ".";
-        
-        const firstChildKey = children[0][0].trim();
-        let suffix = firstChildKey;
-        
-        if (firstChildKey.startsWith(pk)) {
-            const remainder = firstChildKey.substring(pk.length);
-            const match = remainder.match(/^([\.\s]+)(.*)/);
-            if (match) {
-                sep = match[1];
-                suffix = match[2];
-            } else if (remainder.length > 0) {
-                suffix = remainder;
-                sep = "";
+            const newKey = `${pk}${sep}${suffix}`;
+            if (otherKeys.has(newKey)) collisions.push(newKey);
+            
+            return { child: c, newKey: newKey };
+        });
+
+        if (collisions.length > 0) {
+            const msg = `Warning: Renumbering will create ${collisions.length} duplicate keys (e.g. '${collisions[0]}').\nThese keys already exist outside this group.\n\nProceed anyway?`;
+            if (!confirm(msg)) {
+                AppState.history.pop();
+                AppState.updateUndoUI();
+                return;
             }
         }
 
-        if (/^\d+$/.test(suffix)) {
-            if (suffix.length > 1 && suffix.startsWith('0')) format = "01";
-            else format = "1";
-        } else if (/^[A-Z]$/.test(suffix)) {
-            format = "A";
-        } else if (/^[A-Z]+\d+$/.test(suffix)) {
-            const match = suffix.match(/^([A-Z]+)(\d+)$/);
-            format = match[1] + (match[2].startsWith('0') && match[2].length > 1 ? "01" : "1");
-        } else {
-            const userFmt = prompt(`Detected mixed/unknown format (e.g. '${suffix}').\nEnter start sequence (e.g. '01', '1', 'A', 'A1'):`, "01");
-            if (!userFmt) return;
-            format = userFmt;
-        }
-
-        children.forEach((c, i) => {
-            const old = c[0].trim();
-            let newSuffix = "";
-            const idx = i + 1;
-
-            if (format === "01") {
-                newSuffix = idx.toString().padStart(2, '0');
-            } else if (format === "1") {
-                newSuffix = idx.toString();
-            } else if (format === "A") {
-                const getAlpha = (n) => {
-                    let s = "";
-                    while (n > 0) {
-                        let rem = (n - 1) % 26;
-                        s = String.fromCharCode(65 + rem) + s;
-                        n = Math.floor((n - 1) / 26);
-                    }
-                    return s;
-                };
-                newSuffix = getAlpha(idx);
-            } else {
-                const match = format.match(/^([A-Z]+)(\d+)$/);
-                if (match) {
-                    const pfx = match[1];
-                    const numTemplate = match[2];
-                    const isPadded = numTemplate.startsWith('0');
-                    const len = Math.max(numTemplate.length, 2); 
-                    newSuffix = pfx + (isPadded ? idx.toString().padStart(len, '0') : idx.toString());
-                } else {
-                    newSuffix = idx.toString().padStart(2, '0');
-                }
-            }
-
-            const newK = `${pk}${sep}${newSuffix}`;
-            if (old !== newK) {
-                c[0] = newK;
-                
-                const set = AppState.ui.collapsedKeys[id];
-                if (set && set.has(old)) {
-                    set.delete(old);
-                    set.add(newK);
-                }
-                AppState.panes[id].forEach(r => { if(r[2]?.trim() === old) r[2] = newK; });
+        // Apply Updates
+        updates.forEach(u => {
+            const c = u.child;
+            const newKey = u.newKey;
+            const oldKey = c[0].trim();
+            
+            if (newKey !== oldKey) {
+                c[0] = newKey;
+                this.updateKeyHierarchy(id, oldKey, newKey);
             }
         });
-        AppState.setDirty(id, true); this.render(id);
+
+        AppState.setDirty(id, true);
+        this.render(id);
+        this.closeRenumberModal();
+    },
+
+    updateKeyHierarchy(id, oldKey, newKey) {
+        // Update parent pointers of children
+        AppState.panes[id].forEach(r => {
+            if ((r[2] || "").trim() === oldKey) {
+                r[2] = newKey;
+                
+                // Update child key if it inherits prefix
+                const childKey = r[0].trim();
+                if (childKey.startsWith(oldKey)) {
+                    const suffix = childKey.substring(oldKey.length);
+                    const newChildKey = newKey + suffix;
+                    r[0] = newChildKey;
+                    this.updateKeyHierarchy(id, childKey, newChildKey);
+                }
+            }
+        });
+    },
+
+    validateKeyInput(input, id, originalKey) {
+        const val = input.value.trim();
+        if (!val) {
+             input.style.backgroundColor = '#ffcdd2';
+             return;
+        }
+        if (val === originalKey) {
+            input.style.backgroundColor = '';
+            return;
+        }
+        const exists = AppState.panes[id].some(r => r[0].trim() === val);
+        input.style.backgroundColor = exists ? '#ffcdd2' : '';
+    },
+
+    commitKeyChange(input, id, originalKey) {
+        const val = input.value.trim();
+        if (val === originalKey) return;
+        
+        if (!val || AppState.panes[id].some(r => r[0].trim() === val)) {
+            alert(val ? `Key '${val}' already exists.` : "Key cannot be empty.");
+            input.value = originalKey;
+            input.style.backgroundColor = '';
+            return;
+        }
+        
+        const success = this.updateKeyAndParent(id, originalKey, val);
+        if (!success) {
+            input.value = originalKey;
+            return;
+        }
+        
+        this.syncScroll(id, val);
     },
 
     // Helper to get the last logically ordered sibling key under a parent
