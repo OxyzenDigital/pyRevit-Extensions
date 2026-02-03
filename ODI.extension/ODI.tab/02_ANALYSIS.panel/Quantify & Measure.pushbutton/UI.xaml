@@ -1,0 +1,309 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Quantity &amp; Measures" Height="550" Width="1100"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None" AllowsTransparency="True" ResizeMode="CanResizeWithGrip"
+        Background="{DynamicResource WindowBrush}"
+        Foreground="{DynamicResource TextBrush}">
+    <Window.Resources>
+        <!-- Default Colors (Light Theme) -->
+        <SolidColorBrush x:Key="WindowBrush" Color="#F3F3F3"/>
+        <SolidColorBrush x:Key="ToolbarBrush" Color="#EBF4FA"/>
+        <SolidColorBrush x:Key="ControlBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#333333"/>
+        <SolidColorBrush x:Key="TextLightBrush" Color="#888888"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#CCCCCC"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#0078D7"/>
+        <SolidColorBrush x:Key="SelectionBrush" Color="#CCE8FF"/>
+        <SolidColorBrush x:Key="SelectionBorderBrush" Color="#0078D7"/>
+        <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="HoverBrush" Color="#E5E5E5"/>
+        <SolidColorBrush x:Key="ButtonBrush" Color="#DDDDDD"/>
+        <SolidColorBrush x:Key="FooterBrush" Color="#EFEFEF"/>
+        <SolidColorBrush x:Key="AltRowBrush" Color="#FAFAFA"/>
+        
+        <!-- Button Style -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource ButtonBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Margin" Value="0,0,5,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="3" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- TreeView Item Style -->
+        <Style TargetType="{x:Type TreeViewItem}">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Padding" Value="2"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TreeViewItem">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" MinWidth="19"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition/>
+                            </Grid.RowDefinitions>
+                            <ToggleButton x:Name="Expander" ClickMode="Press" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" Content="{TemplateBinding Header}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent" Height="16" Padding="5" Width="16">
+                                            <Path x:Name="ExpandPath" Data="M0,0 L0,6 L6,0 z" Fill="{DynamicResource TextLightBrush}" Stroke="{DynamicResource TextLightBrush}">
+                                                <Path.RenderTransform>
+                                                    <RotateTransform Angle="135" CenterX="3" CenterY="3"/>
+                                                </Path.RenderTransform>
+                                            </Path>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter Property="RenderTransform" TargetName="ExpandPath">
+                                                    <Setter.Value>
+                                                        <RotateTransform Angle="180" CenterX="3" CenterY="3"/>
+                                                    </Setter.Value>
+                                                </Setter>
+                                                <Setter Property="Fill" TargetName="ExpandPath" Value="{DynamicResource AccentBrush}"/>
+                                                <Setter Property="Stroke" TargetName="ExpandPath" Value="{DynamicResource AccentBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <Border x:Name="Bd" Grid.Column="1" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="true">
+                                <ContentPresenter x:Name="PART_Header" ContentSource="Header" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                            </Border>
+                            <ItemsPresenter x:Name="ItemsHost" Grid.Column="1" Grid.Row="1"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" TargetName="Bd" Value="{DynamicResource SelectionBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="Bd" Value="{DynamicResource SelectionBorderBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- DataGrid Styles -->
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Padding" Value="10,8"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+        </Style>
+
+        <Style TargetType="DataGridCell">
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="DataGridCell">
+                        <Border Padding="{TemplateBinding Padding}" BorderBrush="Transparent" BorderThickness="0" Background="{TemplateBinding Background}" SnapsToDevicePixels="True">
+                            <ContentPresenter SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" VerticalAlignment="Center"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource SelectionBrush}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+    </Window.Resources>
+
+    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/> <!-- Custom Header -->
+                <RowDefinition Height="Auto"/> <!-- Toolbar -->
+                <RowDefinition Height="*"/>    <!-- Main Content -->
+                <RowDefinition Height="Auto"/> <!-- Bottom Actions -->
+                <RowDefinition Height="30"/>   <!-- Footer -->
+            </Grid.RowDefinitions>
+
+            <!-- 1. Custom Header -->
+            <Border Name="HeaderDrag" Grid.Row="0" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                <Grid Margin="10,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="Quantity &amp; Measures" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
+                        <TextBlock Text=" | Calculations" Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                    </StackPanel>
+                    <Button Name="Btn_WinClose" Grid.Column="1" Content="✕" Background="Transparent" Foreground="{DynamicResource TextBrush}" FontWeight="Bold" Padding="10,5" Margin="0"/>
+                </Grid>
+            </Border>
+
+            <!-- 2. Toolbar -->
+            <Border Grid.Row="1" Background="{DynamicResource ToolbarBrush}" Padding="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                <Grid>
+                    <StackPanel Orientation="Horizontal">
+                        <Button Name="Btn_ScanView" Content="Scan View" FontWeight="Bold" Margin="0,0,10,0"/>
+                        <Button Name="Btn_Clear" Content="Clear List"/>
+                    </StackPanel>
+                    <CheckBox Name="Cb_AutoZoom" Content="Auto-Zoom" VerticalAlignment="Center" HorizontalAlignment="Right" IsChecked="True" Foreground="{DynamicResource TextBrush}"/>
+                </Grid>
+            </Border>
+
+            <!-- 3. Main Content Split -->
+            <Grid Grid.Row="2">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="350" MinWidth="250"/>
+                    <ColumnDefinition Width="5"/>
+                    <ColumnDefinition Width="*" MinWidth="300"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left Pane: Tree -->
+                <Border Grid.Column="0" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TreeView Grid.Row="0" Name="systemTree" Background="Transparent" BorderThickness="0" Padding="5">
+                        <TreeView.ItemTemplate>
+                            <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                <Grid Margin="0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    
+                                    <CheckBox IsChecked="{Binding IsChecked}" VerticalAlignment="Center" Margin="0,0,5,0" Click="on_checkbox_click"/>
+                                    
+                                    <!-- Name -->
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <TextBlock Text="{Binding Name}" Foreground="{Binding NetworkColor}" FontWeight="{Binding FontWeight}" VerticalAlignment="Center"/>
+                                        <TextBlock Text="{Binding Count, StringFormat=' ({0})'}" Foreground="{DynamicResource TextLightBrush}" FontSize="10" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+
+                                    <!-- Value -->
+                                    <TextBlock Grid.Column="2" Text="{Binding DisplayValue}" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold" Margin="10,0,0,0" FontSize="11" VerticalAlignment="Center"/>
+                                </Grid>
+                            </HierarchicalDataTemplate>
+                        </TreeView.ItemTemplate>
+                        <TreeView.ItemContainerStyle>
+                            <Style TargetType="{x:Type TreeViewItem}">
+                                <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            </Style>
+                        </TreeView.ItemContainerStyle>
+                    </TreeView>
+                    <Border Grid.Row="1" Padding="5" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Background="{DynamicResource AltRowBrush}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Name="Btn_SelectAll" Content="Select All" Margin="0,0,2,0" Padding="5,2" FontSize="11"/>
+                            <Button Grid.Column="1" Name="Btn_ExpandAll" Content="Expand" Margin="2,0,2,0" Padding="5,2" FontSize="11"/>
+                            <Button Grid.Column="2" Name="Btn_CollapseAll" Content="Collapse" Margin="2,0,0,0" Padding="5,2" FontSize="11"/>
+                        </Grid>
+                    </Border>
+                    </Grid>
+                </Border>
+
+                <!-- Splitter -->
+                <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" Background="Transparent"/>
+
+                <!-- Right Pane: Dashboard & List -->
+                <Grid Grid.Column="2" Background="{DynamicResource WindowBrush}" Name="RightPane">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/> <!-- Header -->
+                        <RowDefinition Height="*"/>    <!-- List -->
+                    </Grid.RowDefinitions>
+
+                    <!-- Right Pane Header -->
+                    <Border Grid.Row="0" Padding="15">
+                        <StackPanel>
+                            <TextBlock Text="{Binding Name, TargetNullValue='Select a System'}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                                <TextBlock Text="Type: " Foreground="{DynamicResource TextLightBrush}"/>
+                                <TextBlock Text="{Binding Type}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" Margin="0,0,15,0" MinWidth="50"/>
+                                
+                                <TextBlock Text="Total: " Foreground="{DynamicResource TextLightBrush}"/>
+                                <TextBlock Text="{Binding DisplayValue}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" Margin="0,0,15,0" MinWidth="50"/>
+                                
+                                <TextBlock Text="Count: " Foreground="{DynamicResource TextLightBrush}"/>
+                                <TextBlock Text="{Binding Count}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Element List -->
+                    <DataGrid Grid.Row="1" Name="sysDataGrid" ItemsSource="{Binding GridRows}" Margin="10,0,10,10" BorderThickness="1"
+                              AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True"
+                              Background="{DynamicResource ControlBrush}" RowBackground="{DynamicResource ControlBrush}" 
+                              AlternatingRowBackground="{DynamicResource AltRowBrush}" Foreground="{DynamicResource TextBrush}"
+                              BorderBrush="{DynamicResource BorderBrush}" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource BorderBrush}">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="ID" Binding="{Binding Id}" Width="70"/>
+                            <DataGridTextColumn Header="Name" Binding="{Binding Name}" Width="200"/>
+                            <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="120"/>
+                            <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="60"/>
+                            <DataGridTextColumn Header="Value" Binding="{Binding DisplayValue}" Width="*"/>
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </Grid>
+            </Grid>
+
+            <!-- 4. Bottom Actions -->
+            <Border Grid.Row="3" Background="{DynamicResource ToolbarBrush}" Padding="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Visualization -->
+                    <StackPanel Orientation="Horizontal" Grid.Column="0">
+                        <Button Name="Btn_Visualize" Content="Colorize"/>
+                        <ComboBox Name="Cmb_Colors" Width="120" Margin="0,0,5,0" DisplayMemberPath="Name" VerticalContentAlignment="Center"/>
+                        <Button Name="Btn_ClearVisuals" Content="Reset Colors"/>
+                    </StackPanel>
+
+                </Grid>
+            </Border>
+
+            <!-- 4. Footer -->
+            <Border Grid.Row="4" Background="{DynamicResource FooterBrush}" Padding="10,0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+                <Grid>
+                    <TextBlock Name="statusLabel" Text="Ready." Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
