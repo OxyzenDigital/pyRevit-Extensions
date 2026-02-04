@@ -10,197 +10,33 @@ Description:
 import os
 import traceback
 import math
+import csv
+import datetime
 import clr
 clr.AddReference("System")
 clr.AddReference("PresentationCore")
 clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
-from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
 from System.Collections.Generic import List
-from System.Windows.Media import SolidColorBrush, Color as WpfColor, Colors
+from System.Windows.Media import SolidColorBrush, Color as WpfColor
 from System.Windows.Input import Cursors, Key
 from Autodesk.Revit.DB import (
     Transaction, BuiltInCategory, ElementId, FilteredElementCollector,
     OverrideGraphicSettings, Color, FillPatternElement, ElementTransformUtils, XYZ,
-    BuiltInParameter, ElementMulticategoryFilter, Line, StorageType, UnitUtils
+    BuiltInParameter, ElementMulticategoryFilter, Line, StorageType
 )
 from Autodesk.Revit.UI import TaskDialog, TaskDialogCommonButtons, TaskDialogResult
 from Autodesk.Revit.UI.Selection import ObjectType
 from pyrevit import forms, script, revit
 
-# Try to import UIThemeManager (Revit 2024+)
-try:
-    from Autodesk.Revit.UI import UIThemeManager, UITheme
-    HAS_THEME = True
-except ImportError:
-    HAS_THEME = False
-
-def is_dark_theme():
-    if HAS_THEME:
-        try:
-            if UIThemeManager.CurrentTheme == UITheme.Dark:
-                return True
-        except: pass
-    return False
+# Import modularized components
+from revit_utils import get_id, get_display_val_and_label, is_dark_theme, MEASURABLE_NAMES
+from data_model import NodeBase, MeasurementNode, CategoryNode, FamilyTypeNode, InstanceItem, ColorOption
 
 __title__ = "Quantity & Measures"
-__version__ = "0.1"
+__version__ = "0.2"
 __doc__ = "A Modal WPF tool to visualize and quantify visible elements."
 __context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
-
-# Helper for Revit 2024+ compatibility
-def get_id(element_id):
-    if hasattr(element_id, "Value"):
-        return element_id.Value
-    return element_id.IntegerValue
-
-def format_value(val):
-    """Formats a float to 2 decimal places."""
-    try:
-        return "{:.2f}".format(val)
-    except:
-        return str(val)
-
-# Whitelist of parameter names to aggregate (Case Insensitive check used later)
-MEASURABLE_NAMES = {"Area", "Volume", "Length", "Perimeter", "Width", "Thickness", "Height", "Diameter", "Cut Length"}
-
-# --- Data Model ---
-class ViewModelBase(INotifyPropertyChanged):
-    def __init__(self):
-        self._property_changed_handlers = []
-
-    def add_PropertyChanged(self, handler):
-        self._property_changed_handlers.append(handler)
-
-    def remove_PropertyChanged(self, handler):
-        if handler in self._property_changed_handlers:
-            self._property_changed_handlers.remove(handler)
-
-    def OnPropertyChanged(self, property_name):
-        args = PropertyChangedEventArgs(property_name)
-        for handler in self._property_changed_handlers:
-            handler(self, args)
-
-class NodeBase(ViewModelBase):
-    def __init__(self, name):
-        ViewModelBase.__init__(self)
-        self.Name = name
-        self.Id = None
-        self._is_checked = False
-        self._is_selected = False
-        self.IsExpanded = True
-        self.Children = []
-        self.Type = "Item"
-        self.Count = 0
-        self.Value = 0.0
-        self.FontWeight = "Normal"
-        self.UnitLabel = ""
-        self.AllElements = [] # Flat list of element IDs for highlighting
-        self.NetworkColor = SolidColorBrush(Colors.White if is_dark_theme() else Colors.Black)
-
-    @property
-    def IsChecked(self):
-        return self._is_checked
-
-    @IsChecked.setter
-    def IsChecked(self, value):
-        self._is_checked = value
-        self.OnPropertyChanged("IsChecked")
-
-    @property
-    def IsSelected(self):
-        return self._is_selected
-
-    @IsSelected.setter
-    def IsSelected(self, value):
-        self._is_selected = value
-        self.OnPropertyChanged("IsSelected")
-
-    @property
-    def DisplayValue(self):
-        return "{} {}".format(format_value(self.Value), self.UnitLabel).strip()
-
-    @property
-    def GridRows(self):
-        return self.Children
-
-class MeasurementNode(NodeBase):
-    def __init__(self, name):
-        NodeBase.__init__(self, name)
-        self.FontWeight = "Bold"
-        self.Type = "Measurement"
-        self.NetworkColor = SolidColorBrush(Colors.White if is_dark_theme() else Colors.Black)
-
-class CategoryNode(NodeBase):
-    def __init__(self, name):
-        NodeBase.__init__(self, name)
-        self.FontWeight = "SemiBold"
-        self.Type = "Category"
-        self.NetworkColor = SolidColorBrush(Colors.LightGray if is_dark_theme() else Colors.Gray)
-
-class FamilyTypeNode(NodeBase):
-    def __init__(self, name):
-        NodeBase.__init__(self, name)
-        self.FontWeight = "Normal"
-        self.Type = "Type"
-        self.NetworkColor = SolidColorBrush(Colors.LightGray if is_dark_theme() else Colors.Gray)
-        self.Instances = []
-
-    @property
-    def GridRows(self):
-        return self.Instances
-
-class InstanceItem(ViewModelBase):
-    """Represents a single row in the DataGrid when a Type is selected."""
-    def __init__(self, element, value, unit_label):
-        ViewModelBase.__init__(self)
-        self.Name = element.Name
-        self.Id = get_id(element.Id)
-        self.Value = value
-        self.UnitLabel = unit_label
-        
-        # Try to get Family Name for Type column
-        fam_name = element.Category.Name if element.Category else "Element"
-        p_fam = element.get_Parameter(BuiltInParameter.ELEM_FAMILY_PARAM)
-        if p_fam and p_fam.HasValue:
-            fam_name = p_fam.AsValueString()
-        self.Type = fam_name
-        self.Count = 1
-        self.Element = element
-    
-    @property
-    def DisplayValue(self):
-        return "{} {}".format(format_value(self.Value), self.UnitLabel).strip()
-
-class GridItem(ViewModelBase):
-    """Generic wrapper for DataGrid items."""
-    def __init__(self, name, type_name, count, value, unit_label):
-        ViewModelBase.__init__(self)
-        self.Name = name
-        self.Type = type_name
-        self.Count = count
-        self.Value = value
-        self.UnitLabel = unit_label
-
-    @property
-    def DisplayValue(self):
-        return "{} {}".format(format_value(self.Value), self.UnitLabel).strip()
-
-class ColorOption(ViewModelBase):
-    def __init__(self, name, r, g, b):
-        ViewModelBase.__init__(self)
-        self.Name = name
-        self.R = r
-        self.G = g
-        self.B = b
-        self.Brush = SolidColorBrush(WpfColor.FromRgb(r, g, b))
-        self.RevitColor = Color(r, g, b)
-
-    def __repr__(self):
-        return self.Name
-        
-    def ToString(self):
-        return self.Name
 
 # --- Main Window Class ---
 class SystemNetworkWindow(forms.WPFWindow):
@@ -215,6 +51,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         
         self.Btn_SelectAll.Click += self.select_all_click
         self.Btn_Clear.Click += self.clear_list_click
+        self.Btn_Export.Click += self.export_click
         self.Btn_ExpandAll.Click += self.expand_all_click
         self.Btn_CollapseAll.Click += self.collapse_all_click
         self.Btn_ScanView.Click += self.scan_view_click
@@ -235,6 +72,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_CollapseAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
+        self.Btn_Export.IsEnabled = False
         
         # Default Header
         self.set_default_header()
@@ -265,14 +103,7 @@ class SystemNetworkWindow(forms.WPFWindow):
 
     def apply_revit_theme(self):
         """Detects Revit theme and updates window resources if Dark."""
-        is_dark = False
-        if HAS_THEME:
-            try:
-                if UIThemeManager.CurrentTheme == UITheme.Dark:
-                    is_dark = True
-            except: pass
-        
-        if is_dark:
+        if is_dark_theme():
             # Define Modern Dark Theme Colors (Slate/Blue Palette)
             res = self.Resources
             res["WindowBrush"] = SolidColorBrush(WpfColor.FromRgb(31, 41, 55))      # #1F2937 (Gray-800)
@@ -346,6 +177,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         
         self.Btn_Visualize.IsEnabled = has_checked or has_selection
         self.Btn_ClearVisuals.IsEnabled = has_checked or has_selection
+        self.Btn_Export.IsEnabled = has_checked or has_selection
 
     def expand_all_click(self, sender, args):
         self._set_expansion_state(True)
@@ -401,6 +233,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_CollapseAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
+        self.Btn_Export.IsEnabled = False
         self.set_default_header()
 
     def scan_view_click(self, sender, args):
@@ -427,6 +260,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_SelectAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
+        self.Btn_Export.IsEnabled = False
         self.set_default_header()
 
         try:
@@ -463,12 +297,8 @@ class SystemNetworkWindow(forms.WPFWindow):
                         
                         if not is_measurable: continue
                         
-                        val = p.AsDouble()
+                        val, unit_label = get_display_val_and_label(p, self.doc)
                         if abs(val) < 0.0001: continue # Skip zero values
-                        
-                        # Get Unit Label (e.g. SF, FT) - Simplified
-                        # We can try to get it from the first item later or just hardcode based on name
-                        unit_label = ""
                         
                         cat_name = el.Category.Name
                         type_name = el.Name
@@ -502,6 +332,8 @@ class SystemNetworkWindow(forms.WPFWindow):
                         t_node.AllElements = [i.Id for i in instances]
                         # Store instances for DataGrid
                         t_node.Instances = instances 
+                        if instances:
+                            t_node.UnitLabel = instances[0].UnitLabel
                         
                         c_node.Children.append(t_node)
                         c_val += t_val
@@ -510,6 +342,8 @@ class SystemNetworkWindow(forms.WPFWindow):
                     
                     c_node.Value = c_val
                     c_node.Count = c_count
+                    if c_node.Children:
+                        c_node.UnitLabel = c_node.Children[0].UnitLabel
                     m_node.Children.append(c_node)
                     total_val += c_val
                     total_count += c_count
@@ -517,6 +351,8 @@ class SystemNetworkWindow(forms.WPFWindow):
                 
                 m_node.Value = total_val
                 m_node.Count = total_count
+                if m_node.Children:
+                    m_node.UnitLabel = m_node.Children[0].UnitLabel
                 root_nodes.append(m_node)
 
             self.systemTree.ItemsSource = root_nodes
@@ -527,6 +363,7 @@ class SystemNetworkWindow(forms.WPFWindow):
             self.Btn_SelectAll.IsEnabled = has_data
             self.Btn_ExpandAll.IsEnabled = has_data
             self.Btn_CollapseAll.IsEnabled = has_data
+            self.update_button_states()
         except Exception as e:
             err = traceback.format_exc()
             print(err)
@@ -548,20 +385,10 @@ class SystemNetworkWindow(forms.WPFWindow):
     def on_checkbox_click(self, sender, args):
         """Manually syncs CheckBox state to DataContext."""
         # With MVVM, the binding is TwoWay, so self.IsChecked updates automatically.
-        # We just need to handle the cascading logic.
         node = sender.DataContext
         if node:
-            # Cascade to children (Classification -> Systems)
-            if hasattr(node, "Children"):
-                for child in node.Children:
-                    child.IsChecked = node.IsChecked
-            
-            # Cascade Up (Child -> Parent)
-            if self.systemTree.ItemsSource:
-                # Need recursive check or simple 2-level check. 
-                # we rely on the user checking the parent to select all, which is implemented.
-                pass
-            
+            # Use recursive cascade check to ensure all children (including leaf nodes) are updated
+            self._cascade_check(node, node.IsChecked)
             self.update_button_states()
 
     def tree_selection_changed(self, sender, args):
@@ -867,6 +694,125 @@ class SystemNetworkWindow(forms.WPFWindow):
         finally:
             self.is_busy = False
             self.Cursor = Cursors.Arrow
+
+    def export_click(self, sender, args):
+        """Exports the current tree data to a CSV file."""
+        if not self.systemTree.ItemsSource:
+            return
+
+        # Check if any items are checked or selected
+        checked_items = self.get_checked_systems()
+        has_checked = len(checked_items) > 0
+        selected_node = self.systemTree.SelectedItem
+        
+        if not has_checked and not selected_node:
+            forms.alert("Please check or select items to export.")
+            return
+
+        # Generate Filename
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        prefix = "Quantities"
+        
+        if has_checked:
+            # Analyze checked items to determine common ancestry
+            measurements = set()
+            categories = set()
+            types = set()
+            checked_set = set(checked_items)
+            
+            for m_node in self.systemTree.ItemsSource:
+                for c_node in m_node.Children:
+                    for t_node in c_node.Children:
+                        if t_node in checked_set:
+                            measurements.add(m_node.Name)
+                            categories.add(c_node.Name)
+                            types.add(t_node.Name)
+            
+            if len(measurements) == 1:
+                m_name = list(measurements)[0]
+                if len(categories) == 1:
+                    c_name = list(categories)[0]
+                    if len(types) == 1:
+                        t_name = list(types)[0]
+                        prefix = "{}-{}-{}".format(m_name, c_name, t_name)
+                    else:
+                        prefix = "{}-{}".format(m_name, c_name)
+                else:
+                    prefix = m_name
+            else:
+                prefix = "Selected_Quantities"
+        elif selected_node:
+            # Construct hierarchical name (e.g. Width-Doors)
+            path_names = []
+            found = False
+            for m in self.systemTree.ItemsSource:
+                if m == selected_node:
+                    path_names = [m.Name]
+                    found = True
+                    break
+                for c in m.Children:
+                    if c == selected_node:
+                        path_names = [m.Name, c.Name]
+                        found = True
+                        break
+                    for t in c.Children:
+                        if t == selected_node:
+                            path_names = [m.Name, c.Name, t.Name]
+                            found = True
+                            break
+                    if found: break
+                if found: break
+            
+            if path_names:
+                prefix = "-".join(path_names)
+            else:
+                prefix = selected_node.Name
+            
+        # Sanitize
+        safe_prefix = "".join([c for c in prefix if c.isalnum() or c in (' ', '_', '-')]).strip()
+        default_name = "{}_{}.csv".format(safe_prefix, timestamp)
+
+        # Prompt for file save
+        dest_file = forms.save_file(file_ext='csv', default_name=default_name)
+        if not dest_file:
+            return
+
+        try:
+            with open(dest_file, 'wb') as f:
+                writer = csv.writer(f)
+                # Header
+                writer.writerow(['Measurement', 'Category', 'Type', 'Count', 'Value', 'Unit'])
+                
+                # Iterate Tree (Preserving Hierarchy Sequence)
+                for m_node in self.systemTree.ItemsSource:
+                    measurement_name = m_node.Name.encode('utf-8')
+                    # Check if parent is selected (implies all children exported if nothing checked)
+                    m_selected = (m_node == selected_node) and not has_checked
+                    
+                    for c_node in m_node.Children:
+                        category_name = c_node.Name.encode('utf-8')
+                        c_selected = (c_node == selected_node) and not has_checked
+                        
+                        for t_node in c_node.Children:
+                            # Export if:
+                            # 1. It is explicitly checked
+                            # 2. Nothing is checked AND (Parent is selected OR Itself is selected)
+                            t_selected = (t_node == selected_node) and not has_checked
+                            
+                            if t_node.IsChecked or m_selected or c_selected or t_selected:
+                                type_name = t_node.Name.encode('utf-8')
+                                count = str(t_node.Count)
+                                val = "{:.2f}".format(t_node.Value)
+                                unit = t_node.UnitLabel.encode('utf-8')
+                                
+                                writer.writerow([measurement_name, category_name, type_name, count, val, unit])
+            
+            self.statusLabel.Text = "Export successful: {}".format(os.path.basename(dest_file))
+            os.startfile(dest_file)
+        except Exception as e:
+            err = traceback.format_exc()
+            print(err)
+            self.statusLabel.Text = "Export failed. Check Output."
 
 if __name__ == '__main__':
     SystemNetworkWindow().ShowDialog()

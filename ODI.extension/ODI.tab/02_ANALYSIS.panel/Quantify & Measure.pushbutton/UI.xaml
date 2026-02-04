@@ -168,7 +168,8 @@
                 <Grid>
                     <StackPanel Orientation="Horizontal">
                         <Button Name="Btn_ScanView" Content="Scan View" FontWeight="Bold" Margin="0,0,10,0"/>
-                        <Button Name="Btn_Clear" Content="Clear List"/>
+                        <Button Name="Btn_Clear" Content="Clear List" Margin="0,0,10,0"/>
+                        <Button Name="Btn_Export" Content="Export CSV"/>
                     </StackPanel>
                     <CheckBox Name="Cb_AutoZoom" Content="Auto-Zoom" VerticalAlignment="Center" HorizontalAlignment="Right" IsChecked="True" Foreground="{DynamicResource TextBrush}"/>
                 </Grid>
