@@ -3,20 +3,14 @@
     {
       "materials": [
         {
-          "materialId": "osb_sheathing", 
-          "units": "SF", 
+          "materialId": "cmu_standard", 
+          "units": "Block", 
           "calculationItems": [
             {
               "type": "input", 
-              "value": 0.03125, 
-              "itemId": "sheets_per_sf", 
-              "label": "Sheets per SF"
-            }, 
-            {
-              "type": "input", 
-              "value": 32, 
-              "itemId": "screws_per_sheet", 
-              "label": "Screws needed per sheet"
+              "value": 1.125, 
+              "itemId": "units_per_sf", 
+              "label": "Blocks per SF"
             }, 
             {
               "type": "input", 
@@ -25,23 +19,17 @@
               "label": "Waste Factor (%)"
             }
           ], 
-          "name": "OSB Sheathing Panels"
+          "name": "CMU - Standard (8x8x16)"
         }, 
         {
-          "materialId": "metal_panels", 
-          "units": "SF", 
+          "materialId": "brick_modular", 
+          "units": "Brick", 
           "calculationItems": [
             {
               "type": "input", 
-              "value": 36, 
-              "itemId": "coverage_width", 
-              "label": "Panel effective coverage width (inches)"
-            }, 
-            {
-              "type": "input", 
-              "value": 4, 
-              "itemId": "clips_per_panel", 
-              "label": "Clips needed per panel"
+              "value": 6.75, 
+              "itemId": "units_per_sf", 
+              "label": "Bricks per SF"
             }, 
             {
               "type": "input", 
@@ -50,29 +38,23 @@
               "label": "Waste Factor (%)"
             }
           ], 
-          "name": "Metal Panels"
-        }
-      ], 
-      "categoryId": "skeleton", 
-      "name": "The Skeleton (Framing & Structure)"
-    }, 
-    {
-      "materials": [
+          "name": "Brick - Modular"
+        }, 
         {
-          "materialId": "drywall_panels", 
-          "units": "SF", 
+          "materialId": "paint_acrylic", 
+          "units": "Gal", 
           "calculationItems": [
             {
               "type": "input", 
-              "value": 0.03125, 
-              "itemId": "sheets_per_sf", 
-              "label": "Sheets per SF"
+              "value": 350, 
+              "itemId": "coverage_per_gal", 
+              "label": "Coverage (SF/Gal)"
             }, 
             {
               "type": "input", 
-              "value": 0.050000000000000003, 
-              "itemId": "mud_lbs_per_sf", 
-              "label": "Mud (lbs) per SF"
+              "value": 2, 
+              "itemId": "coats", 
+              "label": "Coats"
             }, 
             {
               "type": "input", 
@@ -81,11 +63,218 @@
               "label": "Waste Factor (%)"
             }
           ], 
-          "name": "Drywall Panels"
+          "name": "Paint - Acrylic Latex"
+        }, 
+        {
+          "materialId": "drywall_58", 
+          "units": "Sheet", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 32, 
+              "itemId": "sheet_area", 
+              "label": "Sheet Area (SF)"
+            }, 
+            {
+              "type": "input", 
+              "value": 10, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }, 
+            {
+              "type": "input", 
+              "value": 32, 
+              "itemId": "screws_per_sheet", 
+              "label": "Screws per Sheet"
+            }
+          ], 
+          "name": "Drywall - 5/8\" Fire Rated"
         }
       ], 
-      "categoryId": "face", 
-      "name": "The Face (Finishes)"
+      "categoryId": "OST_Walls", 
+      "name": "Walls"
+    }, 
+    {
+      "materials": [
+        {
+          "materialId": "shingles_asphalt", 
+          "units": "Bundle", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 3, 
+              "itemId": "bundles_per_sq", 
+              "label": "Bundles per Square (100 SF)"
+            }, 
+            {
+              "type": "input", 
+              "value": 10, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "Asphalt Shingles"
+        }, 
+        {
+          "materialId": "membrane_epdm", 
+          "units": "Roll", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 1000, 
+              "itemId": "roll_area", 
+              "label": "Roll Coverage (SF)"
+            }, 
+            {
+              "type": "input", 
+              "value": 1.1000000000000001, 
+              "itemId": "overlap_factor", 
+              "label": "Overlap Factor (1.x)"
+            }
+          ], 
+          "name": "EPDM Membrane"
+        }
+      ], 
+      "categoryId": "OST_Roofs", 
+      "name": "Roofs"
+    }, 
+    {
+      "materials": [
+        {
+          "materialId": "tile_ceramic_12x12", 
+          "units": "Tile", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 1.0, 
+              "itemId": "tiles_per_sf", 
+              "label": "Tiles per SF"
+            }, 
+            {
+              "type": "input", 
+              "value": 10, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "Ceramic Tile 12x12"
+        }, 
+        {
+          "materialId": "carpet_broadloom", 
+          "units": "SY", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 15, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "Broadloom Carpet"
+        }
+      ], 
+      "categoryId": "OST_Floors", 
+      "name": "Flooring"
+    }, 
+    {
+      "materials": [
+        {
+          "materialId": "act_2x2", 
+          "units": "Ctn", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 16, 
+              "itemId": "tiles_per_ctn", 
+              "label": "Tiles per Carton"
+            }, 
+            {
+              "type": "input", 
+              "value": 4, 
+              "itemId": "tile_area", 
+              "label": "Area per Tile (SF)"
+            }, 
+            {
+              "type": "input", 
+              "value": 5, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "ACT 2x2 Tiles"
+        }
+      ], 
+      "categoryId": "OST_Ceilings", 
+      "name": "Ceilings"
+    }, 
+    {
+      "materials": [
+        {
+          "materialId": "baseboard_rubber", 
+          "units": "Roll", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 120, 
+              "itemId": "roll_len", 
+              "label": "Roll Length (LF)"
+            }, 
+            {
+              "type": "input", 
+              "value": 5, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "Rubber Base"
+        }
+      ], 
+      "categoryId": "OST_Rooms", 
+      "name": "Rooms"
+    }, 
+    {
+      "materials": [
+        {
+          "materialId": "pipe_insul_fiberglass", 
+          "units": "LF", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 5, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "Fiberglass Insulation"
+        }
+      ], 
+      "categoryId": "OST_PipeCurves", 
+      "name": "Pipes"
+    }, 
+    {
+      "materials": [
+        {
+          "materialId": "duct_wrap", 
+          "units": "Roll", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 100, 
+              "itemId": "roll_sf", 
+              "label": "Roll Area (SF)"
+            }, 
+            {
+              "type": "input", 
+              "value": 10, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "Duct Wrap"
+        }
+      ], 
+      "categoryId": "OST_DuctCurves", 
+      "name": "Ducts"
     }
   ]
 }

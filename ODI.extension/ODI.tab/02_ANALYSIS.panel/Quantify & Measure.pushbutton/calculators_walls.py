@@ -1,18 +1,42 @@
 # -*- coding: utf-8 -*-
+import os
+import json
 from Autodesk.Revit.DB import BuiltInParameter
+
+SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'calculation_settings.json')
 
 class WallCMUCalculator:
     def __init__(self):
         self.name = "Wall Material Calculator"
         self.target_category = "Walls"
-        self.options = {
-            "Standard CMU (8x8x16)": 1.125, # 1 / 0.89 sqft
-            "Half-High CMU (4x8x16)": 2.25,
-            "Jumbo CMU (8x12x16)": 1.125,
-            "Modular Brick (4x2.6x8)": 6.75,
-            "Utility Brick (4x4x12)": 3.0
-        }
-        self.default_setting = "Standard CMU (8x8x16)"
+        self.options = {}
+        self.default_setting = ""
+        self.load_settings()
+
+    def load_settings(self):
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r') as f:
+                    data = json.load(f)
+                    for cat in data.get("categories", []):
+                        if cat.get("name") == "Walls":
+                            for grp in cat.get("groups", []):
+                                grp_name = grp.get("name", "")
+                                for typ in grp.get("types", []):
+                                    name = "{} - {}".format(grp_name, typ.get("name", ""))
+                                    # Find primary factor (first item or specific key)
+                                    factor = 1.0
+                                    for item in typ.get("calculationItems", []):
+                                        if "per_sf" in item.get("itemId", ""):
+                                            factor = float(item.get("value", 1.0))
+                                            break
+                                    self.options[name] = factor
+            except: pass
+        
+        if self.options:
+            self.default_setting = sorted(self.options.keys())[0]
+        else:
+            self.default_setting = "No Data"
 
     def calculate(self, element, setting_key):
         """Calculates material count based on Wall Area."""

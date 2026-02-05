@@ -7,7 +7,21 @@
         Foreground="{DynamicResource TextBrush}">
     
     <Window.Resources>
-        <!-- Styles inherited from Main Window via Code-behind injection or defaults -->
+        <!-- Default Colors (Light Theme) -->
+        <SolidColorBrush x:Key="WindowBrush" Color="#F3F3F3"/>
+        <SolidColorBrush x:Key="ControlBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#333333"/>
+        <SolidColorBrush x:Key="TextLightBrush" Color="#888888"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#CCCCCC"/>
+        <SolidColorBrush x:Key="ButtonBrush" Color="#DDDDDD"/>
+        <SolidColorBrush x:Key="HoverBrush" Color="#E5E5E5"/>
+        <SolidColorBrush x:Key="FooterBrush" Color="#EFEFEF"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#0078D7"/>
+        <SolidColorBrush x:Key="SelectionBrush" Color="#CCE8FF"/>
+        <SolidColorBrush x:Key="SelectionBorderBrush" Color="#0078D7"/>
+        <SolidColorBrush x:Key="SelectionTextBrush" Color="#000000"/>
+        <SolidColorBrush x:Key="InactiveSelectionBrush" Color="#E0E0E0"/>
+
         <Style TargetType="Button">
             <Setter Property="Background" Value="{DynamicResource ButtonBrush}"/>
             <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
@@ -37,6 +51,81 @@
             <Setter Property="Padding" Value="5"/>
             <Setter Property="BorderThickness" Value="1"/>
         </Style>
+        <!-- TreeView Item Style -->
+        <Style TargetType="TreeViewItem">
+            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+            <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TreeViewItem">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" MinWidth="19"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition/>
+                            </Grid.RowDefinitions>
+                            
+                            <ToggleButton x:Name="Expander" ClickMode="Press" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" Content="{TemplateBinding Header}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="Transparent" Height="16" Padding="5" Width="16">
+                                            <Path x:Name="ExpandPath" Data="M0,0 L0,6 L6,0 z" Fill="{DynamicResource TextLightBrush}" Stroke="{DynamicResource TextLightBrush}">
+                                                <Path.RenderTransform>
+                                                    <RotateTransform Angle="135" CenterX="3" CenterY="3"/>
+                                                </Path.RenderTransform>
+                                            </Path>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter Property="RenderTransform" TargetName="ExpandPath">
+                                                    <Setter.Value>
+                                                        <RotateTransform Angle="180" CenterX="3" CenterY="3"/>
+                                                    </Setter.Value>
+                                                </Setter>
+                                                <Setter Property="Fill" TargetName="ExpandPath" Value="{DynamicResource AccentBrush}"/>
+                                                <Setter Property="Stroke" TargetName="ExpandPath" Value="{DynamicResource AccentBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            
+                            <Border x:Name="Bd" Grid.Column="1" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="true" CornerRadius="2">
+                                <ContentPresenter x:Name="PART_Header" ContentSource="Header" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                            </Border>
+                            <ItemsPresenter x:Name="ItemsHost" Grid.Column="1" Grid.Row="1"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsExpanded" Value="False">
+                                <Setter Property="Visibility" TargetName="ItemsHost" Value="Collapsed"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter Property="Background" TargetName="Bd" Value="{DynamicResource SelectionBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="Bd" Value="{DynamicResource SelectionBorderBrush}"/>
+                                <Setter Property="TextElement.Foreground" TargetName="PART_Header" Value="{DynamicResource SelectionTextBrush}"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="IsSelectionActive" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter Property="Background" TargetName="Bd" Value="{DynamicResource InactiveSelectionBrush}"/>
+                                <Setter Property="BorderBrush" TargetName="Bd" Value="Transparent"/>
+                                <Setter Property="TextElement.Foreground" TargetName="PART_Header" Value="{DynamicResource TextBrush}"/>
+                            </MultiTrigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource TextLightBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
     </Window.Resources>
 
     <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
@@ -64,24 +153,34 @@
 
                 <!-- Left: Categories Tree -->
                 <Border Grid.Column="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Background="{DynamicResource ControlBrush}">
-                    <TreeView Name="tvCategories" Background="Transparent" BorderThickness="0" Padding="10" ItemsSource="{Binding Categories}">
-                        <TreeView.ItemTemplate>
-                            <HierarchicalDataTemplate ItemsSource="{Binding Materials}">
-                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,5"/>
-                                <HierarchicalDataTemplate.ItemTemplate>
-                                    <DataTemplate>
-                                        <TextBlock Text="{Binding Name}" Margin="0,2"/>
-                                    </DataTemplate>
-                                </HierarchicalDataTemplate.ItemTemplate>
-                            </HierarchicalDataTemplate>
-                        </TreeView.ItemTemplate>
-                        <TreeView.ItemContainerStyle>
-                            <Style TargetType="TreeViewItem">
-                                <Setter Property="IsExpanded" Value="True"/>
-                                <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
-                            </Style>
-                        </TreeView.ItemContainerStyle>
-                    </TreeView>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TreeView Grid.Row="0" Name="tvCategories" Background="Transparent" BorderThickness="0" Padding="5" ItemsSource="{Binding Categories}">
+                            <TreeView.ItemTemplate>
+                                <HierarchicalDataTemplate ItemsSource="{Binding Groups}">
+                                    <TextBlock Text="{Binding Name}" FontWeight="Bold" Margin="0,5"/>
+                                    <HierarchicalDataTemplate.ItemTemplate>
+                                        <HierarchicalDataTemplate ItemsSource="{Binding Types}">
+                                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,2"/>
+                                            <HierarchicalDataTemplate.ItemTemplate>
+                                                <DataTemplate>
+                                                    <TextBlock Text="{Binding Name}" Margin="0,2"/>
+                                                </DataTemplate>
+                                            </HierarchicalDataTemplate.ItemTemplate>
+                                        </HierarchicalDataTemplate>
+                                    </HierarchicalDataTemplate.ItemTemplate>
+                                </HierarchicalDataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
+                        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Center" Margin="5">
+                            <Button Name="Btn_AddGroup" Content="+ Group" FontSize="10" Padding="5,2"/>
+                            <Button Name="Btn_AddType" Content="+ Type" FontSize="10" Padding="5,2"/>
+                            <Button Name="Btn_Delete" Content="Delete" FontSize="10" Padding="5,2"/>
+                        </StackPanel>
+                    </Grid>
                 </Border>
 
                 <!-- Right: Settings Form -->
@@ -89,18 +188,24 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
                     <!-- Selection Header -->
                     <StackPanel Grid.Row="0" Margin="0,0,0,20">
-                        <TextBlock Text="{Binding SelectedMaterial.Name, TargetNullValue='Select a Material'}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}"/>
-                        <TextBlock Text="{Binding SelectedMaterial.Units, StringFormat='Base Unit: {0}'}" Foreground="{DynamicResource TextLightBrush}" Margin="0,5,0,0">
+                        <TextBox Text="{Binding SelectedType.Name, UpdateSourceTrigger=PropertyChanged}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Background="Transparent" BorderThickness="0"/>
+                        <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
+                            <TextBlock Text="Unit: " Foreground="{DynamicResource TextLightBrush}"/>
+                            <TextBox Text="{Binding SelectedType.Units, UpdateSourceTrigger=PropertyChanged}" Foreground="{DynamicResource TextLightBrush}" Background="Transparent" BorderThickness="0,0,0,1" MinWidth="50"/>
+                        </StackPanel>
+                        
+                        <TextBlock Text="Select a Type to edit properties" Foreground="{DynamicResource TextLightBrush}" Margin="0,10,0,0">
                             <TextBlock.Style>
                                 <Style TargetType="TextBlock">
-                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Setter Property="Visibility" Value="Collapsed"/>
                                     <Style.Triggers>
-                                        <DataTrigger Binding="{Binding SelectedMaterial}" Value="{x:Null}">
-                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        <DataTrigger Binding="{Binding SelectedType}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Visible"/>
                                         </DataTrigger>
                                     </Style.Triggers>
                                 </Style>
@@ -110,21 +215,39 @@
 
                     <!-- Dynamic Inputs -->
                     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-                        <ItemsControl ItemsSource="{Binding SelectedMaterial.CalculationItems}">
+                        <ItemsControl ItemsSource="{Binding SelectedType.CalculationItems}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Grid Margin="0,0,0,15">
                                         <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="*"/> <!-- Label -->
                                             <ColumnDefinition Width="100"/>
+                                            <ColumnDefinition Width="30"/> <!-- Delete -->
                                         </Grid.ColumnDefinitions>
                                         <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}"/>
                                         <TextBox Grid.Column="1" Text="{Binding Value}" HorizontalContentAlignment="Right"/>
+                                        <Button Grid.Column="2" Content="-" FontSize="14" FontWeight="Bold" Padding="0" Margin="5,0,0,0" 
+                                                Command="{Binding DataContext.RemoveFieldCommand, RelativeSource={RelativeSource AncestorType=Window}}" 
+                                                CommandParameter="{Binding}" ToolTip="Remove Field"/>
                                     </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
+                    
+                    <!-- Add Field Button -->
+                    <Button Grid.Row="2" Name="Btn_AddField" Content="+ Add Field" HorizontalAlignment="Left" Margin="0,10,0,0" FontSize="11">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+                                <Setter Property="Visibility" Value="Visible"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding SelectedType}" Value="{x:Null}">
+                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
                 </Grid>
             </Grid>
 
