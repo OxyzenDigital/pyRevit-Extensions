@@ -39,7 +39,7 @@ from calculators_walls import WallCMUCalculator
 from settings_logic import SettingsWindow
 
 __title__ = "Quantity & Measures"
-__version__ = "0.3"
+__version__ = "1.0"
 __doc__ = """A Modal WPF tool to visualize, quantify, and estimate materials for visible elements.
 Features:
 - Quantify: Aggregate Length, Area, Volume by Category/Type.
@@ -447,11 +447,11 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_ExpandAll.IsEnabled = False
         self.Btn_CollapseAll.IsEnabled = False
         self.Btn_Visualize.IsEnabled = False
-        self.Btn_ClearVisuals.IsEnabled = False
         self.Btn_Export.IsEnabled = False
         self.Btn_Isolate.IsEnabled = False
         self.Btn_Isolate.Content = "Isolate"
         self.set_default_header()
+        self.update_button_states()
 
     def scan_view_click(self, sender, args):
         """Scans all pipe elements in the active view."""
@@ -1177,6 +1177,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         finally:
             self.is_busy = False
             self.Cursor = Cursors.Arrow
+            self.update_button_states()
 
     def refresh_tree_colors(self):
         """Re-calculates aggregated colors for the entire tree."""
@@ -1261,6 +1262,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         finally:
             self.is_busy = False
             self.Cursor = Cursors.Arrow
+            self.update_button_states()
 
     def export_click(self, sender, args):
         """Exports the current tree data to a CSV file."""
