@@ -23,7 +23,7 @@ from System.Windows.Input import Cursors, Key
 from Autodesk.Revit.DB import (
     Transaction, BuiltInCategory, ElementId, FilteredElementCollector,
     OverrideGraphicSettings, Color, FillPatternElement, ElementTransformUtils, XYZ,
-    BuiltInParameter, ElementMulticategoryFilter, Line, StorageType
+    BuiltInParameter, ElementMulticategoryFilter, Line, StorageType, TemporaryViewMode
 )
 from Autodesk.Revit.UI import TaskDialog, TaskDialogCommonButtons, TaskDialogResult
 from Autodesk.Revit.UI.Selection import ObjectType
@@ -32,10 +32,17 @@ from pyrevit import forms, script, revit
 # Import modularized components
 from revit_utils import get_id, get_display_val_and_label, is_dark_theme, MEASURABLE_NAMES
 from data_model import NodeBase, MeasurementNode, CategoryNode, FamilyTypeNode, InstanceItem, ColorOption
+from calculators_walls import WallCMUCalculator
+from settings_logic import SettingsWindow
 
 __title__ = "Quantity & Measures"
-__version__ = "0.2"
-__doc__ = "A Modal WPF tool to visualize and quantify visible elements."
+__version__ = "0.3"
+__doc__ = """A Modal WPF tool to visualize, quantify, and estimate materials for visible elements.
+Features:
+- Quantify: Aggregate Length, Area, Volume by Category/Type.
+- Calculate: Estimate material requirements (e.g., CMU/Brick count) based on configurable settings.
+- Visualize: Colorize or Isolate elements for visual verification.
+- Export: Export quantified data to CSV."""
 __context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 
 # --- Main Window Class ---
@@ -58,6 +65,8 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_Visualize.Click += self.visualize_click
         self.Btn_ClearVisuals.Click += self.reset_visuals_click
         self.sysDataGrid.SelectionChanged += self.grid_selection_changed
+        self.Btn_Settings.Click += self.settings_click
+        self.Btn_Isolate.Click += self.isolate_click
         
         # Handle TreeView Selection via ItemContainerStyle Binding
         # We no longer use SelectedItemChanged, but we can listen to property changes if needed.
@@ -73,6 +82,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
         self.Btn_Export.IsEnabled = False
+        self.Btn_Isolate.IsEnabled = False
         
         # Default Header
         self.set_default_header()
@@ -87,7 +97,16 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.disabled_filters = [] # Track filters we disable to restore them later
         self.populate_colors()
 
+        # Initialize Calculators
+        self.wall_calculator = WallCMUCalculator()
+        self.calc_settings = {"Walls": self.wall_calculator.default_setting}
+
         self.apply_revit_theme()
+
+        # Check for pre-selection
+        sel_ids = self.uidoc.Selection.GetElementIds()
+        if sel_ids.Count > 0:
+            self.analyze_selection(sel_ids)
 
     def set_default_header(self):
         default_node = NodeBase("Quantity & Measures")
@@ -178,6 +197,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_Visualize.IsEnabled = has_checked or has_selection
         self.Btn_ClearVisuals.IsEnabled = has_checked or has_selection
         self.Btn_Export.IsEnabled = has_checked or has_selection
+        self.Btn_Isolate.Content = "Isolate"
 
     def expand_all_click(self, sender, args):
         self._set_expansion_state(True)
@@ -234,6 +254,8 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
         self.Btn_Export.IsEnabled = False
+        self.Btn_Isolate.IsEnabled = False
+        self.Btn_Isolate.Content = "Isolate"
         self.set_default_header()
 
     def scan_view_click(self, sender, args):
@@ -243,6 +265,7 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Cursor = Cursors.Wait
         
         try:
+            self.uidoc.Selection.SetElementIds(List[ElementId]())
             self.analyze_view()
         except Exception as e:
             err = traceback.format_exc()
@@ -253,7 +276,21 @@ class SystemNetworkWindow(forms.WPFWindow):
             self.Cursor = Cursors.Arrow
             
     def analyze_view(self):
-        """Core logic to filter selection, run BFS, and populate Grid."""
+        """Analyzes all visible elements in the active view."""
+        collector = FilteredElementCollector(self.doc, self.doc.ActiveView.Id).WhereElementIsNotElementType()
+        elements = collector.ToElements()
+        self.process_elements(elements)
+
+    def analyze_selection(self, element_ids):
+        """Analyzes a specific set of elements."""
+        elements = []
+        for eid in element_ids:
+            el = self.doc.GetElement(eid)
+            if el: elements.append(el)
+        self.process_elements(elements)
+
+    def process_elements(self, elements):
+        """Core logic to aggregate quantities from a list of elements."""
         # Reset UI State
         self.systemTree.ItemsSource = None
         self.Btn_SelectAll.Content = "Select All"
@@ -261,13 +298,11 @@ class SystemNetworkWindow(forms.WPFWindow):
         self.Btn_Visualize.IsEnabled = False
         self.Btn_ClearVisuals.IsEnabled = False
         self.Btn_Export.IsEnabled = False
+        self.Btn_Isolate.IsEnabled = False
+        self.Btn_Isolate.Content = "Isolate"
         self.set_default_header()
 
         try:
-            # 1. Collect Visible Elements
-            collector = FilteredElementCollector(self.doc, self.doc.ActiveView.Id).WhereElementIsNotElementType()
-            elements = collector.ToElements()
-            
             # Structure: { ParamName: { CategoryName: { TypeName: [InstanceItem] } } }
             tree_data = {}
             
@@ -302,12 +337,17 @@ class SystemNetworkWindow(forms.WPFWindow):
                         
                         cat_name = el.Category.Name
                         type_name = el.Name
+
+                        # Run Calculation if applicable
+                        calc_val = "-"
+                        if cat_name == "Walls":
+                            calc_val = self.wall_calculator.calculate(el, self.calc_settings["Walls"])
                         
                         if p_name not in tree_data: tree_data[p_name] = {}
                         if cat_name not in tree_data[p_name]: tree_data[p_name][cat_name] = {}
                         if type_name not in tree_data[p_name][cat_name]: tree_data[p_name][cat_name][type_name] = []
                         
-                        tree_data[p_name][cat_name][type_name].append(InstanceItem(el, val, unit_label))
+                        tree_data[p_name][cat_name][type_name].append(InstanceItem(el, val, unit_label, calc_val))
 
             # 2. Build Tree Nodes
             root_nodes = []
@@ -364,6 +404,7 @@ class SystemNetworkWindow(forms.WPFWindow):
             self.Btn_ExpandAll.IsEnabled = has_data
             self.Btn_CollapseAll.IsEnabled = has_data
             self.update_button_states()
+            self.Btn_Isolate.IsEnabled = has_data
         except Exception as e:
             err = traceback.format_exc()
             print(err)
@@ -813,6 +854,82 @@ class SystemNetworkWindow(forms.WPFWindow):
             err = traceback.format_exc()
             print(err)
             self.statusLabel.Text = "Export failed. Check Output."
+
+    def settings_click(self, sender, args):
+        """Opens a dialog to configure calculation settings."""
+        win = SettingsWindow()
+        win.ShowDialog()
+        
+        # After window closes, we can trigger a recalculation if needed.
+        # Currently, the calculators need to be updated to read from the new JSON.
+        # For now, we just notify the user.
+        self.statusLabel.Text = "Settings saved."
+
+    def recalculate_all(self):
+        """Iterates through existing tree and updates calculated values."""
+        if not self.systemTree.ItemsSource: return
+        
+        for m_node in self.systemTree.ItemsSource:
+            for c_node in m_node.Children:
+                if c_node.Name == "Walls":
+                    for t_node in c_node.Children:
+                        for instance in t_node.Instances:
+                            # Recalculate
+                            new_val = self.wall_calculator.calculate(instance.Element, self.calc_settings["Walls"])
+                            instance.CalculatedValue = new_val
+
+    def isolate_click(self, sender, args):
+        """Isolates checked, selected, or all listed elements in the active view."""
+        if self.is_busy: return
+
+        # Toggle Logic
+        if self.Btn_Isolate.Content == "Unisolate":
+            try:
+                with Transaction(self.doc, "Reset Isolate") as t:
+                    t.Start()
+                    self.doc.ActiveView.DisableTemporaryViewMode(TemporaryViewMode.TemporaryHideIsolate)
+                    t.Commit()
+                self.Btn_Isolate.Content = "Isolate"
+            except Exception as e:
+                print("Unisolate Error: {}".format(e))
+            return
+        
+        ids_to_isolate = set()
+        
+        # 1. Checked Items
+        checked = self.get_checked_systems()
+        if checked:
+            for node in checked:
+                ids_to_isolate.update(node.AllElements)
+        
+        # 2. Selected Item (if nothing checked)
+        elif self.systemTree.SelectedItem:
+            node = self.systemTree.SelectedItem
+            if hasattr(node, "AllElements"):
+                ids_to_isolate.update(node.AllElements)
+                
+        # 3. All Items (if nothing checked or selected)
+        elif self.systemTree.ItemsSource:
+            for m_node in self.systemTree.ItemsSource:
+                ids_to_isolate.update(m_node.AllElements)
+                
+        if not ids_to_isolate:
+            forms.alert("No elements found to isolate.")
+            return
+            
+        try:
+            elem_ids = List[ElementId]()
+            for i in ids_to_isolate:
+                try: elem_ids.Add(ElementId(i))
+                except: pass
+
+            with Transaction(self.doc, "Isolate Elements") as t:
+                t.Start()
+                self.doc.ActiveView.IsolateElementsTemporary(elem_ids)
+                t.Commit()
+            self.Btn_Isolate.Content = "Unisolate"
+        except Exception as e:
+            print("Isolate Error: {}".format(e))
 
 if __name__ == '__main__':
     SystemNetworkWindow().ShowDialog()

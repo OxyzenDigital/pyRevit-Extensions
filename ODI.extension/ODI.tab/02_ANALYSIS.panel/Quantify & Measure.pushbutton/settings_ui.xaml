@@ -1,0 +1,140 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Calculation Settings" Height="500" Width="800"
+        WindowStartupLocation="CenterScreen"
+        WindowStyle="None" AllowsTransparency="True" ResizeMode="CanResizeWithGrip"
+        Background="{DynamicResource WindowBrush}"
+        Foreground="{DynamicResource TextBrush}">
+    
+    <Window.Resources>
+        <!-- Styles inherited from Main Window via Code-behind injection or defaults -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource ButtonBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="15,6"/>
+            <Setter Property="Margin" Value="5,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="3" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="Padding" Value="5"/>
+            <Setter Property="BorderThickness" Value="1"/>
+        </Style>
+    </Window.Resources>
+
+    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/> <!-- Header -->
+                <RowDefinition Height="*"/>    <!-- Content -->
+                <RowDefinition Height="50"/>   <!-- Footer -->
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <Border Name="HeaderDrag" Grid.Row="0" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
+                <Grid Margin="15,0">
+                    <TextBlock Text="Calculation Settings" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
+                    <Button Name="Btn_Close" Content="✕" HorizontalAlignment="Right" Background="Transparent" Padding="5" Margin="0"/>
+                </Grid>
+            </Border>
+
+            <!-- Content -->
+            <Grid Grid.Row="1">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="280"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Left: Categories Tree -->
+                <Border Grid.Column="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,0" Background="{DynamicResource ControlBrush}">
+                    <TreeView Name="tvCategories" Background="Transparent" BorderThickness="0" Padding="10" ItemsSource="{Binding Categories}">
+                        <TreeView.ItemTemplate>
+                            <HierarchicalDataTemplate ItemsSource="{Binding Materials}">
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" Margin="0,5"/>
+                                <HierarchicalDataTemplate.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Name}" Margin="0,2"/>
+                                    </DataTemplate>
+                                </HierarchicalDataTemplate.ItemTemplate>
+                            </HierarchicalDataTemplate>
+                        </TreeView.ItemTemplate>
+                        <TreeView.ItemContainerStyle>
+                            <Style TargetType="TreeViewItem">
+                                <Setter Property="IsExpanded" Value="True"/>
+                                <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+                            </Style>
+                        </TreeView.ItemContainerStyle>
+                    </TreeView>
+                </Border>
+
+                <!-- Right: Settings Form -->
+                <Grid Grid.Column="1" Background="{DynamicResource WindowBrush}" Margin="20">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <!-- Selection Header -->
+                    <StackPanel Grid.Row="0" Margin="0,0,0,20">
+                        <TextBlock Text="{Binding SelectedMaterial.Name, TargetNullValue='Select a Material'}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}"/>
+                        <TextBlock Text="{Binding SelectedMaterial.Units, StringFormat='Base Unit: {0}'}" Foreground="{DynamicResource TextLightBrush}" Margin="0,5,0,0">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding SelectedMaterial}" Value="{x:Null}">
+                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                    </StackPanel>
+
+                    <!-- Dynamic Inputs -->
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <ItemsControl ItemsSource="{Binding SelectedMaterial.CalculationItems}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="0,0,0,15">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="100"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Text="{Binding Label}" VerticalAlignment="Center" TextWrapping="Wrap" Foreground="{DynamicResource TextBrush}"/>
+                                        <TextBox Grid.Column="1" Text="{Binding Value}" HorizontalContentAlignment="Right"/>
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Grid>
+            </Grid>
+
+            <!-- Footer -->
+            <Border Grid.Row="2" Background="{DynamicResource FooterBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0">
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="15,0">
+                    <Button Name="Btn_Save" Content="Save Changes" FontWeight="Bold" Background="{DynamicResource AccentBrush}" Foreground="White"/>
+                    <Button Name="Btn_Cancel" Content="Cancel"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Border>
+</Window>

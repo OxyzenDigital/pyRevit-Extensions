@@ -171,7 +171,10 @@
                         <Button Name="Btn_Clear" Content="Clear List" Margin="0,0,10,0"/>
                         <Button Name="Btn_Export" Content="Export CSV"/>
                     </StackPanel>
-                    <CheckBox Name="Cb_AutoZoom" Content="Auto-Zoom" VerticalAlignment="Center" HorizontalAlignment="Right" IsChecked="True" Foreground="{DynamicResource TextBrush}"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Button Name="Btn_Isolate" Content="Isolate" Margin="0,0,10,0" Padding="8,2"/>
+                        <CheckBox Name="Cb_AutoZoom" Content="Auto-Zoom" VerticalAlignment="Center" IsChecked="True" Foreground="{DynamicResource TextBrush}"/>
+                    </StackPanel>
                 </Grid>
             </Border>
 
@@ -248,8 +251,17 @@
 
                     <!-- Right Pane Header -->
                     <Border Grid.Row="0" Padding="15">
-                        <StackPanel>
-                            <TextBlock Text="{Binding Name, TargetNullValue='Select a System'}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}"/>
+                        <StackPanel Orientation="Vertical">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding Name, TargetNullValue='Select a System'}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}"/>
+                                <!-- Settings Button -->
+                                <Button Grid.Column="1" Name="Btn_Settings" Content="⚙ Settings" FontSize="11" Padding="8,2" Visibility="Visible"/>
+                            </Grid>
+                            
                             <StackPanel Orientation="Horizontal" Margin="0,5,0,0">
                                 <TextBlock Text="Type: " Foreground="{DynamicResource TextLightBrush}"/>
                                 <TextBlock Text="{Binding Type}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" Margin="0,0,15,0" MinWidth="50"/>
@@ -275,6 +287,7 @@
                             <DataGridTextColumn Header="Type" Binding="{Binding Type}" Width="120"/>
                             <DataGridTextColumn Header="Count" Binding="{Binding Count}" Width="60"/>
                             <DataGridTextColumn Header="Value" Binding="{Binding DisplayValue}" Width="*"/>
+                            <DataGridTextColumn Header="Calculated Qty" Binding="{Binding CalculatedValue}" Width="100"/>
                         </DataGrid.Columns>
                     </DataGrid>
                 </Grid>
