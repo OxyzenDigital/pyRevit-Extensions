@@ -1,5 +1,17 @@
 # Changelog - Quantity & Measures
 
+## [v0.3] - 2025-02-04
+### Added
+- **Calculation Engine:** Implemented modular calculation logic.
+  - Added Wall Material Calculator (CMU, Brick) based on Area.
+  - Added `Calculated Qty` column to the data grid.
+- **Settings UI:** Added a dedicated configuration window for calculation parameters.
+  - Settings are persisted in `calculation_settings.json`.
+- **Isolation Tool:** Added Isolate/Unisolate button to focus on specific elements/groups.
+- **Workflow:**
+  - Added support for pre-selected elements on startup.
+  - "Scan View" now clears current selection for a fresh start.
+
 ## [v0.2] - 2025-02-04
 ### Added
 - **Export to CSV:** Added functionality to export quantified data to CSV.

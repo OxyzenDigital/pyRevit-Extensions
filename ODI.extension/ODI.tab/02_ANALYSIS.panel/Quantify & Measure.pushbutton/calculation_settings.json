@@ -1,0 +1,91 @@
+{
+  "categories": [
+    {
+      "materials": [
+        {
+          "materialId": "osb_sheathing", 
+          "units": "SF", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 0.03125, 
+              "itemId": "sheets_per_sf", 
+              "label": "Sheets per SF"
+            }, 
+            {
+              "type": "input", 
+              "value": 32, 
+              "itemId": "screws_per_sheet", 
+              "label": "Screws needed per sheet"
+            }, 
+            {
+              "type": "input", 
+              "value": 10, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "OSB Sheathing Panels"
+        }, 
+        {
+          "materialId": "metal_panels", 
+          "units": "SF", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 36, 
+              "itemId": "coverage_width", 
+              "label": "Panel effective coverage width (inches)"
+            }, 
+            {
+              "type": "input", 
+              "value": 4, 
+              "itemId": "clips_per_panel", 
+              "label": "Clips needed per panel"
+            }, 
+            {
+              "type": "input", 
+              "value": 5, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "Metal Panels"
+        }
+      ], 
+      "categoryId": "skeleton", 
+      "name": "The Skeleton (Framing & Structure)"
+    }, 
+    {
+      "materials": [
+        {
+          "materialId": "drywall_panels", 
+          "units": "SF", 
+          "calculationItems": [
+            {
+              "type": "input", 
+              "value": 0.03125, 
+              "itemId": "sheets_per_sf", 
+              "label": "Sheets per SF"
+            }, 
+            {
+              "type": "input", 
+              "value": 0.050000000000000003, 
+              "itemId": "mud_lbs_per_sf", 
+              "label": "Mud (lbs) per SF"
+            }, 
+            {
+              "type": "input", 
+              "value": 10, 
+              "itemId": "waste_factor", 
+              "label": "Waste Factor (%)"
+            }
+          ], 
+          "name": "Drywall Panels"
+        }
+      ], 
+      "categoryId": "face", 
+      "name": "The Face (Finishes)"
+    }
+  ]
+}

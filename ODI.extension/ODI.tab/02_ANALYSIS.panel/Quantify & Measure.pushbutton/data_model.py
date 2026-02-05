@@ -101,12 +101,13 @@ class FamilyTypeNode(NodeBase):
 
 class InstanceItem(ViewModelBase):
     """Represents a single row in the DataGrid when a Type is selected."""
-    def __init__(self, element, value, unit_label):
+    def __init__(self, element, value, unit_label, calculated_val="-"):
         ViewModelBase.__init__(self)
         self.Name = element.Name
         self.Id = get_id(element.Id)
         self.Value = value
         self.UnitLabel = unit_label
+        self._calculated_value = calculated_val
         
         # Try to get Family Name for Type column
         fam_name = element.Category.Name if element.Category else "Element"
@@ -120,6 +121,15 @@ class InstanceItem(ViewModelBase):
     @property
     def DisplayValue(self):
         return "{} {}".format(format_value(self.Value), self.UnitLabel).strip()
+        
+    @property
+    def CalculatedValue(self):
+        return self._calculated_value
+
+    @CalculatedValue.setter
+    def CalculatedValue(self, val):
+        self._calculated_value = val
+        self.OnPropertyChanged("CalculatedValue")
 
 class ColorOption(ViewModelBase):
     def __init__(self, name, r, g, b):
