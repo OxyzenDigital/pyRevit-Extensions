@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*- 
-# Grading Assistant v1.0
-# Developed by Oxyzen Digital
-# Description: Advanced Toposolid grading tool with sculpting, edging, and auto-triangulation features.
+__title__ = "Grading Assistant"
+__doc__ = "Advanced Toposolid grading tool with sculpting, edging, and auto-triangulation features."
+__author__ = "Oxyzen Digital"
+__context__ = "doc-project"
 
-__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 import sys
 import os
 import json

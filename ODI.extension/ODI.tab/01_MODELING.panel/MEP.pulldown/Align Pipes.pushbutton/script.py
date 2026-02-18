@@ -57,6 +57,7 @@ from pyrevit import revit, script, forms
 __title__ = "Align Pipes"
 __doc__ = "Aligns multiple pipes to a reference pipe in the XY plane (Plan View)."
 __version__ = "1.3"
+__context__ = "doc-project"
 
 # --- Configuration ---
 TOLERANCE = 0.01 # Tolerance for parallel check (radians)

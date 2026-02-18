@@ -1,3 +1,9 @@
+# -*- coding: utf-8 -*-
+__title__ = "Match Guide Grid"
+__doc__ = "Matches Guide Grid from one sheet to another."
+__author__ = "ODI"
+__context__ = "doc-project"
+
 from pyrevit import revit, DB, script, forms, output
 
 logger = script.get_logger()

@@ -1,13 +1,21 @@
+# -*- coding: utf-8 -*-
 """Creates a specialty equipment schedule."""
 
 __title__ = "Specialty\nEquipment\nSchedule"
 __doc__ = "Creates a schedule of all specialty equipment with Type, Comments, Count and Level"
 __author__ = "ODI"
+__context__ = "doc-project"
 
-from Autodesk.Revit.DB import *
+from Autodesk.Revit.DB import (
+    BuiltInCategory,
+    ElementId,
+    FilteredElementCollector,
+    ScheduleFieldType,
+    ViewSchedule
+)
 from pyrevit import revit, forms
 
-doc = __revit__.ActiveUIDocument.Document
+doc = revit.doc
 
 def create_specialty_schedule(doc, schedule_name="Specialty Equipment Schedule"):
     """Creates a new specialty equipment schedule."""

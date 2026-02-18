@@ -6,6 +6,7 @@ Calculates Cut and Fill volumes for Toposolids in the project.
 __title__ = "Cut and Fill"
 __version__ = "2.1"
 __author__ = "Oxyzen Digital"
+__context__ = "doc-project"
 
 import json
 import os
