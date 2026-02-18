@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
-"""
-Quantity & Measures
-
-Description:
-    A Modal WPF tool to scan visible elements in the active view and aggregate 
-    measurable quantities (Area, Volume, Length, etc.) by Category and Type.
-"""
+__title__ = "Quantity & Measures"
+__version__ = "1.0"
+__doc__ = """A Modal WPF tool to visualize, quantify, and estimate materials for visible elements.
+Features:
+- Quantify: Aggregate Length, Area, Volume by Category/Type.
+- Calculate: Estimate material requirements (e.g., CMU/Brick count) based on configurable settings.
+- Visualize: Colorize or Isolate elements for visual verification.
+- Export: Export quantified data to CSV."""
+__author__ = "ODI"
+__context__ = "doc-project"
 
 import os
 import traceback
@@ -37,16 +40,6 @@ from revit_utils import get_id, get_display_val_and_label, is_dark_theme, MEASUR
 from data_model import NodeBase, MeasurementNode, CategoryNode, FamilyTypeNode, InstanceItem, ColorOption, ViewModelBase
 from calculators_walls import WallCMUCalculator
 from settings_logic import SettingsWindow
-
-__title__ = "Quantity & Measures"
-__version__ = "1.0"
-__doc__ = """A Modal WPF tool to visualize, quantify, and estimate materials for visible elements.
-Features:
-- Quantify: Aggregate Length, Area, Volume by Category/Type.
-- Calculate: Estimate material requirements (e.g., CMU/Brick count) based on configurable settings.
-- Visualize: Colorize or Isolate elements for visual verification.
-- Export: Export quantified data to CSV."""
-__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 
 # --- Main Window Class ---
 class SystemNetworkWindow(forms.WPFWindow):

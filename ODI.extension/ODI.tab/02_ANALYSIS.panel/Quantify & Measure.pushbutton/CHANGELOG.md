@@ -1,5 +1,11 @@
 # Changelog - Quantity & Measures
 
+## [v1.0.1] - 2025-02-04
+### Changed
+- **Refactoring:**
+  - Standardized script metadata headers (`__title__`, `__doc__`, `__author__`, `__context__`) for consistency.
+  - Cleaned up imports.
+
 ## [v0.3] - 2025-02-04
 ### Added
 - **Calculation Engine:** Implemented modular calculation logic.

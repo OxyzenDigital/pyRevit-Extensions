@@ -1,13 +1,21 @@
+# -*- coding: utf-8 -*-
 """Creates a Light Fixture schedule."""
 
 __title__ = "Light\nFixture\nSchedule"
 __doc__ = "Creates a schedule of all light fixture with Type, Comments, Count and Level"
 __author__ = "ODI"
+__context__ = "doc-project"
 
-from Autodesk.Revit.DB import *
+from Autodesk.Revit.DB import (
+    BuiltInCategory,
+    ElementId,
+    FilteredElementCollector,
+    ScheduleFieldType,
+    ViewSchedule
+)
 from pyrevit import revit, forms
 
-doc = __revit__.ActiveUIDocument.Document
+doc = revit.doc
 
 def create_lightfixture_schedule(doc, schedule_name="Light Fixture Schedule"):
     """Creates a new light fixture schedule."""

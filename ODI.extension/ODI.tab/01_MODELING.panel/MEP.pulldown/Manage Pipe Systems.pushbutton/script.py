@@ -1,18 +1,14 @@
 # -*- coding: utf-8 -*-
-"""
-System Merger Tool
+__title__ = "System Network Browser"
+__doc__ = """Modal tool to diagnose and merge disconnected pipe networks.
 
 Description:
     A Modal WPF tool to visualize and merge disconnected pipe networks.
     Identifies "Islands" of connected pipes and merges them based on logic:
     - Vent Systems: Largest Volume wins (Master).
-    - Pressure Systems: Network with Base Equipment wins.
-
-Architecture:
-    - Modal Window (ShowDialog): Ensures thread safety and prevents context crashes.
-    - Config Persistence: Remembers window position/size.
-    - Transactions: Explicitly handles all model changes.
-"""
+    - Pressure Systems: Network with Base Equipment wins."""
+__author__ = "ODI"
+__context__ = "doc-project"
 
 import os
 import traceback
@@ -41,10 +37,6 @@ try:
     HAS_THEME = True
 except ImportError:
     HAS_THEME = False
-
-__title__ = "System Network Browser"
-__doc__ = "Modal tool to diagnose and merge disconnected pipe networks."
-__context__ = "active-view-type: FloorPlan,CeilingPlan,EngineeringPlan,AreaPlan,Section,Elevation,ThreeD"
 
 # Helper for Revit 2024+ compatibility
 def get_id(element_id):
