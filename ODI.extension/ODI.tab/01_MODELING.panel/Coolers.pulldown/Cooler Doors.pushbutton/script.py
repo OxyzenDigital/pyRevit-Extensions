@@ -160,9 +160,7 @@ def get_mullion_type_width(m_type):
     
     width = 0.0
     
-    # Rectangular Mullions have Width 1 and Width 2
-    # Use getattr to safely access BuiltInParameter to avoid AttributeErrors in some environments
-    
+    # 1. Rectangular Mullions (Width 1 + Width 2)
     bip_w1 = getattr(BuiltInParameter, "MULLION_WIDTH1", None)
     bip_w2 = getattr(BuiltInParameter, "MULLION_WIDTH2", None)
     
@@ -171,20 +169,40 @@ def get_mullion_type_width(m_type):
         p2 = m_type.get_Parameter(bip_w2)
         if p1: width += p1.AsDouble()
         if p2: width += p2.AsDouble()
+        
+    if width > 0.001: return width
+
+    # 2. Corner Mullions (Leg 1 + Leg 2)
+    bip_rw1 = getattr(BuiltInParameter, "RECT_MULLION_WIDTH1", None)
+    bip_rw2 = getattr(BuiltInParameter, "RECT_MULLION_WIDTH2", None)
     
-    # Fallback: Circular Mullions (Radius * 2)
-    if width <= 0.001:
-        bip_rad = getattr(BuiltInParameter, "MULLION_RADIUS", None)
-        if bip_rad:
-            p_rad = m_type.get_Parameter(bip_rad)
-            if p_rad: width = p_rad.AsDouble() * 2.0
+    if bip_rw1 and bip_rw2:
+        p1 = m_type.get_Parameter(bip_rw1)
+        p2 = m_type.get_Parameter(bip_rw2)
+        if p1: width += p1.AsDouble()
+        if p2: width += p2.AsDouble()
+        
+    if width > 0.001: return width
+
+    # 3. Trapezoid Mullions
+    bip_trap = getattr(BuiltInParameter, "TRAPEZOID_MULLION_WIDTH", None)
+    if bip_trap:
+        p = m_type.get_Parameter(bip_trap)
+        if p: width = p.AsDouble()
+        if width > 0.001: return width
+    
+    # 4. Circular Mullions (Radius * 2)
+    bip_rad = getattr(BuiltInParameter, "MULLION_RADIUS", None)
+    if bip_rad:
+        p_rad = m_type.get_Parameter(bip_rad)
+        if p_rad: width = p_rad.AsDouble() * 2.0
+        if width > 0.001: return width
             
-    # Fallback: Thickness (Depth) - often used for Corner Mullions or if Width is missing
-    if width <= 0.001:
-        bip_th = getattr(BuiltInParameter, "MULLION_THICKNESS", None)
-        if bip_th:
-            p_th = m_type.get_Parameter(bip_th)
-            if p_th: width = p_th.AsDouble()
+    # 5. Fallback: Thickness (Depth)
+    bip_th = getattr(BuiltInParameter, "MULLION_THICKNESS", None)
+    if bip_th:
+        p_th = m_type.get_Parameter(bip_th)
+        if p_th: width = p_th.AsDouble()
     
     return width
 
