@@ -14,6 +14,7 @@ import traceback
 # --- ASSEMBLIES ---
 clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
+clr.AddReference('WindowsBase')          # required for WPF colour types
 clr.AddReference('PresentationCore')
 clr.AddReference('PresentationFramework')
 
@@ -234,289 +235,325 @@ class GradingState(object):
         self.reset_mode = False
         
         self.win_top = float(sets.get("win_top", "100"))
-        self.win_left = float(sets.get("win_left", "100")),
+        self.win_left = float(sets.get("win_left", "100"))
         
         self.start_stake = None
         self.end_stake = None
         self.grading_line = None
-        
-        self.next_action = None
 
     @property
     def ready(self):
-        # Basic ready check: must have start stake and line.
-        # End stake is needed if mode is NOT slope.
         has_start = self.start_stake is not None
-        has_line = self.grading_line is not None
-        has_end = self.end_stake is not None
-        
+        has_line  = self.grading_line is not None
+        has_end   = self.end_stake is not None
         if self.mode == "slope":
             return has_start and has_line
-        else:
-            return has_start and has_end and has_line
+        return has_start and has_end and has_line
 
+# ==========================================
+# 2b. WPF WINDOW  (modal ShowDialog loop)
+# ==========================================
 class GradingWindow(forms.WPFWindow):
     def __init__(self, state):
         forms.WPFWindow.__init__(self, 'ui.xaml')
-        self.state = state
-        
-        # Restore Position
+        self.state       = state
+        self.next_action = None   # set by button handlers; read by __main__ loop
+
         try:
-            if self.state.win_top > 0: self.Top = self.state.win_top
+            if self.state.win_top  > 0: self.Top  = self.state.win_top
             if self.state.win_left > 0: self.Left = self.state.win_left
         except: pass
-        
+
         self.apply_revit_theme()
         self.bind_ui()
         self.setup_events()
 
-    def refresh_ui(self):
-        from System.Windows import Media
-        
-        # 1. Fill TextBoxes (Internal -> Display)
+    # ── colour palette for set_status / refresh_ui ────────────────────────
+    _STATUS_COLORS = {
+        # level:  (dot_rgb,           label_rgb)
+        "idle":      ((100, 100, 100), (120, 120, 120)),
+        "info":      ((100, 100, 100), (120, 120, 120)),
+        "success":   (( 16, 124,  16), ( 16, 124,  16)),
+        "error":     ((197,  15,  31), (197,  15,  31)),
+        "selecting": ((255, 140,   0), (180, 100,   0)),
+        "busy":      ((  0, 120, 215), (  0, 100, 200)),
+    }
+
+    def set_status(self, msg, level="info"):
+        """
+        Update the status bar label AND the header dot colour.
+        Safe to call from the WPF thread only — use handler._post_status()
+        from background threads (which dispatches via BeginInvoke).
+        """
         try:
-            self.Tb_Width.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.width))
+            dot_rgb, txt_rgb = self._STATUS_COLORS.get(level, self._STATUS_COLORS["info"])
+            dot_brush = SolidColorBrush(WpfColor.FromRgb(*dot_rgb))
+            txt_brush = SolidColorBrush(WpfColor.FromRgb(*txt_rgb))
+
+            self.Lb_Status.Content    = msg
+            self.Lb_Status.Foreground = txt_brush
+
+            # Header dot reflects overall state
+            self.Dot_Status.Fill = dot_brush
+            # Header subtitle mirrors last activity (truncate if long)
+            self.Tb_StatusHeader.Text = msg if len(msg) <= 46 else msg[:43] + "..."
+        except: pass
+
+    def refresh_ui(self):
+        """Sync all controls from state.  Called after every action completes."""
+        # 1. Parameter textboxes  (internal → display units)
+        try:
+            self.Tb_Width.Text   = "{:.2f}".format(UnitHelper.from_internal(self.state.width))
             self.Tb_Falloff.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.falloff))
-            self.Tb_Grid.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.grid))
-        except: 
-            # Fallback if state has bad strings
-            self.Tb_Width.Text = "6.0"
+            self.Tb_Grid.Text    = "{:.2f}".format(UnitHelper.from_internal(self.state.grid))
+        except:
+            self.Tb_Width.Text   = "6.0"
             self.Tb_Falloff.Text = "10.0"
-            self.Tb_Grid.Text = "3.0"
-            
+            self.Tb_Grid.Text    = "3.0"
         self.Tb_Slope.Text = str(self.state.slope_val)
-        
-        # 2. Mode
+
+        # 2. Mode radio buttons
         if self.state.mode == "slope":
-            self.Rb_UseSlope.IsChecked = True
-            self.Tb_Slope.IsEnabled = True
+            self.Rb_UseSlope.IsChecked    = True
+            self.Tb_Slope.IsEnabled       = True
         else:
             self.Rb_MatchStakes.IsChecked = True
-            self.Tb_Slope.IsEnabled = False
+            self.Tb_Slope.IsEnabled       = False
 
-        # 3. Selection Labels
+        # 3. Selection indicator rows — dot colour + label text + row background
+        dot_set   = SolidColorBrush(WpfColor.FromRgb( 16, 124,  16))  # green
+        dot_unset = SolidColorBrush(WpfColor.FromRgb(170, 170, 170))  # grey
+        bg_set    = SolidColorBrush(WpfColor.FromRgb(240, 255, 240))   # light green tint
+        bg_unset  = SolidColorBrush(WpfColor.FromRgb(248, 248, 248))   # near-white
+
+        # Apply dark-theme overrides if needed
+        if self._is_dark:
+            dot_set   = SolidColorBrush(WpfColor.FromRgb(100, 220, 100))
+            dot_unset = SolidColorBrush(WpfColor.FromRgb( 90,  90,  90))
+            bg_set    = SolidColorBrush(WpfColor.FromRgb( 35,  55,  35))
+            bg_unset  = SolidColorBrush(WpfColor.FromRgb( 45,  52,  64))
+
         if self.state.start_stake:
-            self.Lb_StartStake.Text = "Start: {}".format(get_element_label(self.state.start_stake))
+            self.Dot_StartStake.Fill    = dot_set
+            self.Row_StartStake.Background = bg_set
+            self.Lb_StartStake.Text     = get_element_label(self.state.start_stake)
             self.Lb_StartStake.Foreground = self.FindResource("TextBrush")
         else:
-            self.Lb_StartStake.Text = "Start: [None]"
+            self.Dot_StartStake.Fill    = dot_unset
+            self.Row_StartStake.Background = bg_unset
+            self.Lb_StartStake.Text     = "[None selected]"
             self.Lb_StartStake.Foreground = self.FindResource("TextLightBrush")
 
         if self.state.end_stake:
-            self.Lb_EndStake.Text = "End: {}".format(get_element_label(self.state.end_stake))
+            self.Dot_EndStake.Fill      = dot_set
+            self.Row_EndStake.Background = bg_set
+            self.Lb_EndStake.Text       = get_element_label(self.state.end_stake)
             self.Lb_EndStake.Foreground = self.FindResource("TextBrush")
         else:
-            self.Lb_EndStake.Text = "End: [None]"
+            self.Dot_EndStake.Fill      = dot_unset
+            self.Row_EndStake.Background = bg_unset
+            self.Lb_EndStake.Text       = "[None selected]"
             self.Lb_EndStake.Foreground = self.FindResource("TextLightBrush")
 
         if self.state.grading_line:
-            self.Lb_Line.Text = "Line: {}".format(get_element_label(self.state.grading_line))
-            self.Lb_Line.Foreground = self.FindResource("TextBrush")
+            self.Dot_Line.Fill          = dot_set
+            self.Row_Line.Background    = bg_set
+            self.Lb_Line.Text           = get_element_label(self.state.grading_line)
+            self.Lb_Line.Foreground     = self.FindResource("TextBrush")
         else:
-            self.Lb_Line.Text = "Line: [None]"
-            self.Lb_Line.Foreground = self.FindResource("TextLightBrush")
-            
-        # 4. Enable/Disable Swap
-        is_swap_ready = (self.state.start_stake is not None and self.state.end_stake is not None)
-        self.Btn_Swap.IsEnabled = is_swap_ready
-        
-        # 5. Reset Mode
-        self.Cb_ResetPoints.IsChecked = self.state.reset_mode
-        
-        # 6. Square Ends
-        if hasattr(self, "Cb_SquareEnds"):
-            self.Cb_SquareEnds.IsChecked = self.state.square_ends
-            
-        # 7. Offset
-        if hasattr(self, "Cb_ApplyOffset"):
-            self.Cb_ApplyOffset.IsChecked = self.state.apply_offset
-            try: self.Tb_Offset.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.offset_val))
-            except: self.Tb_Offset.Text = "0.0"
-            
-        # 7. Calculated Slope
-        slope_info = "Slope: -"
+            self.Dot_Line.Fill          = dot_unset
+            self.Row_Line.Background    = bg_unset
+            self.Lb_Line.Text           = "[None selected]"
+            self.Lb_Line.Foreground     = self.FindResource("TextLightBrush")
+
+        # 4. Calculated slope badge
+        slope_info = "Slope: —"
         if self.state.start_stake and self.state.end_stake:
             try:
                 if self.state.start_stake.IsValidObject and self.state.end_stake.IsValidObject:
-                    p1 = self.state.start_stake.Location.Point
-                    p2 = self.state.end_stake.Location.Point
-                    
+                    p1   = self.state.start_stake.Location.Point
+                    p2   = self.state.end_stake.Location.Point
                     d_xy = flatten(p1).DistanceTo(flatten(p2))
-                    d_z = p2.Z - p1.Z
-                    
+                    d_z  = p2.Z - p1.Z
                     if d_xy > 0.01:
-                        s_pct = (d_z / d_xy) * 100.0
-                        d_z_disp = UnitHelper.from_internal(d_z)
-                        slope_info = "Slope: {:.2f}% (ΔZ: {:.2f})".format(s_pct, d_z_disp)
+                        s_pct  = (d_z / d_xy) * 100.0
+                        d_disp = UnitHelper.from_internal(d_z)
+                        slope_info = "Slope: {:.2f}%  (ΔZ {:.2f} {})".format(
+                            s_pct, d_disp, UnitHelper.get_unit_symbol())
                     else:
-                        slope_info = "Slope: Vertical"
+                        slope_info = "Slope: Vertical (same XY)"
             except: pass
-        if hasattr(self, "Lb_CalculatedSlope"):
-            self.Lb_CalculatedSlope.Text = slope_info
+        self.Lb_CalculatedSlope.Text = slope_info
 
-    def bind_ui(self):
-        # Initial Bind
-        self.refresh_ui()
-        
-        # Unit Title
-        u_sym = UnitHelper.get_unit_symbol()
-        self.Title += " [{}]".format(u_sym)
-        
-        # Initial Validation
+        # 5. Swap / reset / square-ends / offset
+        self.Btn_Swap.IsEnabled       = (self.state.start_stake is not None
+                                         and self.state.end_stake is not None)
+        self.Cb_ResetPoints.IsChecked = self.state.reset_mode
+        if hasattr(self, "Cb_SquareEnds"):
+            self.Cb_SquareEnds.IsChecked = self.state.square_ends
+        if hasattr(self, "Cb_ApplyOffset"):
+            self.Cb_ApplyOffset.IsChecked = self.state.apply_offset
+            try:
+                self.Tb_Offset.Text = "{:.2f}".format(
+                    UnitHelper.from_internal(self.state.offset_val))
+            except:
+                self.Tb_Offset.Text = "0.0"
+
+        # 6. Re-run parameter validation so action buttons stay correct
         self.validate_ui()
 
+    def bind_ui(self):
+        u_sym = UnitHelper.get_unit_symbol()
+        self.Title += " [{}]".format(u_sym)
+        # Update unit labels in Parameters section
+        for name in ("Lbl_Width_Unit", "Lbl_Falloff_Unit", "Lbl_Grid_Unit", "Lbl_Offset_Unit"):
+            try: getattr(self, name).Text = u_sym
+            except: pass
+        self.refresh_ui()
+
     def apply_revit_theme(self):
-        """Detects Revit theme and updates window resources if Dark."""
-        is_dark = False
+        """Detect Revit's active UI theme and push matching colours into Resources."""
+        self._is_dark = False
         if HAS_THEME:
             try:
-                if UIThemeManager.CurrentTheme == UITheme.Dark:
-                    is_dark = True
+                self._is_dark = (UIThemeManager.CurrentTheme == UITheme.Dark)
             except: pass
-        
-        if is_dark:
-            # Define Dark Theme Colors
+
+        if self._is_dark:
             res = self.Resources
-            res["WindowBrush"] = SolidColorBrush(WpfColor.FromRgb(59, 68, 83))      # #3b4453
-            res["ControlBrush"] = SolidColorBrush(WpfColor.FromRgb(40, 46, 56))     # #282e38
-            res["TextBrush"] = SolidColorBrush(WpfColor.FromRgb(245, 245, 245))     # #F5F5F5
-            res["TextLightBrush"] = SolidColorBrush(WpfColor.FromRgb(170, 175, 185))# #AAAFB9
-            res["AccentBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 120, 215))     # #0078D7
-            res["HeaderTextBrush"] = SolidColorBrush(WpfColor.FromRgb(255, 255, 255))
-            res["HeaderSubTextBrush"] = SolidColorBrush(WpfColor.FromRgb(200, 200, 200))
-            res["ExpanderBrush"] = SolidColorBrush(WpfColor.FromRgb(45, 52, 64))    # #2d3440
-            res["ExpanderBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 110))
-            res["BorderBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 110))
-            res["StatusReadyBrush"] = SolidColorBrush(WpfColor.FromRgb(100, 255, 100))
-            res["StatusErrorBrush"] = SolidColorBrush(WpfColor.FromRgb(255, 100, 100))
-            res["ButtonBrush"] = SolidColorBrush(WpfColor.FromRgb(70, 80, 95))
-            res["HoverBrush"] = SolidColorBrush(WpfColor.FromRgb(85, 95, 115))
-            res["PressedBrush"] = SolidColorBrush(WpfColor.FromRgb(0, 90, 170))
+            res["WindowBrush"]        = SolidColorBrush(WpfColor.FromRgb( 45,  52,  64))
+            res["ControlBrush"]       = SolidColorBrush(WpfColor.FromRgb( 35,  41,  51))
+            res["TextBrush"]          = SolidColorBrush(WpfColor.FromRgb(240, 240, 240))
+            res["TextLightBrush"]     = SolidColorBrush(WpfColor.FromRgb(160, 165, 175))
+            res["AccentBrush"]        = SolidColorBrush(WpfColor.FromRgb(  0, 120, 215))
+            res["HeaderTextBrush"]    = SolidColorBrush(WpfColor.FromRgb(255, 255, 255))
+            res["HeaderSubTextBrush"] = SolidColorBrush(WpfColor.FromRgb(180, 210, 240))
+            res["BorderBrush"]        = SolidColorBrush(WpfColor.FromRgb( 75,  85, 100))
+            res["StatusReadyBrush"]   = SolidColorBrush(WpfColor.FromRgb( 90, 210,  90))
+            res["StatusErrorBrush"]   = SolidColorBrush(WpfColor.FromRgb(240, 100, 100))
+            res["ButtonBrush"]        = SolidColorBrush(WpfColor.FromRgb( 60,  68,  82))
+            res["HoverBrush"]         = SolidColorBrush(WpfColor.FromRgb( 70,  85, 105))
+            res["PressedBrush"]       = SolidColorBrush(WpfColor.FromRgb(  0,  80, 160))
+            res["RowUnsetBrush"]      = SolidColorBrush(WpfColor.FromRgb( 45,  52,  64))
+            res["RowSetBrush"]        = SolidColorBrush(WpfColor.FromRgb( 30,  55,  35))
+            res["DotUnsetBrush"]      = SolidColorBrush(WpfColor.FromRgb( 90,  90,  90))
+            res["DotSetBrush"]        = SolidColorBrush(WpfColor.FromRgb( 90, 200,  90))
 
     def setup_events(self):
+        # Button actions — each closes the dialog so __main__ can act on next_action
         self.Btn_SelectStakes.Click += self.a_stakes
-        self.Btn_SelectLine.Click += self.a_line
-        self.Btn_Swap.Click += self.a_swap
-        self.Btn_Run.Click += self.a_run
-        self.Btn_Edging.Click += self.a_edge
-        self.Btn_Stitch.Click += self.a_stitch
-        self.Btn_ReadRecipe.Click += self.a_load
+        self.Btn_SelectLine.Click   += self.a_line
+        self.Btn_Swap.Click         += self.a_swap
+        self.Btn_Run.Click          += self.a_run
+        self.Btn_Edging.Click       += self.a_edge
+        self.Btn_Stitch.Click       += self.a_stitch
+        self.Btn_ReadRecipe.Click   += self.a_load
         try: self.Btn_LinePoints.Click += self.a_line_points
         except AttributeError: pass
-        self.Rb_MatchStakes.Checked += self.mode_changed
-        self.Rb_UseSlope.Checked += self.mode_changed
-        
-        self.Btn_SelectStakes.MouseEnter += self.h_stakes_on
-        self.Btn_SelectStakes.MouseLeave += self.h_off
-        self.Btn_SelectLine.MouseEnter += self.h_line_on
-        self.Btn_SelectLine.MouseLeave += self.h_off
-        
-        # Custom Window Events
-        self.HeaderDrag.MouseLeftButtonDown += self.drag_window
-        self.Btn_WinClose.Click += lambda s, a: self.Close()
-        
-        # Validation Events
-        self.Tb_Width.LostFocus += self.validate_ui
-        self.Tb_Falloff.LostFocus += self.validate_ui
-        self.Tb_Grid.LostFocus += self.validate_ui
 
+        # Mode toggle
+        self.Rb_MatchStakes.Checked += self.mode_changed
+        self.Rb_UseSlope.Checked    += self.mode_changed
+
+        # Window chrome
+        self.HeaderDrag.MouseLeftButtonDown += self.drag_window
+        self.Btn_WinClose.Click             += self._on_close_btn
+
+        # Live parameter validation
+        self.Tb_Width.LostFocus   += self.validate_ui
+        self.Tb_Falloff.LostFocus += self.validate_ui
+        self.Tb_Grid.LostFocus    += self.validate_ui
+
+    # ── window events ─────────────────────────────────────────────────────
     def drag_window(self, sender, args):
         try: self.DragMove()
         except: pass
 
-    def validate_ui(self, sender=None, args=None):
-        from System.Windows import Media
-        
+    def _on_close_btn(self, sender, args):
+        """Save position then close."""
         try:
-            # Parse (Display Units -> Internal Logic Checks)
-            # We don't convert to internal for logic ratio checks if units are consistent, 
-            # but for absolute limits (0.1 ft), we MUST convert inputs to internal or convert limit to display.
-            # Easiest: Convert inputs to Internal Feet.
-            
+            self.state.win_top  = self.Top
+            self.state.win_left = self.Left
+            save_state_to_disk(self.state)
+        except: pass
+        self.Close()
+
+    # ── parameter validation ──────────────────────────────────────────────
+    def validate_ui(self, sender=None, args=None):
+        try:
             w = UnitHelper.to_internal(self.Tb_Width.Text)
             f = UnitHelper.to_internal(self.Tb_Falloff.Text)
             g = UnitHelper.to_internal(self.Tb_Grid.Text)
             if hasattr(self, "Tb_Offset"):
                 _ = UnitHelper.to_internal(self.Tb_Offset.Text)
-            
+
             msg = None
-            
-            if w <= 0: msg = "Width must be > 0"
-            elif f < 0: msg = "Falloff cannot be negative"
-            elif g < 0.1: msg = "Grid must be >= 0.1 ft"
-            elif g > w: msg = "Grid > Width (Path skipped!)"
-            elif f > 0 and g > f: msg = "Grid > Falloff (Jagged!)"
-            
+            if   w <= 0:          msg = "Width must be > 0"
+            elif f < 0:           msg = "Falloff cannot be negative"
+            elif g < 0.1:         msg = "Grid must be >= 0.1 ft"
+            elif g > w:           msg = "Grid > Width  (path will be skipped!)"
+            elif f > 0 and g > f: msg = "Grid > Falloff  (blending will be jagged)"
+
             if msg:
-                self.Lb_Status.Content = msg
-                self.Lb_Status.Foreground = self.FindResource("StatusErrorBrush")
-                self.Btn_Run.IsEnabled = False
+                self.set_status(msg, "error")
+                self.Btn_Run.IsEnabled    = False
                 self.Btn_Edging.IsEnabled = False
                 return False
+
+            if self.state.ready:
+                self.set_status("Ready — click Sculpt Terrain or Run Edging.", "success")
+                self.Btn_Run.IsEnabled    = True
+                self.Btn_Edging.IsEnabled = True
             else:
-                # Restore 'Ready' state if logic holds
-                if self.state.ready:
-                    self.Lb_Status.Content = "Ready."
-                    self.Lb_Status.Foreground = self.FindResource("StatusReadyBrush")
-                    self.Btn_Run.IsEnabled = True
-                    self.Btn_Edging.IsEnabled = True
-                else:
-                    self.Lb_Status.Content = "Incomplete."
-                    self.Lb_Status.Foreground = self.FindResource("TextLightBrush")
-                    self.Btn_Run.IsEnabled = False
-                    self.Btn_Edging.IsEnabled = False
-                return True
-                
+                self.set_status("Select required inputs (Stakes + Line).", "idle")
+                self.Btn_Run.IsEnabled    = False
+                self.Btn_Edging.IsEnabled = False
+            return True
+
         except:
-            self.Lb_Status.Content = "Invalid Number Format"
-            self.Lb_Status.Foreground = self.FindResource("StatusErrorBrush")
-            self.Btn_Run.IsEnabled = False
+            self.set_status("Invalid number in parameters.", "error")
+            self.Btn_Run.IsEnabled    = False
             self.Btn_Edging.IsEnabled = False
             return False
 
-    def set_selection(self, elements):
-        try:
-            ids = List[ElementId]()
-            for e in elements:
-                if e and e.IsValidObject: ids.Add(e.Id)
-            if ids.Count > 0:
-                uidoc.Selection.SetElementIds(ids)
-                uidoc.RefreshActiveView()
-        except: pass
-
-    def h_stakes_on(self, s, a): self.set_selection([self.state.start_stake, self.state.end_stake])
-    def h_line_on(self, s, a): self.set_selection([self.state.grading_line])
-    def h_off(self, s, a):
-        uidoc.Selection.SetElementIds(List[ElementId]())
-        uidoc.RefreshActiveView()
-
+    # ── mode toggle ───────────────────────────────────────────────────────
     def mode_changed(self, sender, args):
-        self.state.mode = "slope" if self.Rb_UseSlope.IsChecked else "stakes"
+        self.state.mode   = "slope" if self.Rb_UseSlope.IsChecked else "stakes"
         self.Tb_Slope.IsEnabled = (self.state.mode == "slope")
-        self.Btn_Run.IsEnabled = self.state.ready
-        self.Btn_Edging.IsEnabled = self.state.ready
+        self.validate_ui()
 
+    # ── push UI values → state before any action ──────────────────────────
     def update_state_from_ui(self):
-        """Pushes UI values to Memory (converting Display -> Internal)."""
-        self.state.width = str(UnitHelper.to_internal(self.Tb_Width.Text))
-        self.state.falloff = str(UnitHelper.to_internal(self.Tb_Falloff.Text))
-        self.state.grid = str(UnitHelper.to_internal(self.Tb_Grid.Text))
-        self.state.slope_val = self.Tb_Slope.Text
+        self.state.width      = str(UnitHelper.to_internal(self.Tb_Width.Text))
+        self.state.falloff    = str(UnitHelper.to_internal(self.Tb_Falloff.Text))
+        self.state.grid       = str(UnitHelper.to_internal(self.Tb_Grid.Text))
+        self.state.slope_val  = self.Tb_Slope.Text
         self.state.reset_mode = self.Cb_ResetPoints.IsChecked
         if hasattr(self, "Cb_SquareEnds"):
             self.state.square_ends = self.Cb_SquareEnds.IsChecked
         if hasattr(self, "Cb_ApplyOffset"):
             self.state.apply_offset = self.Cb_ApplyOffset.IsChecked
-            self.state.offset_val = str(UnitHelper.to_internal(self.Tb_Offset.Text))
+            self.state.offset_val   = str(UnitHelper.to_internal(self.Tb_Offset.Text))
 
-    def a_stakes(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_stakes"; self.Close()
-    def a_line(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_line"; self.Close()
-    def a_swap(self, s, a): self.update_state_from_ui(); self.state.next_action = "swap"; self.Close()
-    def a_run(self, s, a): self.update_state_from_ui(); self.state.next_action = "sculpt"; self.Close()
-    def a_edge(self, s, a): self.update_state_from_ui(); self.state.next_action = "edge"; self.Close()
-    def a_stitch(self, s, a): self.update_state_from_ui(); self.state.next_action = "stitch"; self.Close()
-    def a_line_points(self, s, a): self.update_state_from_ui(); self.state.next_action = "line_points"; self.Close()
-    def a_load(self, s, a): self.update_state_from_ui(); self.state.next_action = "load_recipe"; self.Close()
+    # ── action dispatch ───────────────────────────────────────────────────
+    # Button clicks close the dialog; __main__ reads next_action and
+    # performs picks/transactions after the window is gone — no threading
+    # conflicts with Revit's PickObject message pump.
+
+    def _raise(self, action):
+        """Sync UI → state, record the requested action, then close."""
+        self.update_state_from_ui()
+        self.next_action = action
+        self.Close()
+
+    def a_stakes(self, s, a):     self._raise("select_stakes")
+    def a_line(self, s, a):       self._raise("select_line")
+    def a_swap(self, s, a):       self._raise("swap")
+    def a_run(self, s, a):        self._raise("sculpt")
+    def a_edge(self, s, a):       self._raise("edge")
+    def a_stitch(self, s, a):     self._raise("stitch")
+    def a_line_points(self, s, a): self._raise("line_points")
+    def a_load(self, s, a):       self._raise("load_recipe")
 
 # ==========================================
 # 3. HELPERS
@@ -1962,68 +1999,81 @@ def ensure_grade_stake_family():
     log.show()
 
 # ==========================================
-# 6. LOOP
+# 6. ENTRY POINT  (modal ShowDialog loop)
 # ==========================================
 if __name__ == '__main__':
     ensure_grade_stake_family()
     state = GradingState()
+
     while True:
         win = GradingWindow(state)
         win.ShowDialog()
-        
-        # Capture Position
-        try:
-            state.win_top = win.Top
-            state.win_left = win.Left
-        except: pass
-        
-        action = state.next_action
-        state.next_action = None 
-        
+
+        action = win.next_action
+
+        # No action means the user clicked X or Close — exit the loop.
         if not action:
-            save_state_to_disk(state)
-            break 
-            
-        elif action == "select_stakes":
+            break
+
+        if action == "select_stakes":
             try:
-                ref_start = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Start Stake")
-                state.start_stake = doc.GetElement(ref_start)
-                
-                # Visual clue: Highlight the start stake while waiting
-                try: uidoc.Selection.SetElementIds(List[ElementId]([ref_start.ElementId]))
-                except: pass
-                
-                ref_end = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Start Stake selected. Now select End Stake")
-                state.end_stake = doc.GetElement(ref_end)
-                
+                ref1 = uidoc.Selection.PickObject(
+                    ObjectType.Element, UniversalFilter(), "Select Start Stake")
+                state.start_stake = doc.GetElement(ref1)
+                ref2 = uidoc.Selection.PickObject(
+                    ObjectType.Element, UniversalFilter(), "Select End Stake")
+                state.end_stake = doc.GetElement(ref2)
                 save_state_to_disk(state)
-            except: pass # Cancelled selection
-            
+            except:
+                pass  # cancelled — keep existing state
+
         elif action == "select_line":
-            try: 
-                state.grading_line = doc.GetElement(uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Guide Line"))
+            try:
+                ref = uidoc.Selection.PickObject(
+                    ObjectType.Element, UniversalFilter(), "Select Guide Line")
+                state.grading_line = doc.GetElement(ref)
                 save_state_to_disk(state)
-            except: pass # Cancelled selection
-            
-        elif action == "swap": 
+            except:
+                pass
+
+        elif action == "swap":
             perform_swap(state)
             save_state_to_disk(state)
-            
-        elif action == "sculpt": 
+
+        elif action == "sculpt":
             perform_sculpt(state)
             save_state_to_disk(state)
-            
-        elif action == "edge": 
+
+        elif action == "edge":
             perform_edging(state)
             save_state_to_disk(state)
-            
-        elif action == "stitch": 
+
+        elif action == "stitch":
             perform_manual_stitch(state)
-            
+
         elif action == "line_points":
             perform_add_points_along_line(state)
             save_state_to_disk(state)
-            
-        elif action == "load_recipe": 
-            perform_load_recipe(state)
-            save_state_to_disk(state)
+
+        elif action == "load_recipe":
+            log = BatchLogger()
+            try:
+                ref = uidoc.Selection.PickObject(
+                    ObjectType.Element, UniversalFilter(), "Select Toposolid with Recipe")
+                data = GradingRecipe.read_recipe(doc.GetElement(ref))
+                if data:
+                    state.width        = str(data.get("width",       "6.0"))
+                    state.falloff      = str(data.get("falloff",     "10.0"))
+                    state.grid         = str(data.get("grid",         "3.0"))
+                    state.slope_val    = str(data.get("slope",        "2.0"))
+                    state.mode         = str(data.get("mode",      "stakes"))
+                    state.apply_offset =     data.get("apply_offset", False)
+                    state.offset_val   = str(data.get("offset_val",  "0.0"))
+                    state.square_ends  =     data.get("square_ends",  False)
+                    log.info("Recipe loaded successfully.")
+                else:
+                    log.info("No grading recipe stored on this element.")
+            except:
+                pass
+            finally:
+                log.show()
