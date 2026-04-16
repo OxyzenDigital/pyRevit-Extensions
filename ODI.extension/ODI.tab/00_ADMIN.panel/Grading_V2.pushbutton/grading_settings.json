@@ -1,1 +1,1 @@
-{"offset_val": "0.0", "width": "27.0", "win_left": "250.0", "apply_offset": false, "falloff": "6.0", "slope": "-2", "square_ends": true, "grid": "6.0", "mode": "stakes", "win_top": "304.666666667"}
+{"apply_offset": false, "win_top": "304.666666667", "falloff": "0.0", "grid": "6.0", "win_left": "250.0", "slope": "-2", "mode": "stakes", "offset_val": "3.0", "square_ends": true, "width": "24.0"}
