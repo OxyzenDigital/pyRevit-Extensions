@@ -23,7 +23,7 @@ from Autodesk.Revit.DB import (
     XYZ, Transaction, TransactionGroup, ElementId, BuiltInParameter, BuiltInCategory,
     ReferenceIntersector, FindReferenceTarget, Options, Solid, ViewType, View3D, Edge,
     ElementTransformUtils, FamilyInstance, CurveElement, UnitUtils, SpecTypeId, Line,
-    FilteredElementCollector, Family, Toposolid, FilledRegion, IntersectionResultArray, SetComparisonResult
+    FilteredElementCollector, Family, Toposolid, FilledRegion, IntersectionResultArray, SetComparisonResult, CurveLoop
 )
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
 from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, AccessLevel
@@ -137,16 +137,25 @@ def get_element_label(element):
     eid = get_id_val(element)
     try:
         name = ""
-        if hasattr(element, "Symbol") and element.Symbol:
-            name = element.Symbol.FamilyName
+        if isinstance(element, Toposolid):
+            try:
+                type_elem = doc.GetElement(element.GetTypeId())
+                name = "Toposolid: " + type_elem.Name
+            except: name = "Toposolid"
+        elif hasattr(element, "Symbol") and element.Symbol:
+            name = "{} - {}".format(element.Symbol.FamilyName, element.Name)
+        elif hasattr(element, "LineStyle") and element.LineStyle:
+            name = "Line - " + element.LineStyle.Name
         elif element.Category:
             name = element.Category.Name
+        elif hasattr(element, "Name") and element.Name:
+                name += " - " + element.Name
         elif hasattr(element, "Name") and element.Name:
             name = element.Name
         
         if name:
-            if len(name) > 20:
-                name = name[:17] + "..."
+            if len(name) > 35:
+                name = name[:32] + "..."
             return "{} ({})".format(name, eid)
     except: pass
     return "ID {}".format(eid)
@@ -207,6 +216,8 @@ def save_state_to_disk(state):
         "mode": state.mode,
         "apply_offset": state.apply_offset,
         "offset_val": state.offset_val,
+        "apply_plan_offset": getattr(state, 'apply_plan_offset', False),
+        "plan_offset_val": getattr(state, 'plan_offset_val', "0.0"),
         "square_ends": state.square_ends,
         "win_top": str(state.win_top),
         "win_left": str(state.win_left)
@@ -231,6 +242,8 @@ class GradingState(object):
         self.square_ends = sets.get("square_ends", False)
         self.apply_offset = sets.get("apply_offset", False)
         self.offset_val = sets.get("offset_val", "0.0")
+        self.apply_plan_offset = sets.get("apply_plan_offset", False)
+        self.plan_offset_val = sets.get("plan_offset_val", "0.0")
         self.reset_mode = False
         
         self.win_top = float(sets.get("win_top", "100"))
@@ -296,21 +309,21 @@ class GradingWindow(forms.WPFWindow):
 
         # 3. Selection Labels
         if self.state.start_stake:
-            self.Lb_StartStake.Text = "Start: {}".format(get_element_label(self.state.start_stake))
+            self.Lb_StartStake.Text = "Start:\n{}".format(get_element_label(self.state.start_stake))
             self.Lb_StartStake.Foreground = self.FindResource("TextBrush")
         else:
             self.Lb_StartStake.Text = "Start: [None]"
             self.Lb_StartStake.Foreground = self.FindResource("TextLightBrush")
 
         if self.state.end_stake:
-            self.Lb_EndStake.Text = "End: {}".format(get_element_label(self.state.end_stake))
+            self.Lb_EndStake.Text = "End:\n{}".format(get_element_label(self.state.end_stake))
             self.Lb_EndStake.Foreground = self.FindResource("TextBrush")
         else:
             self.Lb_EndStake.Text = "End: [None]"
             self.Lb_EndStake.Foreground = self.FindResource("TextLightBrush")
 
         if self.state.grading_line:
-            self.Lb_Line.Text = "Line: {}".format(get_element_label(self.state.grading_line))
+            self.Lb_Line.Text = "Line:\n{}".format(get_element_label(self.state.grading_line))
             self.Lb_Line.Foreground = self.FindResource("TextBrush")
         else:
             self.Lb_Line.Text = "Line: [None]"
@@ -332,6 +345,14 @@ class GradingWindow(forms.WPFWindow):
             self.Cb_ApplyOffset.IsChecked = self.state.apply_offset
             try: self.Tb_Offset.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.offset_val))
             except: self.Tb_Offset.Text = "0.0"
+            
+        if hasattr(self, "Cb_ApplyPlanOffset"):
+            self.Cb_ApplyPlanOffset.IsChecked = self.state.apply_plan_offset
+            try:
+                self.Tb_PlanOffset.Text = "{:.2f}".format(
+                    UnitHelper.from_internal(self.state.plan_offset_val))
+            except:
+                self.Tb_PlanOffset.Text = "0.0"
             
         # 7. Calculated Slope
         slope_info = "Slope: -"
@@ -508,6 +529,9 @@ class GradingWindow(forms.WPFWindow):
         if hasattr(self, "Cb_ApplyOffset"):
             self.state.apply_offset = self.Cb_ApplyOffset.IsChecked
             self.state.offset_val = str(UnitHelper.to_internal(self.Tb_Offset.Text))
+        if hasattr(self, "Cb_ApplyPlanOffset"):
+            self.state.apply_plan_offset = self.Cb_ApplyPlanOffset.IsChecked
+            self.state.plan_offset_val = str(UnitHelper.to_internal(self.Tb_PlanOffset.Text))
 
     def a_stakes(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_stakes"; self.Close()
     def a_line(self, s, a): self.update_state_from_ui(); self.state.next_action = "select_line"; self.Close()
@@ -1623,17 +1647,30 @@ def perform_add_points_along_line(state):
     g_int = float(state.grid)
     if g_int <= 0.1: g_int = 1.0 # Fallback safety
     
+    g_plan_off = 0.0
+    if getattr(state, "apply_plan_offset", False):
+        try:
+            g_plan_off = float(state.plan_offset_val)
+            log.info("Applied Plan Offset: {:.2f}".format(UnitHelper.from_internal(g_plan_off)))
+        except: pass
+    
     toposolid = None
     raw_elem = None
     target_curves = []
     target_internal_pts = []
     
-    def get_curves_from_elem(elem, g_int):
+    def get_curves_from_elem(elem, g_int, plan_offset):
         crvs = []
         internal_pts = []
         region_info = None
         if isinstance(elem, CurveElement):
             c = elem.GeometryCurve
+            if plan_offset != 0.0:
+                try:
+                    offset_c = c.CreateOffset(plan_offset, XYZ.BasisZ)
+                    if offset_c: c = offset_c
+                except Exception as e:
+                    log.info("Failed to apply plan offset to line: " + str(e))
             if isinstance(c, Line) and flatten(c.GetEndPoint(0)).DistanceTo(flatten(c.GetEndPoint(1))) < 0.01:
                 log.error("Selected line is purely vertical.", "Toposolids cannot have vertically stacked points at the exact same XY coordinates. Please select a sloped or horizontal line.")
                 return None, None, None
@@ -1646,7 +1683,14 @@ def perform_add_points_along_line(state):
                 
             all_curves = []
             for loop in elem.GetBoundaries():
-                for c in loop:
+                working_loop = loop
+                if plan_offset != 0.0:
+                    try:
+                        offset_loop = CurveLoop.CreateViaOffset(loop, plan_offset, XYZ.BasisZ)
+                        if offset_loop: working_loop = offset_loop
+                    except Exception as e:
+                        log.info("Failed to apply plan offset to region boundary: " + str(e))
+                for c in working_loop:
                     crvs.append((c, z_val))
                     all_curves.append(c)
                     
@@ -1699,7 +1743,7 @@ def perform_add_points_along_line(state):
         try: uidoc.Selection.SetElementIds(List[ElementId]([ref_first.ElementId]))
         except: pass
         
-        crvs, int_pts, r_info = get_curves_from_elem(elem_first, g_int)
+        crvs, int_pts, r_info = get_curves_from_elem(elem_first, g_int, g_plan_off)
         target_region_info = None
         
         if crvs is not None and len(crvs) > 0:
@@ -1719,7 +1763,7 @@ def perform_add_points_along_line(state):
             
             ref_second = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Toposolid selected. Now select Line or Filled Region")
             elem_second = doc.GetElement(ref_second)
-            crvs, int_pts, r_info = get_curves_from_elem(elem_second, g_int)
+            crvs, int_pts, r_info = get_curves_from_elem(elem_second, g_int, g_plan_off)
             if crvs is not None and len(crvs) > 0:
                 target_curves = crvs
                 target_internal_pts = int_pts
