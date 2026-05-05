@@ -1,1 +1,1 @@
-{"square_ends": true, "apply_offset": false, "slope": "-2", "offset_val": "3.0", "width": "18.0", "falloff": "0.0", "win_top": "304.666666667", "win_left": "250.0", "mode": "stakes", "plan_offset_val": "0.0", "apply_plan_offset": false, "grid": "6.0"}
+{"falloff": "0.0", "apply_plan_offset": false, "width": "18.0", "slope": "-2", "mode": "stakes", "offset_val": "3.0", "apply_offset": false, "square_ends": true, "win_top": "308.666666667", "plan_offset_val": "0.0", "win_left": "970.666666667", "grid": "6.0"}
