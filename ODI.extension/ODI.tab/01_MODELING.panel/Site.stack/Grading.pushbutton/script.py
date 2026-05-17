@@ -1812,7 +1812,8 @@ def perform_edging(state):
         # Apply moves
         for item in to_move:
             try: 
-                editor.ModifySlabShapeVertex(item[0], item[1])
+                editor.DeletePoint(item[0])
+                editor.AddPoint(item[1])
                 occupied_points.append(item[1])
             except: pass
             
@@ -1989,11 +1990,16 @@ def perform_smooth_region(state):
             final_pt = XYZ(n.x, n.y, n.z)
             if n.v_ref:
                 if abs(n.v_ref.Position.Z - n.z) > 0.005:
-                    editor.ModifySlabShapeVertex(n.v_ref, final_pt)
-                    mod_count += 1
+                    try:
+                        editor.DeletePoint(n.v_ref)
+                        editor.AddPoint(final_pt)
+                        mod_count += 1
+                    except: pass
             else:
-                editor.AddPoint(final_pt)
-                add_count += 1
+                try:
+                    editor.AddPoint(final_pt)
+                    add_count += 1
+                except: pass
                 
         t.Commit()
         tg.Assimilate()
@@ -2292,7 +2298,8 @@ def perform_add_points_along_line(state):
             if matched_vert:
                 if abs(matched_vert.Position.Z - adjusted_pt.Z) > 0.005:
                     try:
-                        editor.ModifySlabShapeVertex(matched_vert, adjusted_pt)
+                        editor.DeletePoint(matched_vert)
+                        editor.AddPoint(adjusted_pt)
                         modified += 1
                     except: pass
             else:
