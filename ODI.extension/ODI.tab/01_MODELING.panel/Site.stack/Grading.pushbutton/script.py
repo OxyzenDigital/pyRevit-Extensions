@@ -23,11 +23,12 @@ from Autodesk.Revit.DB import (
     XYZ, Transaction, TransactionGroup, ElementId, BuiltInParameter, BuiltInCategory,
     ReferenceIntersector, FindReferenceTarget, Options, Solid, ViewType, View3D, Edge,
     ElementTransformUtils, FamilyInstance, CurveElement, UnitUtils, SpecTypeId, Line,
-    FilteredElementCollector, Family, Toposolid, FilledRegion, IntersectionResultArray, SetComparisonResult, CurveLoop
+    FilteredElementCollector, Family, Toposolid, FilledRegion, IntersectionResultArray, SetComparisonResult, CurveLoop,
+    Transform, UnitFormatUtils
 )
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
 from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, AccessLevel
-from System import Guid
+from System import Guid, Double
 from pyrevit import forms, revit, script
 
 # Try to import UIThemeManager (Revit 2024+)
@@ -37,6 +38,8 @@ try:
 except ImportError:
     HAS_THEME = False
 from System.Windows.Media import Colors, SolidColorBrush, Color as WpfColor
+from System.Windows.Input import Key
+from System.Windows import Visibility
 
 doc = revit.doc
 uidoc = revit.uidoc
@@ -71,12 +74,20 @@ class UnitHelper:
         return "units"
 
     @staticmethod
-    def to_internal(value_in_project_units):
+    def to_internal(value_str):
+        units = doc.GetUnits()
+        parsed_val = clr.Reference[Double]()
+        # Try Revit's native parser first (handles 5' 6", 1500mm, etc.)
+        if UnitFormatUtils.TryParse(units, SpecTypeId.Length, str(value_str).strip(), parsed_val):
+            return parsed_val.Value
+            
+        # Fallback to float parsing if pure number given incorrectly
         try:
-            val = float(value_in_project_units)
+            val = float(value_str)
             unit_id = UnitHelper.get_project_length_unit()
             return UnitUtils.ConvertToInternalUnits(val, unit_id)
-        except: return 0.0
+        except:
+            raise ValueError("Invalid unit format")
 
     @staticmethod
     def from_internal(value_in_internal_units):
@@ -85,6 +96,14 @@ class UnitHelper:
             unit_id = UnitHelper.get_project_length_unit()
             return UnitUtils.ConvertFromInternalUnits(val, unit_id)
         except: return 0.0
+
+    @staticmethod
+    def to_formatted_string(value_in_internal_units):
+        try:
+            val = float(value_in_internal_units)
+            units = doc.GetUnits()
+            return UnitFormatUtils.Format(units, SpecTypeId.Length, val, False)
+        except: return "0.0"
 
 # ==========================================
 # 1. SETTINGS & LOGGING
@@ -218,7 +237,9 @@ def save_state_to_disk(state):
         "offset_val": state.offset_val,
         "apply_plan_offset": getattr(state, 'apply_plan_offset', False),
         "plan_offset_val": getattr(state, 'plan_offset_val', "0.0"),
+        "plan_offset_dir": getattr(state, 'plan_offset_dir', "Both"),
         "square_ends": state.square_ends,
+        "draw_split_lines": getattr(state, 'draw_split_lines', False),
         "win_top": str(state.win_top),
         "win_left": str(state.win_left)
     }
@@ -244,6 +265,8 @@ class GradingState(object):
         self.offset_val = sets.get("offset_val", "0.0")
         self.apply_plan_offset = sets.get("apply_plan_offset", False)
         self.plan_offset_val = sets.get("plan_offset_val", "0.0")
+        self.plan_offset_dir = sets.get("plan_offset_dir", "Both")
+        self.draw_split_lines = sets.get("draw_split_lines", False)
         self.reset_mode = False
         
         self.win_top = float(sets.get("win_top", "100"))
@@ -309,9 +332,9 @@ class GradingWindow(forms.WPFWindow):
     def refresh_ui(self):
         # 1. Fill TextBoxes (Internal -> Display)
         try:
-            self.Tb_Width.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.width))
-            self.Tb_Falloff.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.falloff))
-            self.Tb_Grid.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.grid))
+            self.Tb_Width.Text = UnitHelper.to_formatted_string(self.state.width)
+            self.Tb_Falloff.Text = UnitHelper.to_formatted_string(self.state.falloff)
+            self.Tb_Grid.Text = UnitHelper.to_formatted_string(self.state.grid)
         except:
             self.Tb_Width.Text = "6.0"
             self.Tb_Falloff.Text = "10.0"
@@ -384,8 +407,8 @@ class GradingWindow(forms.WPFWindow):
                     
                     if d_xy > 0.01:
                         s_pct = (d_z / d_xy) * 100.0
-                        d_z_disp = UnitHelper.from_internal(d_z)
-                        slope_info = "Slope: {:.2f}% (ΔZ: {:.2f})".format(s_pct, d_z_disp)
+                        d_z_disp = UnitHelper.to_formatted_string(d_z)
+                        slope_info = "Slope: {:.2f}% (ΔZ: {})".format(s_pct, d_z_disp)
                     else:
                         slope_info = "Slope: Vertical"
             except: pass
@@ -401,15 +424,26 @@ class GradingWindow(forms.WPFWindow):
             self.Cb_SquareEnds.IsChecked = self.state.square_ends
         if hasattr(self, "Cb_ApplyOffset"):
             self.Cb_ApplyOffset.IsChecked = self.state.apply_offset
-            try: self.Tb_Offset.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.offset_val))
+            try: self.Tb_Offset.Text = UnitHelper.to_formatted_string(self.state.offset_val)
             except: self.Tb_Offset.Text = "0.0"
             
-        if hasattr(self, "Cb_ApplyPlanOffset"):
-            self.Cb_ApplyPlanOffset.IsChecked = self.state.apply_plan_offset
+        if hasattr(self, "Cb_PlanOffset"):
+            self.Cb_PlanOffset.IsChecked = getattr(self.state, "apply_plan_offset", False)
             try:
-                self.Tb_PlanOffset.Text = "{:.2f}".format(UnitHelper.from_internal(self.state.plan_offset_val))
+                self.Tb_PlanOffset.Text = UnitHelper.to_formatted_string(getattr(self.state, "plan_offset_val", "0.0"))
             except:
                 self.Tb_PlanOffset.Text = "0.0"
+                
+            dir_val = getattr(self.state, "plan_offset_dir", "Both")
+            for i in range(self.Cmb_PlanOffsetDir.Items.Count):
+                item = self.Cmb_PlanOffsetDir.Items[i]
+                content = getattr(item, "Content", None)
+                if content == dir_val:
+                    self.Cmb_PlanOffsetDir.SelectedIndex = i
+                    break
+
+        if hasattr(self, "Cb_Triangulate"):
+            self.Cb_Triangulate.IsChecked = getattr(self.state, "draw_split_lines", False)
 
         # Re-run validation so buttons are correct
         self.validate_ui()
@@ -417,8 +451,10 @@ class GradingWindow(forms.WPFWindow):
     def bind_ui(self):
         u_sym = UnitHelper.get_unit_symbol()
         self.Title += " [{}]".format(u_sym)
-        for name in ("Lbl_Width_Unit", "Lbl_Falloff_Unit", "Lbl_Grid_Unit", "Lbl_Offset_Unit"):
-            try: getattr(self, name).Text = u_sym
+        for name in ("Lbl_Width_Unit", "Lbl_Falloff_Unit", "Lbl_Grid_Unit", "Lbl_Offset_Unit", "Lbl_PlanOffset_Unit"):
+            try: 
+                lbl = getattr(self, name)
+                lbl.Visibility = Visibility.Collapsed
             except: pass
         self.refresh_ui()
 
@@ -468,9 +504,13 @@ class GradingWindow(forms.WPFWindow):
         self.Btn_WinClose.Click += self._on_close_btn
         
         # Validation Events
-        self.Tb_Width.LostFocus += self.validate_ui
-        self.Tb_Falloff.LostFocus += self.validate_ui
-        self.Tb_Grid.LostFocus += self.validate_ui
+        tbs = [self.Tb_Width, self.Tb_Falloff, self.Tb_Grid]
+        if hasattr(self, "Tb_Offset"): tbs.append(self.Tb_Offset)
+        if hasattr(self, "Tb_PlanOffset"): tbs.append(self.Tb_PlanOffset)
+        
+        for tb in tbs:
+            tb.LostFocus += self.format_textbox
+            tb.KeyDown += self.format_textbox
 
     def drag_window(self, sender, args):
         try: self.DragMove()
@@ -484,6 +524,25 @@ class GradingWindow(forms.WPFWindow):
         except: pass
         self.Close()
 
+    def format_textbox(self, sender, args):
+        # If triggered by a key press, only process if it is the Enter key
+        if hasattr(args, "Key") and args.Key != Key.Enter:
+            return
+            
+        try:
+            if hasattr(sender, "Text"):
+                # Parse to internal units (interprets spaces like '50 6')
+                val = UnitHelper.to_internal(sender.Text)
+                # Format back to display string (e.g. 50' - 6")
+                sender.Text = UnitHelper.to_formatted_string(val)
+                if hasattr(sender, "BorderBrush"):
+                    default_color = WpfColor.FromRgb(75, 85, 100) if getattr(self, "_is_dark", False) else WpfColor.FromRgb(171, 173, 179)
+                    sender.BorderBrush = SolidColorBrush(default_color)
+        except:
+            if hasattr(sender, "BorderBrush"):
+                sender.BorderBrush = SolidColorBrush(Colors.Red)
+        self.validate_ui()
+
     def validate_ui(self, sender=None, args=None):
         try:
             w = UnitHelper.to_internal(self.Tb_Width.Text)
@@ -491,6 +550,8 @@ class GradingWindow(forms.WPFWindow):
             g = UnitHelper.to_internal(self.Tb_Grid.Text)
             if hasattr(self, "Tb_Offset"):
                 _ = UnitHelper.to_internal(self.Tb_Offset.Text)
+            if hasattr(self, "Tb_PlanOffset"):
+                _ = UnitHelper.to_internal(self.Tb_PlanOffset.Text)
             
             msg = None
             
@@ -546,19 +607,29 @@ class GradingWindow(forms.WPFWindow):
 
     def update_state_from_ui(self):
         """Pushes UI values to Memory (converting Display -> Internal)."""
-        self.state.width = str(UnitHelper.to_internal(self.Tb_Width.Text))
-        self.state.falloff = str(UnitHelper.to_internal(self.Tb_Falloff.Text))
-        self.state.grid = str(UnitHelper.to_internal(self.Tb_Grid.Text))
+        try: self.state.width = str(UnitHelper.to_internal(self.Tb_Width.Text))
+        except: pass
+        try: self.state.falloff = str(UnitHelper.to_internal(self.Tb_Falloff.Text))
+        except: pass
+        try: self.state.grid = str(UnitHelper.to_internal(self.Tb_Grid.Text))
+        except: pass
         self.state.slope_val = self.Tb_Slope.Text
         self.state.reset_mode = self.Cb_ResetPoints.IsChecked
         if hasattr(self, "Cb_SquareEnds"):
             self.state.square_ends = self.Cb_SquareEnds.IsChecked
         if hasattr(self, "Cb_ApplyOffset"):
             self.state.apply_offset = self.Cb_ApplyOffset.IsChecked
-            self.state.offset_val = str(UnitHelper.to_internal(self.Tb_Offset.Text))
-        if hasattr(self, "Cb_ApplyPlanOffset"):
-            self.state.apply_plan_offset = self.Cb_ApplyPlanOffset.IsChecked
-            self.state.plan_offset_val = str(UnitHelper.to_internal(self.Tb_PlanOffset.Text))
+            try: self.state.offset_val = str(UnitHelper.to_internal(self.Tb_Offset.Text))
+            except: pass
+        if hasattr(self, "Cb_PlanOffset"):
+            self.state.apply_plan_offset = self.Cb_PlanOffset.IsChecked
+            try: self.state.plan_offset_val = str(UnitHelper.to_internal(self.Tb_PlanOffset.Text))
+            except: pass
+            if self.Cmb_PlanOffsetDir.SelectedItem:
+                self.state.plan_offset_dir = getattr(self.Cmb_PlanOffsetDir.SelectedItem, "Content", "Both")
+            
+        if hasattr(self, "Cb_Triangulate"):
+            self.state.draw_split_lines = self.Cb_Triangulate.IsChecked
 
     def _raise(self, action):
         self.update_state_from_ui()
@@ -735,20 +806,25 @@ def validate_input(state, log):
             
         # B. Performance Safety
         if g < 0.1: # 0.1 ft ~= 30mm
-            log.error("Grid resolution is dangerously small ({:.3f} ft).".format(g), 
+            g_str = UnitHelper.to_formatted_string(g)
+            log.error("Grid resolution is dangerously small ({}).".format(g_str), 
                       "This will likely freeze or crash Revit. Please use a value >= 0.25 ft.")
             return False
             
         # C. Geometric Logic
         # If the grid is bigger than the width, we might skip the whole path!
         if g > w:
-            log.error("Grid resolution ({:.2f}) is larger than Path Width ({:.2f}).".format(g, w), 
+            g_str = UnitHelper.to_formatted_string(g)
+            w_str = UnitHelper.to_formatted_string(w)
+            log.error("Grid resolution ({}) is larger than Path Width ({}).".format(g_str, w_str), 
                       "The grading points might jump over your path completely. Reduce Grid or increase Width.")
             return False
             
         # If grid is bigger than falloff, smoothing will look jagged or do nothing
         if f > 0 and g > f:
-            log.error("Grid resolution ({:.2f}) is larger than Falloff ({:.2f}).".format(g, f),
+            g_str = UnitHelper.to_formatted_string(g)
+            f_str = UnitHelper.to_formatted_string(f)
+            log.error("Grid resolution ({}) is larger than Falloff ({}).".format(g_str, f_str),
                       "Smoothing will be ineffective. Reduce Grid size.")
             # We allow this but warn, or strictly block if desired. 
             # Blocking is safer for "useless" results.
@@ -826,11 +902,15 @@ def perform_load_recipe(state):
             state.width = str(data.get("width", "6.0"))
             state.falloff = str(data.get("falloff", "10.0"))
             state.grid = str(data.get("grid", "3.0"))
-            state.slope_val = str(data.get("slope", "2.0")),
-            state.mode = str(data.get("mode", "stakes")),
+            state.slope_val = str(data.get("slope", "2.0"))
+            state.mode = str(data.get("mode", "stakes"))
             state.apply_offset = data.get("apply_offset", False)
             state.offset_val = str(data.get("offset_val", "0.0"))
+            state.apply_plan_offset = data.get("apply_plan_offset", False)
+            state.plan_offset_val = str(data.get("plan_offset_val", "0.0"))
+            state.plan_offset_dir = data.get("plan_offset_dir", "Both")
             state.square_ends = data.get("square_ends", False)
+            state.draw_split_lines = data.get("draw_split_lines", False)
             log.info("Recipe loaded successfully.")
         else:
             log.info("No grading recipe found on this element.")
@@ -1170,7 +1250,11 @@ def perform_sculpt(state):
         g_int = float(state.grid)
         
         log.info("--- SCULPT STARTED ---")
-        log.info("Parameters (Internal Ft): Width={:.2f}, Falloff={:.2f}, Grid={:.2f}".format(w_int, f_int, g_int))
+        log.info("Parameters: Width={}, Falloff={}, Grid={}".format(
+            UnitHelper.to_formatted_string(w_int), 
+            UnitHelper.to_formatted_string(f_int), 
+            UnitHelper.to_formatted_string(g_int)
+        ))
         
         try:
             ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid to Grade")
@@ -1205,7 +1289,11 @@ def perform_sculpt(state):
             "slope": state.slope_val,
             "apply_offset": state.apply_offset,
             "offset_val": state.offset_val,
-            "mode": state.mode
+            "apply_plan_offset": getattr(state, 'apply_plan_offset', False),
+            "plan_offset_val": getattr(state, 'plan_offset_val', "0.0"),
+            "plan_offset_dir": getattr(state, 'plan_offset_dir', "Both"),
+            "mode": state.mode,
+            "draw_split_lines": getattr(state, "draw_split_lines", False)
         }
         
         t_rec = Transaction(doc, "Save Recipe")
@@ -1222,7 +1310,7 @@ def perform_sculpt(state):
                 g_z_off = float(state.offset_val)
                 z_s += g_z_off
                 z_e += g_z_off
-                log.info("Applied Z-Offset: {:.2f}".format(UnitHelper.from_internal(g_z_off)))
+                log.info("Applied Z-Offset: {}".format(UnitHelper.to_formatted_string(g_z_off)))
             except: pass
         log.info("Stake Elevations: Start={:.2f}, End={:.2f}".format(z_s, z_e))
         
@@ -1457,69 +1545,70 @@ def perform_sculpt(state):
             raise
 
         # Phase 3: Triangulate (Split Lines)
-        log.info("--- PHASE 3: TRIANGULATE ---")
-        t3 = Transaction(doc, "Triangulate Path")
-        t3.Start()
-        split_lines_count = 0
-        try:
-            editor = toposolid.GetSlabShapeEditor() 
-            editor.Enable()
-            
-            all_verts = [v for v in editor.SlabShapeVertices]
-            search_tol = g_int * 0.25
-            step_len = g_int
-            if step_len < 0.1: step_len = 1.0
-            
-            l_len = curve.Length
-            current_len = 0.0
-            
-            while current_len <= l_len:
-                norm_param = current_len / l_len
-                if norm_param > 1.0: norm_param = 1.0
+        if getattr(state, 'draw_split_lines', False):
+            log.info("--- PHASE 3: TRIANGULATE ---")
+            t3 = Transaction(doc, "Triangulate Path")
+            t3.Start()
+            split_lines_count = 0
+            try:
+                editor = toposolid.GetSlabShapeEditor() 
+                editor.Enable()
                 
-                center_pt = curve.Evaluate(norm_param, True)
-                deriv = curve.ComputeDerivatives(norm_param, True)
-                tangent = deriv.BasisX.Normalize()
-                normal = tangent.CrossProduct(XYZ.BasisZ) 
+                all_verts = [v for v in editor.SlabShapeVertices]
+                search_tol = g_int * 0.25
+                step_len = g_int
+                if step_len < 0.1: step_len = 1.0
                 
-                p_left = center_pt + (normal * core_rad)
-                p_right = center_pt - (normal * core_rad) 
+                l_len = curve.Length
+                current_len = 0.0
                 
-                v_left = None
-                v_right = None
-                
-                min_d_l = search_tol
-                min_d_r = search_tol
-                
-                p_l_flat = flatten(p_left)
-                p_r_flat = flatten(p_right)
-                
-                for v in all_verts:
-                    v_flat = flatten(v.Position)
-                    d_l = v_flat.DistanceTo(p_l_flat)
-                    if d_l < min_d_l:
-                        min_d_l = d_l
-                        v_left = v
-                    d_r = v_flat.DistanceTo(p_r_flat)
-                    if d_r < min_d_r:
-                        min_d_r = d_r
-                        v_right = v
-                
-                if v_left and v_right and not v_left.Position.IsAlmostEqualTo(v_right.Position):
-                    dist_real = v_left.Position.DistanceTo(v_right.Position)
-                    if abs(dist_real - w_int) < (w_int * 0.5):
-                        try:
-                            editor.DrawSplitLine(v_left, v_right)
-                            split_lines_count += 1
-                        except: pass
-                
-                current_len += step_len
+                while current_len <= l_len:
+                    norm_param = current_len / l_len
+                    if norm_param > 1.0: norm_param = 1.0
+                    
+                    center_pt = curve.Evaluate(norm_param, True)
+                    deriv = curve.ComputeDerivatives(norm_param, True)
+                    tangent = deriv.BasisX.Normalize()
+                    normal = tangent.CrossProduct(XYZ.BasisZ) 
+                    
+                    p_left = center_pt + (normal * core_rad)
+                    p_right = center_pt - (normal * core_rad) 
+                    
+                    v_left = None
+                    v_right = None
+                    
+                    min_d_l = search_tol
+                    min_d_r = search_tol
+                    
+                    p_l_flat = flatten(p_left)
+                    p_r_flat = flatten(p_right)
+                    
+                    for v in all_verts:
+                        v_flat = flatten(v.Position)
+                        d_l = v_flat.DistanceTo(p_l_flat)
+                        if d_l < min_d_l:
+                            min_d_l = d_l
+                            v_left = v
+                        d_r = v_flat.DistanceTo(p_r_flat)
+                        if d_r < min_d_r:
+                            min_d_r = d_r
+                            v_right = v
+                    
+                    if v_left and v_right and not v_left.Position.IsAlmostEqualTo(v_right.Position):
+                        dist_real = v_left.Position.DistanceTo(v_right.Position)
+                        if abs(dist_real - w_int) < (w_int * 0.5):
+                            try:
+                                editor.DrawSplitLine(v_left, v_right)
+                                split_lines_count += 1
+                            except: pass
+                    
+                    current_len += step_len
 
-            t3.Commit()
-            log.info("Triangulation Complete. Split Lines Added: {}".format(split_lines_count))
-        except:
-            t3.RollBack()
-            raise
+                t3.Commit()
+                log.info("Triangulation Complete. Split Lines Added: {}".format(split_lines_count))
+            except:
+                t3.RollBack()
+                raise
 
         tg.Assimilate()
         log.info("Sculpt Transaction Committed.")
@@ -1562,7 +1651,7 @@ def perform_edging(state):
                 g_z_off = float(state.offset_val)
                 z_s += g_z_off
                 z_e += g_z_off
-                log.info("Applied Z-Offset: {:.2f}".format(UnitHelper.from_internal(g_z_off)))
+                log.info("Applied Z-Offset: {}".format(UnitHelper.to_formatted_string(g_z_off)))
             except: pass
         
         # Initialize Intersector for Raycasting Context
@@ -1680,10 +1769,13 @@ def perform_add_points_along_line(state):
     if g_int <= 0.1: g_int = 1.0 # Fallback safety
     
     g_plan_off = 0.0
+    g_plan_dir = "Both"
     if getattr(state, "apply_plan_offset", False):
         try:
-            g_plan_off = float(state.plan_offset_val)
-            log.info("Applied Plan Offset: {:.2f}".format(UnitHelper.from_internal(g_plan_off)))
+            g_plan_off = float(getattr(state, "plan_offset_val", "0.0"))
+            g_plan_dir = getattr(state, "plan_offset_dir", "Both")
+            if g_plan_off != 0.0:
+                log.info("Applied Plan Offset: {} ({})".format(UnitHelper.to_formatted_string(g_plan_off), g_plan_dir))
         except: pass
     
     toposolid = None
@@ -1691,22 +1783,18 @@ def perform_add_points_along_line(state):
     target_curves = []
     target_internal_pts = []
     
-    def get_curves_from_elem(elem, g_int, plan_offset):
+    def get_curves_from_elem(elem, g_int):
         crvs = []
         internal_pts = []
         region_info = None
         if isinstance(elem, CurveElement):
             c = elem.GeometryCurve
-            if plan_offset != 0.0:
-                try:
-                    offset_c = c.CreateOffset(plan_offset, XYZ.BasisZ)
-                    if offset_c: c = offset_c
-                except Exception as e:
-                    log.info("Failed to apply plan offset to line: " + str(e))
             if isinstance(c, Line) and flatten(c.GetEndPoint(0)).DistanceTo(flatten(c.GetEndPoint(1))) < 0.01:
                 log.error("Selected line is purely vertical.", "Toposolids cannot have vertically stacked points at the exact same XY coordinates. Please select a sloped or horizontal line.")
                 return None, None, None
+                
             crvs.append((c, None))
+            
         elif isinstance(elem, FilledRegion):
             view = doc.GetElement(elem.OwnerViewId)
             z_val = 0.0
@@ -1715,14 +1803,7 @@ def perform_add_points_along_line(state):
                 
             all_curves = []
             for loop in elem.GetBoundaries():
-                working_loop = loop
-                if plan_offset != 0.0:
-                    try:
-                        offset_loop = CurveLoop.CreateViaOffset(loop, plan_offset, XYZ.BasisZ)
-                        if offset_loop: working_loop = offset_loop
-                    except Exception as e:
-                        log.info("Failed to apply plan offset to region boundary: " + str(e))
-                for c in working_loop:
+                for c in loop:
                     crvs.append((c, z_val))
                     all_curves.append(c)
                     
@@ -1775,7 +1856,7 @@ def perform_add_points_along_line(state):
         try: uidoc.Selection.SetElementIds(List[ElementId]([ref_first.ElementId]))
         except: pass
         
-        crvs, int_pts, r_info = get_curves_from_elem(elem_first, g_int, g_plan_off)
+        crvs, int_pts, r_info = get_curves_from_elem(elem_first, g_int)
         target_region_info = None
         
         if crvs is not None and len(crvs) > 0:
@@ -1795,7 +1876,7 @@ def perform_add_points_along_line(state):
             
             ref_second = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Toposolid selected. Now select Line or Filled Region")
             elem_second = doc.GetElement(ref_second)
-            crvs, int_pts, r_info = get_curves_from_elem(elem_second, g_int, g_plan_off)
+            crvs, int_pts, r_info = get_curves_from_elem(elem_second, g_int)
             if crvs is not None and len(crvs) > 0:
                 target_curves = crvs
                 target_internal_pts = int_pts
@@ -1816,7 +1897,7 @@ def perform_add_points_along_line(state):
     if state.apply_offset:
         try:
             g_z_off = float(state.offset_val)
-            log.info("Applied Z-Offset: {:.2f}".format(UnitHelper.from_internal(g_z_off)))
+            log.info("Applied Z-Offset: {}".format(UnitHelper.to_formatted_string(g_z_off)))
         except: pass
     
     tg = TransactionGroup(doc, "Points Along Line")
@@ -1857,6 +1938,10 @@ def perform_add_points_along_line(state):
                         if d_xy < (g_int * 0.75):
                             should_delete = True
                             break
+                        if g_plan_off != 0.0 and g_plan_dir != "Center":
+                            if abs(d_xy - g_plan_off) < (g_int * 0.75):
+                                should_delete = True
+                                break
                             
                 if should_delete:
                     to_delete.append(v)
@@ -1876,33 +1961,42 @@ def perform_add_points_along_line(state):
         else:
             pts_to_add.extend(target_internal_pts)
         
+        def add_curve_pts(curve, param, override_z):
+            pt = curve.Evaluate(param, True)
+            try:
+                deriv = curve.ComputeDerivatives(param, True)
+                tangent = deriv.BasisX.Normalize()
+                if tangent.IsAlmostEqualTo(XYZ.Zero):
+                    normal = XYZ(0, 1, 0)
+                else:
+                    normal = XYZ.BasisZ.CrossProduct(tangent).Normalize()
+            except:
+                normal = XYZ(0, 1, 0)
+                
+            base_z = override_z if override_z is not None else pt.Z
+            base_pt = XYZ(pt.X, pt.Y, base_z + g_z_off)
+            
+            res = [base_pt]
+            # Only apply planar offsets if g_plan_off is not zero
+            if g_plan_off != 0.0:
+                offset_vec = normal.Multiply(g_plan_off)
+                if g_plan_dir == "Center":
+                    # Offset by half the value on each side, centered on the line
+                    offset_half_vec = normal.Multiply(g_plan_off / 2.0)
+                    res.append(base_pt.Add(offset_half_vec))  # Left
+                    res.append(base_pt.Subtract(offset_half_vec)) # Right
+                elif g_plan_dir == "Left":
+                    res.append(base_pt.Add(offset_vec))
+                elif g_plan_dir == "Right":
+                    res.append(base_pt.Subtract(offset_vec))
+                elif g_plan_dir == "Both":
+                    # Offset by the full value on each side
+                    res.append(base_pt.Add(offset_vec))  # Left
+                    res.append(base_pt.Subtract(offset_vec)) # Right
+            return res
         for curve, override_z in target_curves:
             length = curve.Length
             current_len = 0.0
-            
-            # Walk along curve at Grid Resolution intervals
-            while current_len < length:
-                eval_t = current_len / length
-                pt = curve.Evaluate(eval_t, True)
-                if override_z is not None:
-                    pt = XYZ(pt.X, pt.Y, override_z + g_z_off)
-                else:
-                    pt = XYZ(pt.X, pt.Y, pt.Z + g_z_off)
-                pts_to_add.append(pt)
-                current_len += g_int
-                
-            # Ensure exact end point is always included
-            end_pt = curve.GetEndPoint(1)
-            if override_z is not None:
-                end_pt = XYZ(end_pt.X, end_pt.Y, override_z + g_z_off)
-            else:
-                end_pt = XYZ(end_pt.X, end_pt.Y, end_pt.Z + g_z_off)
-                
-            if pts_to_add and flatten(pts_to_add[-1]).DistanceTo(flatten(end_pt)) < (g_int * 0.1):
-                pts_to_add[-1] = end_pt
-            else:
-                pts_to_add.append(end_pt)
-            
         # Account for Subdivision thickness offset so points sit correctly
         off = 0.0
         if toposolid.Id != raw_elem.Id:

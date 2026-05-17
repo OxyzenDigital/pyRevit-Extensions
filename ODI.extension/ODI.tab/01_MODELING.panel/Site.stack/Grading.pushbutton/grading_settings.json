@@ -1,1 +1,1 @@
-{"offset_val": "3.0", "plan_offset_val": "0.0", "win_top": "312.0", "win_left": "250.0", "width": "18.0", "slope": "-2", "apply_plan_offset": false, "square_ends": true, "falloff": "0.0", "grid": "6.0", "apply_offset": false, "mode": "stakes"}
+{"apply_offset": false, "win_left": "250.0", "square_ends": true, "width": "50.0", "grid": "6.0", "slope": "-2", "mode": "stakes", "plan_offset_val": "10.0", "win_top": "184.0", "falloff": "25.0", "offset_val": "-1.0", "plan_offset_dir": "Both", "apply_plan_offset": false, "draw_split_lines": false}
