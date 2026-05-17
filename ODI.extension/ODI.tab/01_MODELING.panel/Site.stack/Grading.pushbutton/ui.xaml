@@ -347,6 +347,7 @@
                             <RowDefinition Height="30"/>
                             <RowDefinition Height="30"/>
                             <RowDefinition Height="30"/>
+                            <RowDefinition Height="30"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Path Width:"      VerticalAlignment="Center" Grid.Row="0"/>
@@ -370,6 +371,14 @@
                                  VerticalContentAlignment="Center"
                                  ToolTip="Spacing between generated toposolid points. Smaller = smoother but slower."/>
                         <TextBlock Name="Lbl_Grid_Unit"   Text="ft" Grid.Row="2" Grid.Column="2"
+                                   VerticalAlignment="Center" Margin="4,0,0,0"
+                                   Foreground="{DynamicResource TextLightBrush}"/>
+
+                        <TextBlock Text="Outlier Tol:"  VerticalAlignment="Center" Grid.Row="3"/>
+                        <TextBox Name="Tb_OutlierTol"    Text="1.0"  Grid.Row="3" Grid.Column="1"
+                                 VerticalContentAlignment="Center"
+                                 ToolTip="Height difference threshold to delete outlier points before smoothing."/>
+                        <TextBlock Name="Lbl_OutlierTol_Unit"   Text="ft" Grid.Row="3" Grid.Column="2"
                                    VerticalAlignment="Center" Margin="4,0,0,0"
                                    Foreground="{DynamicResource TextLightBrush}"/>
                     </Grid>

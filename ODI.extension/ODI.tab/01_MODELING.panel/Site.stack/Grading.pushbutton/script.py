@@ -216,6 +216,7 @@ class GradingRecipe:
 def load_settings_from_disk():
     defaults = {
         "width": "6.0", "falloff": "10.0", "grid": "3.0", "slope": "2.0", "mode": "stakes",
+        "outlier_tol": "1.0",
         "win_top": "100", "win_left": "100"
     }
     try:
@@ -232,6 +233,7 @@ def save_state_to_disk(state):
         "falloff": state.falloff, 
         "grid": state.grid, 
         "slope": state.slope_val, 
+        "outlier_tol": getattr(state, "outlier_tol", "1.0"),
         "mode": state.mode,
         "apply_offset": state.apply_offset,
         "offset_val": state.offset_val,
@@ -258,6 +260,7 @@ class GradingState(object):
         self.width = sets.get("width", "6.0")
         self.falloff = sets.get("falloff", "10.0")
         self.grid = sets.get("grid", "3.0")
+        self.outlier_tol = sets.get("outlier_tol", "1.0")
         self.slope_val = sets.get("slope", "2.0")
         self.mode = sets.get("mode", "stakes")
         self.square_ends = sets.get("square_ends", False)
@@ -335,10 +338,14 @@ class GradingWindow(forms.WPFWindow):
             self.Tb_Width.Text = UnitHelper.to_formatted_string(self.state.width)
             self.Tb_Falloff.Text = UnitHelper.to_formatted_string(self.state.falloff)
             self.Tb_Grid.Text = UnitHelper.to_formatted_string(self.state.grid)
+            if hasattr(self, "Tb_OutlierTol"):
+                self.Tb_OutlierTol.Text = UnitHelper.to_formatted_string(self.state.outlier_tol)
         except:
             self.Tb_Width.Text = "6.0"
             self.Tb_Falloff.Text = "10.0"
             self.Tb_Grid.Text = "3.0"
+            if hasattr(self, "Tb_OutlierTol"):
+                self.Tb_OutlierTol.Text = "1.0"
         self.Tb_Slope.Text = str(self.state.slope_val)
         
         # 2. Mode
@@ -451,7 +458,7 @@ class GradingWindow(forms.WPFWindow):
     def bind_ui(self):
         u_sym = UnitHelper.get_unit_symbol()
         self.Title += " [{}]".format(u_sym)
-        for name in ("Lbl_Width_Unit", "Lbl_Falloff_Unit", "Lbl_Grid_Unit", "Lbl_Offset_Unit", "Lbl_PlanOffset_Unit"):
+        for name in ("Lbl_Width_Unit", "Lbl_Falloff_Unit", "Lbl_Grid_Unit", "Lbl_Offset_Unit", "Lbl_PlanOffset_Unit", "Lbl_OutlierTol_Unit"):
             try: 
                 lbl = getattr(self, name)
                 lbl.Visibility = Visibility.Collapsed
@@ -493,6 +500,7 @@ class GradingWindow(forms.WPFWindow):
         self.Btn_Run.Click += self.a_run
         self.Btn_Edging.Click += self.a_edge
         self.Btn_Stitch.Click += self.a_stitch
+        self.Btn_SmoothRegion.Click += self.a_smooth
         self.Btn_ReadRecipe.Click += self.a_load
         try: self.Btn_LinePoints.Click += self.a_line_points
         except AttributeError: pass
@@ -505,6 +513,7 @@ class GradingWindow(forms.WPFWindow):
         
         # Validation Events
         tbs = [self.Tb_Width, self.Tb_Falloff, self.Tb_Grid]
+        if hasattr(self, "Tb_OutlierTol"): tbs.append(self.Tb_OutlierTol)
         if hasattr(self, "Tb_Offset"): tbs.append(self.Tb_Offset)
         if hasattr(self, "Tb_PlanOffset"): tbs.append(self.Tb_PlanOffset)
         
@@ -548,6 +557,8 @@ class GradingWindow(forms.WPFWindow):
             w = UnitHelper.to_internal(self.Tb_Width.Text)
             f = UnitHelper.to_internal(self.Tb_Falloff.Text)
             g = UnitHelper.to_internal(self.Tb_Grid.Text)
+            if hasattr(self, "Tb_OutlierTol"):
+                _ = UnitHelper.to_internal(self.Tb_OutlierTol.Text)
             if hasattr(self, "Tb_Offset"):
                 _ = UnitHelper.to_internal(self.Tb_Offset.Text)
             if hasattr(self, "Tb_PlanOffset"):
@@ -613,6 +624,9 @@ class GradingWindow(forms.WPFWindow):
         except: pass
         try: self.state.grid = str(UnitHelper.to_internal(self.Tb_Grid.Text))
         except: pass
+        if hasattr(self, "Tb_OutlierTol"):
+            try: self.state.outlier_tol = str(UnitHelper.to_internal(self.Tb_OutlierTol.Text))
+            except: pass
         self.state.slope_val = self.Tb_Slope.Text
         self.state.reset_mode = self.Cb_ResetPoints.IsChecked
         if hasattr(self, "Cb_SquareEnds"):
@@ -642,6 +656,7 @@ class GradingWindow(forms.WPFWindow):
     def a_run(self, s, a): self._raise("sculpt")
     def a_edge(self, s, a): self._raise("edge")
     def a_stitch(self, s, a): self._raise("stitch")
+    def a_smooth(self, s, a): self._raise("smooth")
     def a_line_points(self, s, a): self._raise("line_points")
     def a_load(self, s, a): self._raise("load_recipe")
 
@@ -902,6 +917,7 @@ def perform_load_recipe(state):
             state.width = str(data.get("width", "6.0"))
             state.falloff = str(data.get("falloff", "10.0"))
             state.grid = str(data.get("grid", "3.0"))
+            state.outlier_tol = str(data.get("outlier_tol", "1.0"))
             state.slope_val = str(data.get("slope", "2.0"))
             state.mode = str(data.get("mode", "stakes"))
             state.apply_offset = data.get("apply_offset", False)
@@ -1115,6 +1131,14 @@ def perform_manual_stitch(state):
         
         if snap_dist <= 0: snap_dist = 1.0
 
+        g_plan_off = 0.0
+        if getattr(state, "apply_plan_offset", False):
+            try:
+                g_plan_off = float(getattr(state, "plan_offset_val", "0.0"))
+                if g_plan_off != 0.0:
+                    log.info("Applied Plan Offset: {}".format(UnitHelper.to_formatted_string(g_plan_off)))
+            except: pass
+
         try:
             ref_edge = uidoc.Selection.PickObject(ObjectType.Edge, "Select Boundary Edge to Stitch")
         except: 
@@ -1194,7 +1218,16 @@ def perform_manual_stitch(state):
                 # Logic: If close enough (but not ON the edge), propose new point
                 if best_proj and (0.005 < best_dist < snap_dist):
                     
-                    new_pt = XYZ(best_proj.X, best_proj.Y, v.Position.Z)
+                    offset_pt = best_proj
+                    if g_plan_off != 0.0:
+                        v_flat = flatten(v.Position)
+                        p_target_flat = flatten(best_proj)
+                        vec_to_v = v_flat - p_target_flat
+                        if not vec_to_v.IsAlmostEqualTo(XYZ.Zero):
+                            dir_outward = vec_to_v.Normalize().Negate()
+                            offset_pt = p_target_flat + (dir_outward * g_plan_off)
+                            
+                    new_pt = XYZ(offset_pt.X, offset_pt.Y, v.Position.Z)
                     
                     key = (round(new_pt.X, 4), round(new_pt.Y, 4))
                     if key not in existing_coords:
@@ -1286,6 +1319,7 @@ def perform_sculpt(state):
             "width": state.width, 
             "falloff": state.falloff, 
             "grid": state.grid,
+            "outlier_tol": getattr(state, "outlier_tol", "1.0"),
             "slope": state.slope_val,
             "apply_offset": state.apply_offset,
             "offset_val": state.offset_val,
@@ -1653,6 +1687,16 @@ def perform_edging(state):
                 z_e += g_z_off
                 log.info("Applied Z-Offset: {}".format(UnitHelper.to_formatted_string(g_z_off)))
             except: pass
+            
+        g_plan_off = 0.0
+        g_plan_dir = "Both"
+        if getattr(state, "apply_plan_offset", False):
+            try:
+                g_plan_off = float(getattr(state, "plan_offset_val", "0.0"))
+                g_plan_dir = getattr(state, "plan_offset_dir", "Both")
+                if g_plan_off != 0.0:
+                    log.info("Applied Plan Offset: {} ({})".format(UnitHelper.to_formatted_string(g_plan_off), g_plan_dir))
+            except: pass
         
         # Initialize Intersector for Raycasting Context
         intersector = None
@@ -1692,9 +1736,27 @@ def perform_edging(state):
         # 1. Snap existing nearby points to exact edge
         for v in all_verts: 
             p_3d, t_norm, d_xy = project_2d(curve, v.Position)
-            if abs(d_xy - edge_offset) < 1.0:
-                vec = (flatten(v.Position) - flatten(p_3d)).Normalize()
-                exact_xy = flatten(p_3d) + (vec * edge_offset)
+            vec_to_pt = flatten(v.Position) - flatten(p_3d)
+            if vec_to_pt.IsAlmostEqualTo(XYZ.Zero): continue
+            
+            try:
+                deriv = curve.ComputeDerivatives(t_norm, True)
+                tangent = deriv.BasisX.Normalize()
+                normal = XYZ.BasisZ.CrossProduct(tangent).Normalize() # Left normal
+                side_sign = 1.0 if vec_to_pt.DotProduct(normal) >= 0 else -1.0
+            except:
+                side_sign = 1.0
+                
+            active_offset = edge_offset
+            if g_plan_off != 0.0:
+                if g_plan_dir == "Both": active_offset += g_plan_off
+                elif g_plan_dir == "Center": active_offset += (g_plan_off / 2.0)
+                elif g_plan_dir == "Left" and side_sign > 0: active_offset += g_plan_off
+                elif g_plan_dir == "Right" and side_sign < 0: active_offset += g_plan_off
+
+            if abs(d_xy - active_offset) < 1.0:
+                vec = vec_to_pt.Normalize()
+                exact_xy = flatten(p_3d) + (vec * active_offset)
                 road_z = z_s + t_norm * (z_e - z_s)
                 
                 t_check = XYZ(exact_xy.X, exact_xy.Y, 0)
@@ -1712,13 +1774,23 @@ def perform_edging(state):
         while t_val <= 1.001:
             eval_t = max(0.0, min(1.0, t_val))
             center_pt = curve.Evaluate(eval_t, True)
-            tangent = curve.ComputeDerivatives(eval_t, True).BasisX.Normalize()
-            normal = tangent.CrossProduct(XYZ.BasisZ)
+            try:
+                tangent = curve.ComputeDerivatives(eval_t, True).BasisX.Normalize()
+                normal = XYZ.BasisZ.CrossProduct(tangent).Normalize()
+            except:
+                normal = XYZ(0, 1, 0)
             
             road_z = z_s + eval_t * (z_e - z_s)
             
             for side in [1.0, -1.0]:
-                offset_vec = normal * (side * edge_offset)
+                active_offset = edge_offset
+                if g_plan_off != 0.0:
+                    if g_plan_dir == "Both": active_offset += g_plan_off
+                    elif g_plan_dir == "Center": active_offset += (g_plan_off / 2.0)
+                    elif g_plan_dir == "Left" and side > 0: active_offset += g_plan_off
+                    elif g_plan_dir == "Right" and side < 0: active_offset += g_plan_off
+                    
+                offset_vec = normal * (side * active_offset)
                 final_pt = center_pt + offset_vec
                 
                 # Raycast check for validity + offset
@@ -1758,6 +1830,177 @@ def perform_edging(state):
     except Exception as e:
         tg.RollBack()
         log.error("Edging failed.", e)
+    finally:
+        log.show()
+
+def perform_smooth_region(state):
+    log = BatchLogger()
+    log.info("--- SMOOTH REGION STARTED ---")
+    
+    try:
+        # 1. Pick Elements
+        ref_topo = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid to Smooth")
+        raw_topo = doc.GetElement(ref_topo)
+        toposolid = resolve_toposolid_host(doc, raw_topo)
+        if not isinstance(toposolid, Toposolid):
+            log.error("First selection is not a Toposolid.")
+            log.show(); return
+        
+        ref_reg = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Filled Region defining the boundary")
+        region_elem = doc.GetElement(ref_reg)
+        if not isinstance(region_elem, FilledRegion):
+            log.error("Second selection is not a Filled Region.")
+            log.show(); return
+            
+        # 2. Calculate Dynamic Resolution based on View Zoom
+        active_view_id = doc.ActiveView.Id
+        view_width = 50.0
+        for uv in uidoc.GetOpenUIViews():
+            if uv.ViewId == active_view_id:
+                corners = uv.GetZoomCorners()
+                view_width = abs(corners[1].X - corners[0].X)
+                break
+        
+        # Divide screen width by 30 to get a nice smoothing resolution, clamped to a safe minimum of 0.25ft (3 inches)
+        dynamic_res = max(0.25, view_width / 30.0) 
+        log.info("Dynamic Grid Resolution: {} (Based on current zoom level)".format(UnitHelper.to_formatted_string(dynamic_res)))
+        
+        # 3. Extract Region Geometry
+        all_curves = []
+        for loop in region_elem.GetBoundaries():
+            for c in loop: all_curves.append(c)
+        
+        min_x = min([c.Evaluate(i/10.0, True).X for c in all_curves for i in range(11)])
+        max_x = max([c.Evaluate(i/10.0, True).X for c in all_curves for i in range(11)])
+        min_y = min([c.Evaluate(i/10.0, True).Y for c in all_curves for i in range(11)])
+        max_y = max([c.Evaluate(i/10.0, True).Y for c in all_curves for i in range(11)])
+        
+        def is_inside(pt):
+            if pt.X < min_x or pt.X > max_x or pt.Y < min_y or pt.Y > max_y: return False
+            ints = 0
+            ray_y = pt.Y + 0.000137
+            for c in all_curves:
+                c_z = c.GetEndPoint(0).Z
+                ray = Line.CreateBound(XYZ(pt.X, ray_y, c_z), XYZ(max_x + 100.0, ray_y, c_z))
+                res_arr = clr.Reference[IntersectionResultArray]()
+                res = c.Intersect(ray, res_arr)
+                if res == SetComparisonResult.Overlap and res_arr.Value is not None:
+                    ints += res_arr.Value.Size
+            return ints % 2 != 0
+
+        # Raycast Context
+        intersector = None
+        ray_start_z = get_toposolid_max_z(toposolid) + 100.0
+        view3d = doc.ActiveView if doc.ActiveView.ViewType == ViewType.ThreeD else None
+        if not view3d:
+            for v in FilteredElementCollector(doc).OfClass(View3D).WhereElementIsNotElementType().ToElements():
+                if not v.IsTemplate: view3d = v; break
+        if view3d:
+            intersector = ReferenceIntersector(toposolid.Id, FindReferenceTarget.Element, view3d)
+        
+        # 4. Laplacian Smoothing Process
+        tg = TransactionGroup(doc, "Smooth Region")
+        tg.Start()
+        t = Transaction(doc, "Smooth Points")
+        t.Start()
+        
+        editor = toposolid.GetSlabShapeEditor()
+        editor.Enable()
+        
+        class Node:
+            def __init__(self, x, y, z, v_ref=None):
+                self.x = x; self.y = y; self.z = z
+                self.v_ref = v_ref
+                self.next_z = z
+        
+        nodes = []
+        interior_nodes = []
+        
+        off = get_subdivision_offset(doc, raw_topo.Id) if toposolid.Id != raw_topo.Id else 0.0
+
+        # A. Classify existing points
+        for v in editor.SlabShapeVertices:
+            n = Node(v.Position.X, v.Position.Y, v.Position.Z, v)
+            if is_inside(v.Position): interior_nodes.append(n)
+            nodes.append(n)
+            
+        # A.1 Outlier Detection
+        try: outlier_tol_val = float(state.outlier_tol)
+        except: outlier_tol_val = 1.0
+        
+        outlier_nodes = []
+        outlier_radius = dynamic_res * 2.0
+        for n in interior_nodes:
+            neighbors = [nb for nb in nodes if nb != n and math.hypot(n.x - nb.x, n.y - nb.y) < outlier_radius]
+            if len(neighbors) >= 3:
+                mean_z = sum(nb.z for nb in neighbors) / len(neighbors)
+                variance = sum((nb.z - mean_z) ** 2 for nb in neighbors) / len(neighbors)
+                std_dev = math.sqrt(max(0.0, variance))
+                
+                # Flag as outlier if it deviates significantly (e.g. > 2 std devs AND > user threshold)
+                if abs(n.z - mean_z) > max(2.0 * std_dev, outlier_tol_val):
+                    outlier_nodes.append(n)
+                    
+        if outlier_nodes:
+            log.info("Removing {} outlier points before smoothing.".format(len(outlier_nodes)))
+            for out_n in outlier_nodes:
+                if out_n in interior_nodes: interior_nodes.remove(out_n)
+                if out_n in nodes: nodes.remove(out_n)
+                if out_n.v_ref:
+                    try: editor.DeletePoint(out_n.v_ref)
+                    except: pass
+        
+        # B. Densify (Add missing grid points)
+        x = math.floor(min_x / dynamic_res) * dynamic_res
+        while x <= max_x:
+            y = math.floor(min_y / dynamic_res) * dynamic_res
+            while y <= max_y:
+                pt = XYZ(x, y, 0)
+                if is_inside(pt):
+                    # Ensure not too close to existing vertices
+                    if not any(math.hypot(n.x - x, n.y - y) < dynamic_res * 0.4 for n in interior_nodes):
+                        rz = 0.0
+                        if intersector:
+                            z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
+                            if z_hit is not None: rz = z_hit - off
+                        n = Node(x, y, rz)
+                        interior_nodes.append(n)
+                        nodes.append(n)
+                y += dynamic_res
+            x += dynamic_res
+        
+        # C. Identify boundaries and Smooth
+        smoothing_radius = dynamic_res * 1.5
+        boundary_nodes = [n for n in nodes if n not in interior_nodes and any(math.hypot(n.x - i.x, n.y - i.y) < smoothing_radius for i in interior_nodes)]
+        active_nodes = interior_nodes + boundary_nodes
+        
+        for _ in range(5): # 5 Iterations of Laplacian averaging
+            for n in interior_nodes:
+                neighbors = [a for a in active_nodes if a != n and math.hypot(n.x - a.x, n.y - a.y) < smoothing_radius]
+                if neighbors:
+                    n.next_z = sum(nb.z for nb in neighbors) / len(neighbors)
+            for n in interior_nodes:
+                n.z = n.next_z
+        
+        # D. Apply to Toposolid
+        add_count, mod_count = 0, 0
+        for n in interior_nodes:
+            final_pt = XYZ(n.x, n.y, n.z)
+            if n.v_ref:
+                if abs(n.v_ref.Position.Z - n.z) > 0.005:
+                    editor.ModifySlabShapeVertex(n.v_ref, final_pt)
+                    mod_count += 1
+            else:
+                editor.AddPoint(final_pt)
+                add_count += 1
+                
+        t.Commit()
+        tg.Assimilate()
+        log.info("Smooth Region Complete.\nAdded {} new points, Smoothed {} existing points.".format(add_count, mod_count))
+        
+    except Exception as e:
+        if 'tg' in locals() and tg.HasStarted(): tg.RollBack()
+        log.error("Smooth Region Failed", "{}\n{}".format(e, traceback.format_exc()))
     finally:
         log.show()
 
@@ -1996,7 +2239,20 @@ def perform_add_points_along_line(state):
             return res
         for curve, override_z in target_curves:
             length = curve.Length
+            step_len = g_int
+            if step_len < 0.1: step_len = 1.0
+            
             current_len = 0.0
+            while current_len <= length + 0.001:
+                param = current_len / length
+                if param > 1.0: param = 1.0
+                pts_to_add.extend(add_curve_pts(curve, param, override_z))
+                current_len += step_len
+                
+            # Ensure the exact end point is included if it was missed
+            if abs((current_len - step_len) - length) > 0.01:
+                pts_to_add.extend(add_curve_pts(curve, 1.0, override_z))
+                
         # Account for Subdivision thickness offset so points sit correctly
         off = 0.0
         if toposolid.Id != raw_elem.Id:
@@ -2188,6 +2444,9 @@ if __name__ == '__main__':
             
         elif action == "stitch": 
             perform_manual_stitch(state)
+            
+        elif action == "smooth":
+            perform_smooth_region(state)
             
         elif action == "line_points":
             perform_add_points_along_line(state)
