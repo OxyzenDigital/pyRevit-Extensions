@@ -500,7 +500,8 @@ class GradingWindow(forms.WPFWindow):
         self.Btn_Run.Click += self.a_run
         self.Btn_Edging.Click += self.a_edge
         self.Btn_Stitch.Click += self.a_stitch
-        self.Btn_SmoothRegion.Click += self.a_smooth
+        try: self.Btn_SmoothRegion.Click += self.a_smooth
+        except AttributeError: pass
         self.Btn_ReadRecipe.Click += self.a_load
         try: self.Btn_LinePoints.Click += self.a_line_points
         except AttributeError: pass
@@ -2326,7 +2327,8 @@ def perform_add_points_along_line(state):
                             
                     if intersections % 2 != 0:
                         try:
-                            editor.ModifySlabShapeVertex(v, XYZ(pos.X, pos.Y, target_z))
+                            editor.DeletePoint(v)
+                            editor.AddPoint(XYZ(pos.X, pos.Y, target_z))
                             modified += 1
                         except: pass
                         
