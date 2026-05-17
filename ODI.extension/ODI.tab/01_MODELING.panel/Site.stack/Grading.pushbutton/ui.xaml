@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Toposolid Grading Tool" Height="830" Width="420"
+        Title="Toposolid Grading Tool" Height="890" Width="420"
         WindowStartupLocation="Manual" Left="250" Top="100"
         ResizeMode="CanResize"
         WindowStyle="None"
@@ -391,22 +391,61 @@
             <StackPanel>
 
                 <!-- Options row -->
-                <WrapPanel HorizontalAlignment="Center" Margin="0,0,0,8">
-                    <CheckBox Name="Cb_ResetPoints" Content="Reset existing points"
-                              Margin="0,0,16,0" VerticalAlignment="Center"
-                              FontWeight="SemiBold" IsChecked="False"
-                              ToolTip="Remove existing toposolid points inside the grading zone before adding new ones. &#10;Useful when re-running on the same path with different settings."/>
-                    <CheckBox Name="Cb_ApplyOffset" Content="Z-Offset:"
-                              Margin="0,0,6,0" VerticalAlignment="Center"
-                              FontWeight="SemiBold" IsChecked="False"
-                              ToolTip="Apply a fixed vertical offset to all generated points (e.g. for a paving thickness)."/>
-                    <TextBox Name="Tb_Offset" Text="0.0" Width="44" Height="22"
-                             VerticalContentAlignment="Center"
-                             IsEnabled="{Binding ElementName=Cb_ApplyOffset, Path=IsChecked}"/>
-                    <TextBlock Name="Lbl_Offset_Unit" Text="ft"
-                               VerticalAlignment="Center" Margin="4,0,0,0"
-                               Foreground="{DynamicResource TextLightBrush}"/>
-                </WrapPanel>
+                <GroupBox Header="4. Options" Padding="10" Margin="0,0,0,8"
+                          Background="{DynamicResource ControlBrush}"
+                          BorderBrush="{DynamicResource BorderBrush}">
+                    <StackPanel>
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="150"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox Name="Cb_ResetPoints" Content="Reset existing points" Grid.Column="0"
+                                      VerticalAlignment="Center" ToolTip="Remove existing toposolid points inside the grading zone before adding new ones."/>
+                            <CheckBox Name="Cb_Triangulate" Content="Add Split Lines" Grid.Column="1"
+                                      VerticalAlignment="Center" ToolTip="Draw split lines perpendicular to the path to enforce uniform triangulation."/>
+                        </Grid>
+                        
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100"/>
+                                <ColumnDefinition Width="40"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox Name="Cb_ApplyOffset" Content="Z-Offset:" Grid.Column="0"
+                                      VerticalAlignment="Center" ToolTip="Apply a fixed vertical offset to all generated points."/>
+                            <TextBox Name="Tb_Offset" Text="0.0" Grid.Column="1" Height="22"
+                                     VerticalContentAlignment="Center"
+                                     IsEnabled="{Binding ElementName=Cb_ApplyOffset, Path=IsChecked}"/>
+                            <TextBlock Name="Lbl_Offset_Unit" Text="ft" Grid.Column="2"
+                                       VerticalAlignment="Center" Margin="4,0,0,0" Foreground="{DynamicResource TextLightBrush}"/>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="100"/>
+                                <ColumnDefinition Width="40"/>
+                                <ColumnDefinition Width="75"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <CheckBox Name="Cb_PlanOffset" Content="Plan Offset:" Grid.Column="0"
+                                      VerticalAlignment="Center" ToolTip="Offset graded points horizontally from the line."/>
+                            <TextBox Name="Tb_PlanOffset" Text="0.0" Grid.Column="1" Height="22"
+                                     VerticalContentAlignment="Center"
+                                     IsEnabled="{Binding ElementName=Cb_PlanOffset, Path=IsChecked}"/>
+                            <ComboBox Name="Cmb_PlanOffsetDir" Grid.Column="2" Height="22" Margin="4,0,0,0"
+                                      IsEnabled="{Binding ElementName=Cb_PlanOffset, Path=IsChecked}"
+                                      VerticalContentAlignment="Center">
+                                <ComboBoxItem Content="Center"/>
+                                <ComboBoxItem Content="Left"/>
+                                <ComboBoxItem Content="Right"/>
+                                <ComboBoxItem Content="Both" IsSelected="True"/>
+                            </ComboBox>
+                            <TextBlock Name="Lbl_PlanOffset_Unit" Text="ft" Grid.Column="3"
+                                       VerticalAlignment="Center" Margin="4,0,0,0" Foreground="{DynamicResource TextLightBrush}"/>
+                        </Grid>
+                    </StackPanel>
+                </GroupBox>
 
                 <!-- Status bar — colour and text driven by set_status() in code -->
                 <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
