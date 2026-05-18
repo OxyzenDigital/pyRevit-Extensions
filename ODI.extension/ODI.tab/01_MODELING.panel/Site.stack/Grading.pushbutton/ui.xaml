@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Toposolid Grading Tool" Height="910" Width="420"
+        Title="Toposolid Grading Tool" Height="930" Width="420"
         WindowStartupLocation="Manual" Left="250" Top="100"
         ResizeMode="CanResize"
         WindowStyle="None"
@@ -387,6 +387,10 @@
                               Content="Square Ends  (stop grading orthogonally at line ends)"
                               Margin="0,4,0,0" IsChecked="False"
                               ToolTip="If checked, grading stops at a flat plane perpendicular to the guide line at each end, &#10;rather than fading out radially beyond the endpoints."/>
+                    <CheckBox Name="Cb_SharpSmoothing"
+                              Content="Sharp Smoothing (ignore falloff for Smooth Path)"
+                              Margin="0,4,0,0" IsChecked="False"
+                              ToolTip="If checked, the 'Smooth Path' operation only affects points strictly within the Path Width, keeping edges sharp by ignoring the Falloff distance."/>
                 </StackPanel>
             </GroupBox>
         </Grid>
@@ -503,6 +507,9 @@
                     <Button Name="Btn_SmoothRegion" Content="Smooth Region"     Height="30"
                             Grid.Row="1" Grid.Column="0" Margin="0,0,4,0"
                             ToolTip="Select a Toposolid and a Filled Region to apply Laplacian smoothing to the interior points."/>
+                    <Button Name="Btn_SmoothPath"   Content="Smooth Path"       Height="30"
+                            Grid.Row="1" Grid.Column="1" Margin="0,0,0,0"
+                            ToolTip="Select a Toposolid and a Guide Line to apply Laplacian smoothing along the path using the Path Width."/>
                 </Grid>
 
             </StackPanel>
