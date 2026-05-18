@@ -241,6 +241,7 @@ def save_state_to_disk(state):
         "plan_offset_val": getattr(state, 'plan_offset_val', "0.0"),
         "plan_offset_dir": getattr(state, 'plan_offset_dir', "Both"),
         "square_ends": state.square_ends,
+        "sharp_smoothing": getattr(state, 'sharp_smoothing', False),
         "draw_split_lines": getattr(state, 'draw_split_lines', False),
         "win_top": str(state.win_top),
         "win_left": str(state.win_left)
@@ -264,6 +265,7 @@ class GradingState(object):
         self.slope_val = sets.get("slope", "2.0")
         self.mode = sets.get("mode", "stakes")
         self.square_ends = sets.get("square_ends", False)
+        self.sharp_smoothing = sets.get("sharp_smoothing", False)
         self.apply_offset = sets.get("apply_offset", False)
         self.offset_val = sets.get("offset_val", "0.0")
         self.apply_plan_offset = sets.get("apply_plan_offset", False)
@@ -429,6 +431,8 @@ class GradingWindow(forms.WPFWindow):
         self.Cb_ResetPoints.IsChecked = self.state.reset_mode
         if hasattr(self, "Cb_SquareEnds"):
             self.Cb_SquareEnds.IsChecked = self.state.square_ends
+        if hasattr(self, "Cb_SharpSmoothing"):
+            self.Cb_SharpSmoothing.IsChecked = getattr(self.state, "sharp_smoothing", False)
         if hasattr(self, "Cb_ApplyOffset"):
             self.Cb_ApplyOffset.IsChecked = self.state.apply_offset
             try: self.Tb_Offset.Text = UnitHelper.to_formatted_string(self.state.offset_val)
@@ -501,6 +505,8 @@ class GradingWindow(forms.WPFWindow):
         self.Btn_Edging.Click += self.a_edge
         self.Btn_Stitch.Click += self.a_stitch
         try: self.Btn_SmoothRegion.Click += self.a_smooth
+        except AttributeError: pass
+        try: self.Btn_SmoothPath.Click += self.a_smooth_path
         except AttributeError: pass
         self.Btn_ReadRecipe.Click += self.a_load
         try: self.Btn_LinePoints.Click += self.a_line_points
@@ -632,6 +638,8 @@ class GradingWindow(forms.WPFWindow):
         self.state.reset_mode = self.Cb_ResetPoints.IsChecked
         if hasattr(self, "Cb_SquareEnds"):
             self.state.square_ends = self.Cb_SquareEnds.IsChecked
+        if hasattr(self, "Cb_SharpSmoothing"):
+            self.state.sharp_smoothing = self.Cb_SharpSmoothing.IsChecked
         if hasattr(self, "Cb_ApplyOffset"):
             self.state.apply_offset = self.Cb_ApplyOffset.IsChecked
             try: self.state.offset_val = str(UnitHelper.to_internal(self.Tb_Offset.Text))
@@ -658,6 +666,7 @@ class GradingWindow(forms.WPFWindow):
     def a_edge(self, s, a): self._raise("edge")
     def a_stitch(self, s, a): self._raise("stitch")
     def a_smooth(self, s, a): self._raise("smooth")
+    def a_smooth_path(self, s, a): self._raise("smooth_path")
     def a_line_points(self, s, a): self._raise("line_points")
     def a_load(self, s, a): self._raise("load_recipe")
 
@@ -696,17 +705,33 @@ def project_2d(curve, pt):
         d = flatten(pt).DistanceTo(flatten(pt_3d))
         return pt_3d, t_bounded, d
     else:
-        best_pt = None; best_dist = float('inf'); best_t = 0.0
+        best_pt = None; best_dist = float('inf'); best_t_raw = 0.0
         p_min, p_max = curve.GetEndParameter(0), curve.GetEndParameter(1)
-        steps = 50
+        
+        # 1. Broad scan based on curve length
+        steps = int(max(50, curve.Length * 4.0))
         for i in range(steps + 1):
-            t_norm = i / float(steps)
-            t_raw = p_min + t_norm * (p_max - p_min)
+            t_raw = p_min + (i / float(steps)) * (p_max - p_min)
             p_3d = curve.Evaluate(t_raw, False)
             d = flatten(pt).DistanceTo(flatten(p_3d))
             if d < best_dist:
-                best_dist = d; best_pt = p_3d; best_t = t_norm
-        return best_pt, best_t, best_dist
+                best_dist = d; best_pt = p_3d; best_t_raw = t_raw
+                
+        # 2. Refined local scan for high precision
+        local_steps = 20
+        step_size = (p_max - p_min) / float(steps)
+        local_min = max(p_min, best_t_raw - step_size)
+        local_max = min(p_max, best_t_raw + step_size)
+        
+        for i in range(local_steps + 1):
+            t_raw = local_min + (i / float(local_steps)) * (local_max - local_min)
+            p_3d = curve.Evaluate(t_raw, False)
+            d = flatten(pt).DistanceTo(flatten(p_3d))
+            if d < best_dist:
+                best_dist = d; best_pt = p_3d; best_t_raw = t_raw
+                
+        best_t_norm = (best_t_raw - p_min) / (p_max - p_min)
+        return best_pt, best_t_norm, best_dist
 
 def get_toposolid_max_z(toposolid):
     bb = toposolid.get_BoundingBox(None)
@@ -909,10 +934,14 @@ def calculate_and_adjust_stakes(state, log):
 # 5. EXECUTION
 # ==========================================
 def perform_load_recipe(state):
-    log = BatchLogger()
     try:
         ref = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid")
         if not ref: return
+    except:
+        return # Cancelled
+        
+    log = BatchLogger()
+    try:
         data = GradingRecipe.read_recipe(doc.GetElement(ref))
         if data:
             state.width = str(data.get("width", "6.0"))
@@ -927,6 +956,7 @@ def perform_load_recipe(state):
             state.plan_offset_val = str(data.get("plan_offset_val", "0.0"))
             state.plan_offset_dir = data.get("plan_offset_dir", "Both")
             state.square_ends = data.get("square_ends", False)
+            state.sharp_smoothing = data.get("sharp_smoothing", False)
             state.draw_split_lines = data.get("draw_split_lines", False)
             log.info("Recipe loaded successfully.")
         else:
@@ -1328,6 +1358,7 @@ def perform_sculpt(state):
             "plan_offset_val": getattr(state, 'plan_offset_val', "0.0"),
             "plan_offset_dir": getattr(state, 'plan_offset_dir', "Both"),
             "mode": state.mode,
+            "sharp_smoothing": getattr(state, "sharp_smoothing", False),
             "draw_split_lines": getattr(state, "draw_split_lines", False)
         }
         
@@ -1836,61 +1867,305 @@ def perform_edging(state):
         log.show()
 
 def perform_smooth_region(state):
-    log = BatchLogger()
-    log.info("--- SMOOTH REGION STARTED ---")
-    
     try:
-        # 1. Pick Elements
         ref_topo = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid to Smooth")
         raw_topo = doc.GetElement(ref_topo)
         toposolid = resolve_toposolid_host(doc, raw_topo)
         if not isinstance(toposolid, Toposolid):
+            forms.alert("First selection must be a Toposolid.", exitscript=True)
+    except:
+        return # Cancelled
+        
+    log = BatchLogger()
+    
+    # Raycast Context (setup once)
+    intersector = None
+    ray_start_z = get_toposolid_max_z(toposolid) + 100.0
+    view3d = doc.ActiveView if doc.ActiveView.ViewType == ViewType.ThreeD else None
+    if not view3d:
+        for v in FilteredElementCollector(doc).OfClass(View3D).WhereElementIsNotElementType().ToElements():
+            if not v.IsTemplate: view3d = v; break
+    if view3d:
+        intersector = ReferenceIntersector(toposolid.Id, FindReferenceTarget.Element, view3d)
+
+    # --- LOOP START ---
+    while True:
+        tg = None
+        try:
+            # Pick one or more Filled Regions
+            refs = uidoc.Selection.PickObjects(ObjectType.Element, UniversalFilter(), "Select Filled Regions (Finish when done, ESC to exit)")
+            region_elems = [doc.GetElement(r) for r in refs if isinstance(doc.GetElement(r), FilledRegion)]
+        except:
+            break # User pressed ESC to exit loop
+
+        if not region_elems:
+            log.error("No valid Filled Regions selected.")
+            continue
+            
+        log.info("--- SMOOTH REGION STARTED ---")
+        
+        try:
+            # 1. Parameters
+            g_int = float(state.grid)
+            dynamic_res = max(0.25, g_int) 
+            log.info("Grid Resolution: {}".format(UnitHelper.to_formatted_string(dynamic_res)))
+            
+            # 2. Extract Region Geometries
+            region_data = []
+            combined_min_x, combined_max_x = float('inf'), float('-inf')
+            combined_min_y, combined_max_y = float('inf'), float('-inf')
+
+            for region_elem in region_elems:
+                curves = []
+                for loop in region_elem.GetBoundaries():
+                    for c in loop: curves.append(c)
+                
+                if not curves: continue
+
+                min_x = min([c.Evaluate(i/10.0, True).X for c in curves for i in range(11)])
+                max_x = max([c.Evaluate(i/10.0, True).X for c in curves for i in range(11)])
+                min_y = min([c.Evaluate(i/10.0, True).Y for c in curves for i in range(11)])
+                max_y = max([c.Evaluate(i/10.0, True).Y for c in curves for i in range(11)])
+                
+                region_data.append({'curves': curves, 'min_x': min_x, 'max_x': max_x, 'min_y': min_y, 'max_y': max_y})
+                
+                combined_min_x = min(combined_min_x, min_x)
+                combined_max_x = max(combined_max_x, max_x)
+                combined_min_y = min(combined_min_y, min_y)
+                combined_max_y = max(combined_max_y, max_y)
+
+            def is_inside(pt):
+                for r_data in region_data:
+                    if pt.X < r_data['min_x'] or pt.X > r_data['max_x'] or pt.Y < r_data['min_y'] or pt.Y > r_data['max_y']:
+                        continue
+                    
+                    ints = 0
+                    ray_y = pt.Y + 0.000137
+                    for c in r_data['curves']:
+                        c_z = c.GetEndPoint(0).Z
+                        ray = Line.CreateBound(XYZ(pt.X, ray_y, c_z), XYZ(r_data['max_x'] + 100.0, ray_y, c_z))
+                        res_arr = clr.Reference[IntersectionResultArray]()
+                        res = c.Intersect(ray, res_arr)
+                        if res == SetComparisonResult.Overlap and res_arr.Value is not None:
+                            ints += res_arr.Value.Size
+                    if ints % 2 != 0:
+                        return True # It's inside at least one region
+                return False
+
+            # 3. Laplacian Smoothing Process
+            tg = TransactionGroup(doc, "Smooth Region")
+            tg.Start()
+            t = Transaction(doc, "Smooth Points")
+            t.Start()
+            
+            editor = toposolid.GetSlabShapeEditor()
+            editor.Enable()
+            
+            class Node:
+                def __init__(self, x, y, z, v_ref=None):
+                    self.x = x; self.y = y; self.z = z
+                    self.v_ref = v_ref
+                    self.next_z = z
+            
+            nodes = []
+            interior_nodes = []
+            
+            off = get_subdivision_offset(doc, raw_topo.Id) if toposolid.Id != raw_topo.Id else 0.0
+
+            # A. Classify existing points
+            for v in editor.SlabShapeVertices:
+                n = Node(v.Position.X, v.Position.Y, v.Position.Z, v)
+                if is_inside(v.Position): interior_nodes.append(n)
+                nodes.append(n)
+                
+            # A.1 Outlier Detection
+            try: outlier_tol_val = float(state.outlier_tol)
+            except: outlier_tol_val = 1.0
+            
+            outlier_nodes = []
+            outlier_radius = dynamic_res * 2.0
+            for n in interior_nodes:
+                neighbors = [nb for nb in nodes if nb != n and math.hypot(n.x - nb.x, n.y - nb.y) < outlier_radius]
+                if len(neighbors) >= 3:
+                    mean_z = sum(nb.z for nb in neighbors) / len(neighbors)
+                    variance = sum((nb.z - mean_z) ** 2 for nb in neighbors) / len(neighbors)
+                    std_dev = math.sqrt(max(0.0, variance))
+                    if abs(n.z - mean_z) > max(2.0 * std_dev, outlier_tol_val):
+                        outlier_nodes.append(n)
+                        
+            if outlier_nodes:
+                log.info("Removing {} outlier points before smoothing.".format(len(outlier_nodes)))
+                for out_n in outlier_nodes:
+                    if out_n in interior_nodes: interior_nodes.remove(out_n)
+                    if out_n in nodes: nodes.remove(out_n)
+                    if out_n.v_ref:
+                        try: editor.DeletePoint(out_n.v_ref)
+                        except: pass
+            
+            # B. Densify (Add missing grid points)
+            x = math.floor(combined_min_x / dynamic_res) * dynamic_res
+            while x <= combined_max_x:
+                y = math.floor(combined_min_y / dynamic_res) * dynamic_res
+                while y <= combined_max_y:
+                    pt = XYZ(x, y, 0)
+                    if is_inside(pt):
+                        if not any(math.hypot(n.x - x, n.y - y) < dynamic_res * 0.4 for n in interior_nodes):
+                            rz = 0.0
+                            if intersector:
+                                z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
+                                if z_hit is not None: rz = z_hit - off
+                            n = Node(x, y, rz)
+                            interior_nodes.append(n)
+                            nodes.append(n)
+                    y += dynamic_res
+                x += dynamic_res
+            
+            # C. Identify boundaries and Smooth
+            smoothing_radius = dynamic_res * 1.5
+            boundary_nodes = [n for n in nodes if n not in interior_nodes and any(math.hypot(n.x - i.x, n.y - i.y) < smoothing_radius for i in interior_nodes)]
+            active_nodes = interior_nodes + boundary_nodes
+            
+            for _ in range(5):
+                for n in interior_nodes:
+                    neighbors = [a for a in active_nodes if a != n and math.hypot(n.x - a.x, n.y - a.y) < smoothing_radius]
+                    if neighbors:
+                        n.next_z = sum(nb.z for nb in neighbors) / len(neighbors)
+                for n in interior_nodes:
+                    n.z = n.next_z
+            
+            # D. Apply to Toposolid
+            add_count, mod_count = 0, 0
+            for n in interior_nodes:
+                final_pt = XYZ(n.x, n.y, n.z)
+                if n.v_ref:
+                    if abs(n.v_ref.Position.Z - n.z) > 0.005:
+                        try:
+                            editor.DeletePoint(n.v_ref)
+                            editor.AddPoint(final_pt)
+                            mod_count += 1
+                        except: pass
+                else:
+                    try:
+                        editor.AddPoint(final_pt)
+                        add_count += 1
+                    except: pass
+                    
+            t.Commit()
+            tg.Assimilate()
+            log.info("Smooth Region Complete.\nAdded {} new points, Smoothed {} existing points.\n".format(add_count, mod_count))
+            
+        except Exception as loop_e:
+            if tg is not None and tg.HasStarted(): tg.RollBack()
+            log.error("Smooth Region Iteration Failed", "{}\n{}".format(loop_e, traceback.format_exc()))
+
+    log.show()
+
+def perform_smooth_path(state):
+    try:
+        ref_topo = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid to Smooth")
+        raw_topo = doc.GetElement(ref_topo)
+        ref_lines = uidoc.Selection.PickObjects(ObjectType.Element, UniversalFilter(), "Select Guide Lines (Tab for chain, Finish when done)")
+        line_elems = [doc.GetElement(ref) for ref in ref_lines]
+    except:
+        return # Cancelled
+        
+    log = BatchLogger()
+    
+    try:
+        # 1. Elements
+        toposolid = resolve_toposolid_host(doc, raw_topo)
+        if not isinstance(toposolid, Toposolid):
             log.error("First selection is not a Toposolid.")
             log.show(); return
-        
-        ref_reg = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Filled Region defining the boundary")
-        region_elem = doc.GetElement(ref_reg)
-        if not isinstance(region_elem, FilledRegion):
-            log.error("Second selection is not a Filled Region.")
-            log.show(); return
             
-        # 2. Calculate Dynamic Resolution based on View Zoom
-        active_view_id = doc.ActiveView.Id
-        view_width = 50.0
-        for uv in uidoc.GetOpenUIViews():
-            if uv.ViewId == active_view_id:
-                corners = uv.GetZoomCorners()
-                view_width = abs(corners[1].X - corners[0].X)
-                break
+        curves = []
+        for elem in line_elems:
+            if isinstance(elem, CurveElement):
+                curves.append(elem.GeometryCurve)
+                
+        if not curves:
+            log.error("No valid Lines/Curves selected.")
+            log.show(); return
         
-        # Divide screen width by 30 to get a nice smoothing resolution, clamped to a safe minimum of 0.25ft (3 inches)
-        dynamic_res = max(0.25, view_width / 30.0) 
-        log.info("Dynamic Grid Resolution: {} (Based on current zoom level)".format(UnitHelper.to_formatted_string(dynamic_res)))
+        # 2. Parameters
+        w_int = float(state.width)
+        f_int = float(state.falloff)
+        g_int = float(state.grid)
+        core_rad = w_int / 2.0
+        total_rad = core_rad + f_int
         
-        # 3. Extract Region Geometry
-        all_curves = []
-        for loop in region_elem.GetBoundaries():
-            for c in loop: all_curves.append(c)
+        if getattr(state, "sharp_smoothing", False):
+            total_rad = core_rad
+            
+        if getattr(state, "apply_plan_offset", False):
+            try: total_rad += abs(float(getattr(state, "plan_offset_val", "0.0")))
+            except: pass
         
-        min_x = min([c.Evaluate(i/10.0, True).X for c in all_curves for i in range(11)])
-        max_x = max([c.Evaluate(i/10.0, True).X for c in all_curves for i in range(11)])
-        min_y = min([c.Evaluate(i/10.0, True).Y for c in all_curves for i in range(11)])
-        max_y = max([c.Evaluate(i/10.0, True).Y for c in all_curves for i in range(11)])
+        dynamic_res = max(0.25, g_int) 
+        log.info("Smoothing Width: {} (Core: {}, Falloff: {})".format(
+            UnitHelper.to_formatted_string(w_int if getattr(state, "sharp_smoothing", False) else w_int + 2*f_int),
+            UnitHelper.to_formatted_string(w_int),
+            UnitHelper.to_formatted_string(0.0 if getattr(state, "sharp_smoothing", False) else f_int)
+        ))
         
-        def is_inside(pt):
-            if pt.X < min_x or pt.X > max_x or pt.Y < min_y or pt.Y > max_y: return False
-            ints = 0
-            ray_y = pt.Y + 0.000137
-            for c in all_curves:
-                c_z = c.GetEndPoint(0).Z
-                ray = Line.CreateBound(XYZ(pt.X, ray_y, c_z), XYZ(max_x + 100.0, ray_y, c_z))
-                res_arr = clr.Reference[IntersectionResultArray]()
-                res = c.Intersect(ray, res_arr)
-                if res == SetComparisonResult.Overlap and res_arr.Value is not None:
-                    ints += res_arr.Value.Size
-            return ints % 2 != 0
+        # Square Ends logic for chains
+        check_square_ends = False
+        sq_ends_info = []
+        if state.square_ends:
+            try:
+                end_map = []
+                for c in curves:
+                    p0 = c.GetEndPoint(0)
+                    p1 = c.GetEndPoint(1)
+                    if isinstance(c, Line):
+                        vec = (p1 - p0)
+                        tan_start_outward = vec.Normalize().Negate()
+                        tan_end_outward = vec.Normalize()
+                    else:
+                        t0 = c.GetEndParameter(0)
+                        t1 = c.GetEndParameter(1)
+                        tan_start_outward = c.ComputeDerivatives(t0, False).BasisX.Normalize().Negate()
+                        tan_end_outward = c.ComputeDerivatives(t1, False).BasisX.Normalize()
+                        
+                    end_map.append({'pt': p0, 'tan': tan_start_outward})
+                    end_map.append({'pt': p1, 'tan': tan_end_outward})
+                    
+                # Find open ends
+                open_ends = []
+                for i, e1 in enumerate(end_map):
+                    matched = False
+                    for j, e2 in enumerate(end_map):
+                        if i != j and e1['pt'].DistanceTo(e2['pt']) < 0.01:
+                            matched = True
+                            break
+                    if not matched:
+                        open_ends.append(e1)
+                        
+                if open_ends:
+                    check_square_ends = True
+                    for ep in open_ends:
+                        tan_xy = XYZ(ep['tan'].X, ep['tan'].Y, 0)
+                        if not tan_xy.IsZeroLength():
+                            sq_ends_info.append({'pt': ep['pt'], 'tan': tan_xy.Normalize()})
+            except Exception as e: pass
 
-        # Raycast Context
+        def is_outside_bounds(pt):
+            if not check_square_ends: return False
+            for ep in sq_ends_info:
+                v = XYZ(pt.X - ep['pt'].X, pt.Y - ep['pt'].Y, 0)
+                if v.DotProduct(ep['tan']) > 0.001: 
+                    return True
+            return False
+
+        def is_inside(pt):
+            if is_outside_bounds(pt): return False
+            min_d = float('inf')
+            for c in curves:
+                p_3d, t_norm, d_xy = project_2d(c, pt)
+                if d_xy < min_d: min_d = d_xy
+            return min_d <= total_rad
+            
+        # 3. Raycast Context
         intersector = None
         ray_start_z = get_toposolid_max_z(toposolid) + 100.0
         view3d = doc.ActiveView if doc.ActiveView.ViewType == ViewType.ThreeD else None
@@ -1901,7 +2176,7 @@ def perform_smooth_region(state):
             intersector = ReferenceIntersector(toposolid.Id, FindReferenceTarget.Element, view3d)
         
         # 4. Laplacian Smoothing Process
-        tg = TransactionGroup(doc, "Smooth Region")
+        tg = TransactionGroup(doc, "Smooth Path")
         tg.Start()
         t = Transaction(doc, "Smooth Points")
         t.Start()
@@ -1917,7 +2192,6 @@ def perform_smooth_region(state):
         
         nodes = []
         interior_nodes = []
-        
         off = get_subdivision_offset(doc, raw_topo.Id) if toposolid.Id != raw_topo.Id else 0.0
 
         # A. Classify existing points
@@ -1938,8 +2212,6 @@ def perform_smooth_region(state):
                 mean_z = sum(nb.z for nb in neighbors) / len(neighbors)
                 variance = sum((nb.z - mean_z) ** 2 for nb in neighbors) / len(neighbors)
                 std_dev = math.sqrt(max(0.0, variance))
-                
-                # Flag as outlier if it deviates significantly (e.g. > 2 std devs AND > user threshold)
                 if abs(n.z - mean_z) > max(2.0 * std_dev, outlier_tol_val):
                     outlier_nodes.append(n)
                     
@@ -1953,13 +2225,28 @@ def perform_smooth_region(state):
                     except: pass
         
         # B. Densify (Add missing grid points)
-        x = math.floor(min_x / dynamic_res) * dynamic_res
-        while x <= max_x:
-            y = math.floor(min_y / dynamic_res) * dynamic_res
-            while y <= max_y:
+        min_x = min_y = float('inf')
+        max_x = max_y = float('-inf')
+        for elem in line_elems:
+            if isinstance(elem, CurveElement):
+                bb = elem.get_BoundingBox(None)
+                if bb:
+                    min_x = min(min_x, bb.Min.X)
+                    min_y = min(min_y, bb.Min.Y)
+                    max_x = max(max_x, bb.Max.X)
+                    max_y = max(max_y, bb.Max.Y)
+                    
+        start_x = math.floor((min_x - total_rad - g_int) / g_int) * g_int
+        end_x   = math.ceil((max_x + total_rad + g_int) / g_int) * g_int
+        start_y = math.floor((min_y - total_rad - g_int) / g_int) * g_int
+        end_y   = math.ceil((max_y + total_rad + g_int) / g_int) * g_int
+        
+        x = start_x
+        while x <= end_x:
+            y = start_y
+            while y <= end_y:
                 pt = XYZ(x, y, 0)
                 if is_inside(pt):
-                    # Ensure not too close to existing vertices
                     if not any(math.hypot(n.x - x, n.y - y) < dynamic_res * 0.4 for n in interior_nodes):
                         rz = 0.0
                         if intersector:
@@ -1976,7 +2263,7 @@ def perform_smooth_region(state):
         boundary_nodes = [n for n in nodes if n not in interior_nodes and any(math.hypot(n.x - i.x, n.y - i.y) < smoothing_radius for i in interior_nodes)]
         active_nodes = interior_nodes + boundary_nodes
         
-        for _ in range(5): # 5 Iterations of Laplacian averaging
+        for _ in range(5): 
             for n in interior_nodes:
                 neighbors = [a for a in active_nodes if a != n and math.hypot(n.x - a.x, n.y - a.y) < smoothing_radius]
                 if neighbors:
@@ -2003,17 +2290,16 @@ def perform_smooth_region(state):
                 
         t.Commit()
         tg.Assimilate()
-        log.info("Smooth Region Complete.\nAdded {} new points, Smoothed {} existing points.".format(add_count, mod_count))
+        log.info("Smooth Path Complete.\nAdded {} new points, Smoothed {} existing points.".format(add_count, mod_count))
         
     except Exception as e:
         if 'tg' in locals() and tg.HasStarted(): tg.RollBack()
-        log.error("Smooth Region Failed", "{}\n{}".format(e, traceback.format_exc()))
+        log.error("Smooth Path Failed", "{}\n{}".format(e, traceback.format_exc()))
     finally:
         log.show()
 
 def perform_add_points_along_line(state):
     log = BatchLogger()
-    log.info("--- GRADE WITH ELEMENTS STARTED ---")
     
     g_int = float(state.grid)
     if g_int <= 0.1: g_int = 1.0 # Fallback safety
@@ -2024,14 +2310,7 @@ def perform_add_points_along_line(state):
         try:
             g_plan_off = float(getattr(state, "plan_offset_val", "0.0"))
             g_plan_dir = getattr(state, "plan_offset_dir", "Both")
-            if g_plan_off != 0.0:
-                log.info("Applied Plan Offset: {} ({})".format(UnitHelper.to_formatted_string(g_plan_off), g_plan_dir))
         except: pass
-    
-    toposolid = None
-    raw_elem = None
-    target_curves = []
-    target_internal_pts = []
     
     def get_curves_from_elem(elem, g_int):
         crvs = []
@@ -2042,21 +2321,17 @@ def perform_add_points_along_line(state):
             if isinstance(c, Line) and flatten(c.GetEndPoint(0)).DistanceTo(flatten(c.GetEndPoint(1))) < 0.01:
                 log.error("Selected line is purely vertical.", "Toposolids cannot have vertically stacked points at the exact same XY coordinates. Please select a sloped or horizontal line.")
                 return None, None, None
-                
             crvs.append((c, None))
-            
         elif isinstance(elem, FilledRegion):
             view = doc.GetElement(elem.OwnerViewId)
             z_val = 0.0
             if view and hasattr(view, "GenLevel") and view.GenLevel:
                 z_val = view.GenLevel.Elevation
-                
             all_curves = []
             for loop in elem.GetBoundaries():
                 for c in loop:
                     crvs.append((c, z_val))
                     all_curves.append(c)
-                    
             if all_curves:
                 min_x, max_x = float('inf'), float('-inf')
                 min_y, max_y = float('inf'), float('-inf')
@@ -2067,285 +2342,250 @@ def perform_add_points_along_line(state):
                         max_x = max(max_x, pt.X)
                         min_y = min(min_y, pt.Y)
                         max_y = max(max_y, pt.Y)
-                        
                 start_x = math.floor(min_x / g_int) * g_int
                 end_x   = math.ceil(max_x / g_int) * g_int
                 start_y = math.floor(min_y / g_int) * g_int
                 end_y   = math.ceil(max_y / g_int) * g_int
-                
-                
                 y = start_y
                 while y <= end_y:
                     x = start_x
                     while x <= end_x:
                         intersections = 0
-                        ray_y = y + 0.000137 # Infinitesimal offset avoids collinear/vertex anomalies
+                        ray_y = y + 0.000137
                         for c in all_curves:
                             c_z = c.GetEndPoint(0).Z
                             ray_line_z = Line.CreateBound(XYZ(x, ray_y, c_z), XYZ(max_x + 100.0, ray_y, c_z))
-                            
                             res_array = clr.Reference[IntersectionResultArray]()
                             res = c.Intersect(ray_line_z, res_array)
                             if res == SetComparisonResult.Overlap and res_array.Value is not None:
                                 intersections += res_array.Value.Size
-                        
                         if intersections % 2 != 0:
                             internal_pts.append(XYZ(x, y, z_val))
-                            
                         x += g_int
                     y += g_int
-                
                 region_info = (all_curves, z_val, max_x, min_x, min_y, max_y)
         return crvs, internal_pts, region_info
 
     try:
-        ref_first = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid, Model Line, or Filled Region")
-        elem_first = doc.GetElement(ref_first)
-        
-        # Visual Clue: Highlight first selection while waiting
-        try: uidoc.Selection.SetElementIds(List[ElementId]([ref_first.ElementId]))
-        except: pass
-        
-        crvs, int_pts, r_info = get_curves_from_elem(elem_first, g_int)
-        target_region_info = None
-        
-        if crvs is not None and len(crvs) > 0:
-            target_curves = crvs
-            target_internal_pts = int_pts
-            target_region_info = r_info
-            ref_second = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Path selected. Now select Toposolid to modify")
-            raw_elem = doc.GetElement(ref_second)
-            toposolid = resolve_toposolid_host(doc, raw_elem)
-            if not isinstance(toposolid, Toposolid):
-                log.error("Second selection is not a Toposolid.")
-                log.show(); return
-                
-        elif isinstance(elem_first, Toposolid):
-            raw_elem = elem_first
-            toposolid = resolve_toposolid_host(doc, raw_elem)
-            
-            ref_second = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Toposolid selected. Now select Line or Filled Region")
-            elem_second = doc.GetElement(ref_second)
-            crvs, int_pts, r_info = get_curves_from_elem(elem_second, g_int)
-            if crvs is not None and len(crvs) > 0:
-                target_curves = crvs
-                target_internal_pts = int_pts
-                target_region_info = r_info
-            else:
-                log.error("Second selection is not a valid line or filled region.")
-                log.show(); return
-        else:
-            log.error("Selected element is neither a Toposolid, Model Line, nor Filled Region.")
+        ref_topo = uidoc.Selection.PickObject(ObjectType.Element, UniversalFilter(), "Select Toposolid to modify")
+        raw_elem = doc.GetElement(ref_topo)
+        toposolid = resolve_toposolid_host(doc, raw_elem)
+        if not isinstance(toposolid, Toposolid):
+            log.error("First selection is not a Toposolid.")
             log.show(); return
-            
+        try: uidoc.Selection.SetElementIds(List[ElementId]([ref_topo.ElementId]))
+        except: pass
     except: return # Cancelled
     
-    g_int = float(state.grid)
-    if g_int <= 0.1: g_int = 1.0 # Fallback safety
-    
-    g_z_off = 0.0
-    if state.apply_offset:
+    while True:
+        tg = None
         try:
-            g_z_off = float(state.offset_val)
-            log.info("Applied Z-Offset: {}".format(UnitHelper.to_formatted_string(g_z_off)))
-        except: pass
-    
-    tg = TransactionGroup(doc, "Points Along Line")
-    tg.Start()
-    
-    t = Transaction(doc, "Add Points")
-    t.Start()
-    
-    try:
-        editor = toposolid.GetSlabShapeEditor()
-        editor.Enable()
+            ref_elems = uidoc.Selection.PickObjects(ObjectType.Element, UniversalFilter(), "Select Model Lines or Filled Regions (Tab for chain, Finish when done, ESC to exit)")
+            target_elems = [doc.GetElement(ref) for ref in ref_elems]
+        except: 
+            break
         
-        # --- PHASE 0: RESET POINTS ---
-        if state.reset_mode:
-            log.info("Reset Mode: Removing existing points in target area.")
-            to_delete = []
-            for v in editor.SlabShapeVertices:
-                pos = v.Position
-                should_delete = False
-                
-                if target_region_info:
-                    all_curves, reg_z, max_x, min_x, min_y, max_y = target_region_info
-                    if min_x <= pos.X <= max_x and min_y <= pos.Y <= max_y:
-                        intersections = 0
-                        ray_y = pos.Y + 0.000137
-                        for c in all_curves:
-                            c_z = c.GetEndPoint(0).Z
-                            ray_line_z = Line.CreateBound(XYZ(pos.X, ray_y, c_z), XYZ(max_x + 100.0, ray_y, c_z))
-                            res_array = clr.Reference[IntersectionResultArray]()
-                            res = c.Intersect(ray_line_z, res_array)
-                            if res == SetComparisonResult.Overlap and res_array.Value is not None:
-                                intersections += res_array.Value.Size
-                        if intersections % 2 != 0:
-                            should_delete = True
-                else:
-                    for curve, _ in target_curves:
-                        p_3d, t_norm, d_xy = project_2d(curve, pos)
-                        if d_xy < (g_int * 0.75):
-                            should_delete = True
-                            break
-                        if g_plan_off != 0.0 and g_plan_dir != "Center":
-                            if abs(d_xy - g_plan_off) < (g_int * 0.75):
+        log.info("--- GRADE WITH ELEMENTS STARTED ---")
+        if getattr(state, "apply_plan_offset", False) and g_plan_off != 0.0:
+            log.info("Applied Plan Offset: {} ({})".format(UnitHelper.to_formatted_string(g_plan_off), g_plan_dir))
+
+        target_curves = []
+        target_internal_pts = []
+        target_region_infos = []
+        
+        for elem in target_elems:
+            crvs, int_pts, r_info = get_curves_from_elem(elem, g_int)
+            if crvs: target_curves.extend(crvs)
+            if int_pts: target_internal_pts.extend(int_pts)
+            if r_info: target_region_infos.append(r_info)
+            
+        if not target_curves:
+            log.error("No valid lines or filled regions selected.")
+            continue
+            
+        g_z_off = 0.0
+        if state.apply_offset:
+            try:
+                g_z_off = float(state.offset_val)
+                log.info("Applied Z-Offset: {}".format(UnitHelper.to_formatted_string(g_z_off)))
+            except: pass
+        
+        tg = TransactionGroup(doc, "Points Along Line")
+        tg.Start()
+        
+        t = Transaction(doc, "Add Points")
+        t.Start()
+        
+        try:
+            editor = toposolid.GetSlabShapeEditor()
+            editor.Enable()
+            
+            if state.reset_mode:
+                log.info("Reset Mode: Removing existing points in target area.")
+                to_delete = []
+                for v in editor.SlabShapeVertices:
+                    pos = v.Position
+                    should_delete = False
+                    if target_region_infos:
+                        for r_info in target_region_infos:
+                            all_curves, reg_z, max_x, min_x, min_y, max_y = r_info
+                            if min_x <= pos.X <= max_x and min_y <= pos.Y <= max_y:
+                                intersections = 0
+                                ray_y = pos.Y + 0.000137
+                                for c in all_curves:
+                                    c_z = c.GetEndPoint(0).Z
+                                    ray_line_z = Line.CreateBound(XYZ(pos.X, ray_y, c_z), XYZ(max_x + 100.0, ray_y, c_z))
+                                    res_array = clr.Reference[IntersectionResultArray]()
+                                    res = c.Intersect(ray_line_z, res_array)
+                                    if res == SetComparisonResult.Overlap and res_array.Value is not None:
+                                        intersections += res_array.Value.Size
+                                if intersections % 2 != 0:
+                                    should_delete = True
+                                    break
+                    if not should_delete:
+                        for curve, _ in target_curves:
+                            p_3d, t_norm, d_xy = project_2d(curve, pos)
+                            if d_xy < (g_int * 0.75):
                                 should_delete = True
                                 break
-                            
-                if should_delete:
-                    to_delete.append(v)
-                    
-            if to_delete:
-                del_count = 0
-                for v in to_delete:
-                    try:
-                        editor.DeletePoint(v)
-                        del_count += 1
-                    except: pass
-                log.info("Removed {} existing points.".format(del_count))
-
-        pts_to_add = []
-        if g_z_off != 0.0:
-            pts_to_add.extend([XYZ(p.X, p.Y, p.Z + g_z_off) for p in target_internal_pts])
-        else:
-            pts_to_add.extend(target_internal_pts)
-        
-        def add_curve_pts(curve, param, override_z):
-            pt = curve.Evaluate(param, True)
-            try:
-                deriv = curve.ComputeDerivatives(param, True)
-                tangent = deriv.BasisX.Normalize()
-                if tangent.IsAlmostEqualTo(XYZ.Zero):
-                    normal = XYZ(0, 1, 0)
-                else:
-                    normal = XYZ.BasisZ.CrossProduct(tangent).Normalize()
-            except:
-                normal = XYZ(0, 1, 0)
-                
-            base_z = override_z if override_z is not None else pt.Z
-            base_pt = XYZ(pt.X, pt.Y, base_z + g_z_off)
-            
-            res = [base_pt]
-            # Only apply planar offsets if g_plan_off is not zero
-            if g_plan_off != 0.0:
-                offset_vec = normal.Multiply(g_plan_off)
-                if g_plan_dir == "Center":
-                    # Offset by half the value on each side, centered on the line
-                    offset_half_vec = normal.Multiply(g_plan_off / 2.0)
-                    res.append(base_pt.Add(offset_half_vec))  # Left
-                    res.append(base_pt.Subtract(offset_half_vec)) # Right
-                elif g_plan_dir == "Left":
-                    res.append(base_pt.Add(offset_vec))
-                elif g_plan_dir == "Right":
-                    res.append(base_pt.Subtract(offset_vec))
-                elif g_plan_dir == "Both":
-                    # Offset by the full value on each side
-                    res.append(base_pt.Add(offset_vec))  # Left
-                    res.append(base_pt.Subtract(offset_vec)) # Right
-            return res
-        for curve, override_z in target_curves:
-            length = curve.Length
-            step_len = g_int
-            if step_len < 0.1: step_len = 1.0
-            
-            current_len = 0.0
-            while current_len <= length + 0.001:
-                param = current_len / length
-                if param > 1.0: param = 1.0
-                pts_to_add.extend(add_curve_pts(curve, param, override_z))
-                current_len += step_len
-                
-            # Ensure the exact end point is included if it was missed
-            if abs((current_len - step_len) - length) > 0.01:
-                pts_to_add.extend(add_curve_pts(curve, 1.0, override_z))
-                
-        # Account for Subdivision thickness offset so points sit correctly
-        off = 0.0
-        if toposolid.Id != raw_elem.Id:
-            off = get_subdivision_offset(doc, raw_elem.Id)
-            
-        # 1. Resolve self-intersections or vertical lines within the line's own points
-        # We keep the latest evaluated elevation for any given XY coordinate
-        unique_pts = []
-        for pt in pts_to_add:
-            conflict_idx = None
-            cand_flat = flatten(pt)
-            for i, u_pt in enumerate(unique_pts):
-                if flatten(u_pt).DistanceTo(cand_flat) < MIN_DIST_TOLERANCE:
-                    conflict_idx = i
-                    break
-            if conflict_idx is not None:
-                unique_pts[conflict_idx] = pt # Override with latest height
-            else:
-                unique_pts.append(pt)
-        
-        added = 0
-        modified = 0
-        all_verts = [v for v in editor.SlabShapeVertices]
-        
-        # 2. Add or Update points on the Toposolid
-        for pt in unique_pts:
-            adjusted_pt = XYZ(pt.X, pt.Y, pt.Z - off)
-            
-            cand_flat = flatten(adjusted_pt)
-            matched_vert = None
-            for v in all_verts:
-                if flatten(v.Position).DistanceTo(cand_flat) < MIN_DIST_TOLERANCE:
-                    matched_vert = v
-                    break
-                    
-            if matched_vert:
-                if abs(matched_vert.Position.Z - adjusted_pt.Z) > 0.005:
-                    try:
-                        editor.DeletePoint(matched_vert)
-                        editor.AddPoint(adjusted_pt)
-                        modified += 1
-                    except: pass
-            else:
-                try:
-                    editor.AddPoint(adjusted_pt)
-                    added += 1
-                except: pass
-                
-        # 3. Enforce flattening for all existing points inside Filled Region
-        if target_region_info and not state.reset_mode:
-            all_curves, reg_z, max_x, min_x, min_y, max_y = target_region_info
-            target_z = reg_z - off + g_z_off
-            
-            for v in editor.SlabShapeVertices:
-                pos = v.Position
-                # Fast bounding box check
-                if pos.X < min_x or pos.X > max_x or pos.Y < min_y or pos.Y > max_y:
-                    continue
-                    
-                if abs(pos.Z - target_z) > 0.005:
-                    intersections = 0
-                    ray_y = pos.Y + 0.000137
-                    ray_end_x = max_x + 100.0
-                    
-                    for c in all_curves:
-                        c_z = c.GetEndPoint(0).Z
-                        ray_line_z = Line.CreateBound(XYZ(pos.X, ray_y, c_z), XYZ(ray_end_x, ray_y, c_z))
-                        res_array = clr.Reference[IntersectionResultArray]()
-                        res = c.Intersect(ray_line_z, res_array)
-                        if res == SetComparisonResult.Overlap and res_array.Value is not None:
-                            intersections += res_array.Value.Size
-                            
-                    if intersections % 2 != 0:
+                            if g_plan_off != 0.0 and g_plan_dir != "Center":
+                                if abs(d_xy - g_plan_off) < (g_int * 0.75):
+                                    should_delete = True
+                                    break
+                    if should_delete:
+                        to_delete.append(v)
+                if to_delete:
+                    del_count = 0
+                    for v in to_delete:
                         try:
                             editor.DeletePoint(v)
-                            editor.AddPoint(XYZ(pos.X, pos.Y, target_z))
+                            del_count += 1
+                        except: pass
+                    log.info("Removed {} existing points.".format(del_count))
+
+            pts_to_add = []
+            if g_z_off != 0.0:
+                pts_to_add.extend([XYZ(p.X, p.Y, p.Z + g_z_off) for p in target_internal_pts])
+            else:
+                pts_to_add.extend(target_internal_pts)
+            
+            def add_curve_pts(curve, param, override_z):
+                pt = curve.Evaluate(param, True)
+                try:
+                    deriv = curve.ComputeDerivatives(param, True)
+                    tangent = deriv.BasisX.Normalize()
+                    if tangent.IsAlmostEqualTo(XYZ.Zero):
+                        normal = XYZ(0, 1, 0)
+                    else:
+                        normal = XYZ.BasisZ.CrossProduct(tangent).Normalize()
+                except:
+                    normal = XYZ(0, 1, 0)
+                base_z = override_z if override_z is not None else pt.Z
+                base_pt = XYZ(pt.X, pt.Y, base_z + g_z_off)
+                res = [base_pt]
+                if g_plan_off != 0.0:
+                    offset_vec = normal.Multiply(g_plan_off)
+                    if g_plan_dir == "Center":
+                        offset_half_vec = normal.Multiply(g_plan_off / 2.0)
+                        res.append(base_pt.Add(offset_half_vec))
+                        res.append(base_pt.Subtract(offset_half_vec))
+                    elif g_plan_dir == "Left":
+                        res.append(base_pt.Add(offset_vec))
+                    elif g_plan_dir == "Right":
+                        res.append(base_pt.Subtract(offset_vec))
+                    elif g_plan_dir == "Both":
+                        res.append(base_pt.Add(offset_vec))
+                        res.append(base_pt.Subtract(offset_vec))
+                return res
+            for curve, override_z in target_curves:
+                length = curve.Length
+                step_len = g_int
+                if step_len < 0.1: step_len = 1.0
+                current_len = 0.0
+                while current_len <= length + 0.001:
+                    param = current_len / length
+                    if param > 1.0: param = 1.0
+                    pts_to_add.extend(add_curve_pts(curve, param, override_z))
+                    current_len += step_len
+                if abs((current_len - step_len) - length) > 0.01:
+                    pts_to_add.extend(add_curve_pts(curve, 1.0, override_z))
+            
+            off = 0.0
+            if toposolid.Id != raw_elem.Id:
+                off = get_subdivision_offset(doc, raw_elem.Id)
+            
+            unique_pts = []
+            for pt in pts_to_add:
+                conflict_idx = None
+                cand_flat = flatten(pt)
+                for i, u_pt in enumerate(unique_pts):
+                    if flatten(u_pt).DistanceTo(cand_flat) < MIN_DIST_TOLERANCE:
+                        conflict_idx = i
+                        break
+                if conflict_idx is not None:
+                    unique_pts[conflict_idx] = pt
+                else:
+                    unique_pts.append(pt)
+            
+            added = 0
+            modified = 0
+            all_verts = [v for v in editor.SlabShapeVertices]
+            
+            for pt in unique_pts:
+                adjusted_pt = XYZ(pt.X, pt.Y, pt.Z - off)
+                cand_flat = flatten(adjusted_pt)
+                matched_vert = None
+                for v in all_verts:
+                    if flatten(v.Position).DistanceTo(cand_flat) < MIN_DIST_TOLERANCE:
+                        matched_vert = v
+                        break
+                if matched_vert:
+                    if abs(matched_vert.Position.Z - adjusted_pt.Z) > 0.005:
+                        try:
+                            editor.DeletePoint(matched_vert)
+                            editor.AddPoint(adjusted_pt)
                             modified += 1
                         except: pass
-                        
-        t.Commit()
-        tg.Assimilate()
-        log.info("Successfully graded line: Added {} new points, Modified {} existing points.".format(added, modified))
-    except Exception as e:
-        t.RollBack()
-        tg.RollBack()
-        log.error("Failed to add points.", e)
+                else:
+                    try:
+                        editor.AddPoint(adjusted_pt)
+                        added += 1
+                    except: pass
+            
+            if target_region_infos and not state.reset_mode:
+                for r_info in target_region_infos:
+                    all_curves, reg_z, max_x, min_x, min_y, max_y = r_info
+                    target_z = reg_z - off + g_z_off
+                    for v in editor.SlabShapeVertices:
+                        pos = v.Position
+                        if pos.X < min_x or pos.X > max_x or pos.Y < min_y or pos.Y > max_y:
+                            continue
+                        if abs(pos.Z - target_z) > 0.005:
+                            intersections = 0
+                            ray_y = pos.Y + 0.000137
+                            ray_end_x = max_x + 100.0
+                            for c in all_curves:
+                                c_z = c.GetEndPoint(0).Z
+                                ray_line_z = Line.CreateBound(XYZ(pos.X, ray_y, c_z), XYZ(ray_end_x, ray_y, c_z))
+                                res_array = clr.Reference[IntersectionResultArray]()
+                                res = c.Intersect(ray_line_z, res_array)
+                                if res == SetComparisonResult.Overlap and res_array.Value is not None:
+                                    intersections += res_array.Value.Size
+                            if intersections % 2 != 0:
+                                try:
+                                    editor.DeletePoint(v)
+                                    editor.AddPoint(XYZ(pos.X, pos.Y, target_z))
+                                    modified += 1
+                                except: pass
+            
+            t.Commit()
+            tg.Assimilate()
+            log.info("Successfully graded elements: Added {} new points, Modified {} existing points.\n".format(added, modified))
+        except Exception as loop_e:
+            if 't' in locals() and t.HasStarted(): t.RollBack()
+            if tg is not None and tg.HasStarted(): tg.RollBack()
+            log.error("Failed to add points.", "{}\n{}".format(loop_e, traceback.format_exc()))
+            
     finally:
         log.show()
 
@@ -2456,6 +2696,9 @@ if __name__ == '__main__':
             
         elif action == "smooth":
             perform_smooth_region(state)
+            
+        elif action == "smooth_path":
+            perform_smooth_path(state)
             
         elif action == "line_points":
             perform_add_points_along_line(state)
