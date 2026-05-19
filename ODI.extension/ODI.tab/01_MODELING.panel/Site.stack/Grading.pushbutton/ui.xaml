@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Toposolid Grading Tool" Height="930" Width="420"
+        Title="Toposolid Grading Tool" Height="1000" Width="420"
         WindowStartupLocation="Manual" Left="250" Top="100"
         ResizeMode="CanResize"
         WindowStyle="None"
@@ -348,6 +348,7 @@
                             <RowDefinition Height="30"/>
                             <RowDefinition Height="30"/>
                             <RowDefinition Height="30"/>
+                        <RowDefinition Height="30"/>
                         </Grid.RowDefinitions>
 
                         <TextBlock Text="Path Width:"      VerticalAlignment="Center" Grid.Row="0"/>
@@ -381,6 +382,14 @@
                         <TextBlock Name="Lbl_OutlierTol_Unit"   Text="ft" Grid.Row="3" Grid.Column="2"
                                    VerticalAlignment="Center" Margin="4,0,0,0"
                                    Foreground="{DynamicResource TextLightBrush}"/>
+
+                    <TextBlock Text="Point Dist Tol:"  VerticalAlignment="Center" Grid.Row="4"/>
+                    <TextBox Name="Tb_PointTol"    Text="0.25"  Grid.Row="4" Grid.Column="1"
+                             VerticalContentAlignment="Center"
+                             ToolTip="Minimum distance allowed between points. Points closer than this will be merged or skipped."/>
+                    <TextBlock Name="Lbl_PointTol_Unit"   Text="ft" Grid.Row="4" Grid.Column="2"
+                               VerticalAlignment="Center" Margin="4,0,0,0"
+                               Foreground="{DynamicResource TextLightBrush}"/>
                     </Grid>
                     <Separator/>
                     <CheckBox Name="Cb_SquareEnds"
