@@ -167,7 +167,7 @@ def get_element_label(element):
             name = "Line - " + element.LineStyle.Name
         elif element.Category:
             name = element.Category.Name
-        elif hasattr(element, "Name") and element.Name:
+            if hasattr(element, "Name") and element.Name:
                 name += " - " + element.Name
         elif hasattr(element, "Name") and element.Name:
             name = element.Name
@@ -274,8 +274,15 @@ class GradingState(object):
         self.draw_split_lines = sets.get("draw_split_lines", False)
         self.reset_mode = False
         
-        self.win_top = float(sets.get("win_top", "100"))
-        self.win_left = float(sets.get("win_left", "100")),
+        try:
+            self.win_top = float(sets.get("win_top", "100"))
+        except ValueError:
+            self.win_top = 100.0
+            
+        try:
+            self.win_left = float(sets.get("win_left", "100"))
+        except ValueError:
+            self.win_left = 100.0
         
         self.start_stake = None
         self.end_stake = None
@@ -411,7 +418,7 @@ class GradingWindow(forms.WPFWindow):
                     p1 = self.state.start_stake.Location.Point
                     p2 = self.state.end_stake.Location.Point
                     
-                    d_xy = flatten(p1).DistanceTo(flatten(p2))
+                    d_xy = dist_2d(p1, p2)
                     d_z = p2.Z - p1.Z
                     
                     if d_xy > 0.01:
@@ -677,45 +684,66 @@ class UniversalFilter(ISelectionFilter):
     def AllowElement(self, e): return True
     def AllowReference(self, r, p): return True
 
-def flatten(pt): return XYZ(pt.X, pt.Y, 0)
+def dist_2d(p1, p2): return math.hypot(p1.X - p2.X, p1.Y - p2.Y)
 def lerp(a, b, t): return a + t * (b - a)
+
+# Cache for curve discretizations to avoid IronPython/C# interop overhead
+_curve_eval_cache = {}
 
 def project_2d(curve, pt):
     """
     Projects a 3D point onto a curve in the XY plane.
     Returns: (closest_3d_pt, normalized_param, distance_xy)
     """
+    pt_x, pt_y = pt.X, pt.Y
+
     if isinstance(curve, Line):
         p0 = curve.GetEndPoint(0)
         p1 = curve.GetEndPoint(1)
-        p0_flat = flatten(p0)
-        p1_flat = flatten(p1)
-        v_line = p1_flat - p0_flat
-        len_sq = v_line.X**2 + v_line.Y**2
+        v_x = p1.X - p0.X
+        v_y = p1.Y - p0.Y
+        len_sq = v_x**2 + v_y**2
         
         if len_sq < 0.0001:
-            d = flatten(pt).DistanceTo(p0_flat)
+            d = math.hypot(pt_x - p0.X, pt_y - p0.Y)
             return p0, 0.0, d
             
-        v_pt = flatten(pt) - p0_flat
-        t = (v_pt.X * v_line.X + v_pt.Y * v_line.Y) / len_sq
+        t = ((pt_x - p0.X) * v_x + (pt_y - p0.Y) * v_y) / len_sq
         t_bounded = max(0.0, min(1.0, t))
         
         pt_3d = p0 + (p1 - p0) * t_bounded
-        d = flatten(pt).DistanceTo(flatten(pt_3d))
+        d = math.hypot(pt_x - pt_3d.X, pt_y - pt_3d.Y)
         return pt_3d, t_bounded, d
     else:
-        best_pt = None; best_dist = float('inf'); best_t_raw = 0.0
         p_min, p_max = curve.GetEndParameter(0), curve.GetEndParameter(1)
         
-        # 1. Broad scan based on curve length
-        steps = int(max(50, curve.Length * 4.0))
+        # Create a stable geometric signature to avoid wrapper hash volatility
+        p0 = curve.GetEndPoint(0)
+        p1 = curve.GetEndPoint(1)
+        cache_key = (
+            round(p0.X, 4), round(p0.Y, 4), round(p0.Z, 4),
+            round(p1.X, 4), round(p1.Y, 4), round(p1.Z, 4),
+            round(curve.Length, 4)
+        )
+        if cache_key not in _curve_eval_cache:
+            steps = int(max(50, curve.Length * 4.0))
+            eval_pts = [curve.Evaluate(p_min + (i / float(steps)) * (p_max - p_min), False) for i in range(steps + 1)]
+            _curve_eval_cache[cache_key] = (steps, eval_pts)
+            
+        steps, eval_pts = _curve_eval_cache[cache_key]
+        
+        best_dist_sq = float('inf')
+        best_pt = None
+        best_t_raw = 0.0
+        
+        # 1. Broad scan using cached points
         for i in range(steps + 1):
-            t_raw = p_min + (i / float(steps)) * (p_max - p_min)
-            p_3d = curve.Evaluate(t_raw, False)
-            d = flatten(pt).DistanceTo(flatten(p_3d))
-            if d < best_dist:
-                best_dist = d; best_pt = p_3d; best_t_raw = t_raw
+            p_3d = eval_pts[i]
+            d_sq = (pt_x - p_3d.X)**2 + (pt_y - p_3d.Y)**2
+            if d_sq < best_dist_sq:
+                best_dist_sq = d_sq
+                best_pt = p_3d
+                best_t_raw = p_min + (i / float(steps)) * (p_max - p_min)
                 
         # 2. Refined local scan for high precision
         local_steps = 20
@@ -723,10 +751,11 @@ def project_2d(curve, pt):
         local_min = max(p_min, best_t_raw - step_size)
         local_max = min(p_max, best_t_raw + step_size)
         
+        best_dist = math.sqrt(best_dist_sq)
         for i in range(local_steps + 1):
             t_raw = local_min + (i / float(local_steps)) * (local_max - local_min)
             p_3d = curve.Evaluate(t_raw, False)
-            d = flatten(pt).DistanceTo(flatten(p_3d))
+            d = math.hypot(pt_x - p_3d.X, pt_y - p_3d.Y)
             if d < best_dist:
                 best_dist = d; best_pt = p_3d; best_t_raw = t_raw
                 
@@ -747,9 +776,10 @@ def is_point_on_solid(intersector, pt, start_z):
     return False
 
 def is_too_close(candidate_pt, occupied_points, tolerance=MIN_DIST_TOLERANCE):
-    cand_flat = flatten(candidate_pt)
+    cx, cy = candidate_pt.X, candidate_pt.Y
+    tol_sq = tolerance * tolerance
     for existing in occupied_points:
-        if cand_flat.DistanceTo(flatten(existing)) < tolerance: return True
+        if (cx - existing.X)**2 + (cy - existing.Y)**2 < tol_sq: return True
     return False
 
 def get_surface_info(intersector, pt, start_z):
@@ -765,16 +795,32 @@ def get_surface_info(intersector, pt, start_z):
     except: pass
     return (None, None)
 
+_subdivision_offset_cache = {}
+
 def get_subdivision_offset(doc, elem_id):
     """Checks if the element is a subdivision and returns its height parameter."""
     if not elem_id or elem_id == ElementId.InvalidElementId: return 0.0
+    
+    try:
+        key = elem_id.Value
+    except AttributeError:
+        key = elem_id.IntegerValue
+        
+    if key in _subdivision_offset_cache:
+        return _subdivision_offset_cache[key]
+        
     try:
         el = doc.GetElement(elem_id)
         # Check if it has HostTopoId (Revit 2024+)
         if hasattr(el, "HostTopoId") and el.HostTopoId != ElementId.InvalidElementId:
             p = el.get_Parameter(BuiltInParameter.TOPOSOLID_SUBDIV_HEIGHT)
-            if p: return p.AsDouble()
+            if p: 
+                val = p.AsDouble()
+                _subdivision_offset_cache[key] = val
+                return val
     except: pass
+    
+    _subdivision_offset_cache[key] = 0.0
     return 0.0
 
 def get_boundary_curves(toposolid):
@@ -995,7 +1041,6 @@ def get_chain_of_edges(toposolid, start_edge):
             # Midpoint of selected edge for proximity check
             sel_curve = start_edge.AsCurve()
             mid_pt = sel_curve.Evaluate(0.5, True)
-            mid_flat = flatten(mid_pt)
             
             best_loop = None
             min_dist = 1.0 # Tolerance ft
@@ -1008,9 +1053,8 @@ def get_chain_of_edges(toposolid, start_edge):
                     sc = curve_array.get_Item(i)
                     
                     # Project selected midpoint to sketch curve (2D check)
-                    # We flatten the sketch curve ends to check distance
-                    sp0 = flatten(sc.GetEndPoint(0))
-                    sp1 = flatten(sc.GetEndPoint(1))
+                    sp0 = sc.GetEndPoint(0)
+                    sp1 = sc.GetEndPoint(1)
                     
                     # Simple distance to segment check
                     # Or assume sketch curve is planar Z-flat, just ignore Z
@@ -1020,7 +1064,7 @@ def get_chain_of_edges(toposolid, start_edge):
                     # Hard to do generically without creating geometry.
                     
                     # Quick check: Is mid_flat close to endpoints?
-                    if mid_flat.DistanceTo(sp0) < 5.0 or mid_flat.DistanceTo(sp1) < 5.0:
+                    if dist_2d(mid_pt, sp0) < 5.0 or dist_2d(mid_pt, sp1) < 5.0:
                         # Closer check
                         pass
 
@@ -1036,7 +1080,7 @@ def get_chain_of_edges(toposolid, start_edge):
                         if res:
                             # Distance in XY plane
                             p_res = res.XYZPoint
-                            d_xy = flatten(p_res).DistanceTo(mid_flat)
+                            d_xy = dist_2d(p_res, mid_pt)
                             if d_xy < min_dist:
                                 is_match = True
                                 break
@@ -1212,9 +1256,10 @@ def perform_manual_stitch(state):
             
             # Cache existing vertices
             for v in editor.SlabShapeVertices:
-                pos = v.Position
+                try: pos = v.Position
+                except: continue
                 existing_coords.add((round(pos.X, 4), round(pos.Y, 4)))
-                candidates.append(v)
+                candidates.append((v, pos))
             
             log.info("Internal Vertices to Check: {}".format(len(candidates)))
             
@@ -1224,7 +1269,7 @@ def perform_manual_stitch(state):
             check_count = 0
             match_count = 0
             
-            for v in candidates:
+            for v, pos in candidates:
                 check_count += 1
                 best_proj = None
                 best_dist = 9999.0
@@ -1237,9 +1282,7 @@ def perform_manual_stitch(state):
                         if not proj_res: continue
                         
                         p_target = proj_res.XYZPoint
-                        v_flat = flatten(v.Position)
-                        p_target_flat = flatten(p_target)
-                        dist = v_flat.DistanceTo(p_target_flat)
+                        dist = dist_2d(v.Position, p_target)
                         
                         if dist < best_dist:
                             best_dist = dist
@@ -1251,9 +1294,7 @@ def perform_manual_stitch(state):
                     
                     offset_pt = best_proj
                     if g_plan_off != 0.0:
-                        v_flat = flatten(v.Position)
-                        p_target_flat = flatten(best_proj)
-                        vec_to_v = v_flat - p_target_flat
+                        vec_to_v = XYZ(v.Position.X - best_proj.X, v.Position.Y - best_proj.Y, 0)
                         if not vec_to_v.IsAlmostEqualTo(XYZ.Zero):
                             dir_outward = vec_to_v.Normalize().Negate()
                             offset_pt = p_target_flat + (dir_outward * g_plan_off)
@@ -1469,7 +1510,9 @@ def perform_sculpt(state):
                 editor.Enable()
                 to_delete = []
                 for v in editor.SlabShapeVertices:
-                    p_3d, t_norm, d_xy = project_2d(curve, v.Position)
+                    try: pos = v.Position
+                    except: continue
+                    p_3d, t_norm, d_xy = project_2d(curve, pos)
                     if d_xy < (total_rad + g_int):
                         to_delete.append(v)
                 
@@ -1495,7 +1538,10 @@ def perform_sculpt(state):
         try:
             editor = toposolid.GetSlabShapeEditor()
             editor.Enable()
-            occupied_points = [v.Position for v in editor.SlabShapeVertices]
+            occupied_points = []
+            for v in editor.SlabShapeVertices:
+                try: occupied_points.append(v.Position)
+                except: pass
             log.info("Initial Vertex Count: {}".format(len(occupied_points)))
             
             bb = state.grading_line.get_BoundingBox(None)
@@ -1554,23 +1600,37 @@ def perform_sculpt(state):
             editor = toposolid.GetSlabShapeEditor()
             editor.Enable()
             updates = []
-            current_verts = [v for v in editor.SlabShapeVertices]
+            current_verts = []
+            for v in editor.SlabShapeVertices:
+                try: current_verts.append((v, v.Position))
+                except: pass
             log.info("Total Vertices to Process: {}".format(len(current_verts)))
             sample_log = []
             
-            for v in current_verts:
-                if is_outside_bounds(v.Position): continue
+            # Bounding Box Pre-filter
+            bb = state.grading_line.get_BoundingBox(None)
+            min_x = bb.Min.X - total_rad - g_int
+            max_x = bb.Max.X + total_rad + g_int
+            min_y = bb.Min.Y - total_rad - g_int
+            max_y = bb.Max.Y + total_rad + g_int
+
+            for v, pos in current_verts:
+                # Fast bounds check before expensive projection
+                if pos.X < min_x or pos.X > max_x or pos.Y < min_y or pos.Y > max_y:
+                    continue
+
+                if is_outside_bounds(pos): continue
                 
-                p_3d, t_norm, d_xy = project_2d(curve, v.Position)
+                p_3d, t_norm, d_xy = project_2d(curve, pos)
                 if d_xy > total_rad: continue
                 
-                rz, hit_id = get_surface_info(intersector, v.Position, ray_start_z)
+                rz, hit_id = get_surface_info(intersector, pos, ray_start_z)
                 off = 0.0
                 if rz is not None:
                      off = get_subdivision_offset(doc, hit_id)
                 
                 # Current State
-                current_base_z = v.Position.Z
+                current_base_z = pos.Z
                 current_top_z = current_base_z + off
                 
                 target_top_z = z_s + t_norm * (z_e - z_s)
@@ -1589,11 +1649,11 @@ def perform_sculpt(state):
                     # Convert back to BASE
                     new_base_z = desired_top_z - off
                 
-                if abs(new_base_z - v.Position.Z) > 0.005:
-                    updates.append(XYZ(v.Position.X, v.Position.Y, new_base_z))
+                if abs(new_base_z - pos.Z) > 0.005:
+                    updates.append(XYZ(pos.X, pos.Y, new_base_z))
                     if len(sample_log) < 3:
                         sample_log.append("Pt ({:.1f}, {:.1f}): Z {:.2f} -> {:.2f} (Off={:.2f})".format(
-                            v.Position.X, v.Position.Y, v.Position.Z, new_base_z, off
+                            pos.X, pos.Y, pos.Z, new_base_z, off
                         ))
             
             modified_count = len(updates)
@@ -1620,7 +1680,10 @@ def perform_sculpt(state):
                 editor = toposolid.GetSlabShapeEditor() 
                 editor.Enable()
                 
-                all_verts = [v for v in editor.SlabShapeVertices]
+                all_verts = []
+                for v in editor.SlabShapeVertices:
+                    try: all_verts.append((v, v.Position))
+                    except: pass
                 search_tol = g_int * 0.25
                 step_len = g_int
                 if step_len < 0.1: step_len = 1.0
@@ -1640,33 +1703,32 @@ def perform_sculpt(state):
                     p_left = center_pt + (normal * core_rad)
                     p_right = center_pt - (normal * core_rad) 
                     
-                    v_left = None
-                    v_right = None
+                    v_left = None; pos_left = None
+                    v_right = None; pos_right = None
                     
                     min_d_l = search_tol
                     min_d_r = search_tol
                     
-                    p_l_flat = flatten(p_left)
-                    p_r_flat = flatten(p_right)
-                    
-                    for v in all_verts:
-                        v_flat = flatten(v.Position)
-                        d_l = v_flat.DistanceTo(p_l_flat)
+                    for v, pos in all_verts:
+                        d_l = dist_2d(pos, p_left)
                         if d_l < min_d_l:
                             min_d_l = d_l
                             v_left = v
-                        d_r = v_flat.DistanceTo(p_r_flat)
+                            pos_left = pos
+                        d_r = dist_2d(pos, p_right)
                         if d_r < min_d_r:
                             min_d_r = d_r
                             v_right = v
+                            pos_right = pos
                     
-                    if v_left and v_right and not v_left.Position.IsAlmostEqualTo(v_right.Position):
-                        dist_real = v_left.Position.DistanceTo(v_right.Position)
-                        if abs(dist_real - w_int) < (w_int * 0.5):
-                            try:
-                                editor.DrawSplitLine(v_left, v_right)
-                                split_lines_count += 1
-                            except: pass
+                    if v_left and v_right:
+                        try:
+                            if not pos_left.IsAlmostEqualTo(pos_right):
+                                dist_real = pos_left.DistanceTo(pos_right)
+                                if abs(dist_real - w_int) < (w_int * 0.5):
+                                    editor.DrawSplitLine(v_left, v_right)
+                                    split_lines_count += 1
+                        except: pass
                     
                     current_len += step_len
 
@@ -1763,12 +1825,15 @@ def perform_edging(state):
         to_move = [] 
         to_add = []
         
-        all_verts = [v for v in editor.SlabShapeVertices]
+        all_verts = []
+        for v in editor.SlabShapeVertices:
+            try: all_verts.append((v, v.Position))
+            except: pass
         
         # 1. Snap existing nearby points to exact edge
-        for v in all_verts: 
-            p_3d, t_norm, d_xy = project_2d(curve, v.Position)
-            vec_to_pt = flatten(v.Position) - flatten(p_3d)
+        for v, pos in all_verts: 
+            p_3d, t_norm, d_xy = project_2d(curve, pos)
+            vec_to_pt = XYZ(pos.X - p_3d.X, pos.Y - p_3d.Y, 0)
             if vec_to_pt.IsAlmostEqualTo(XYZ.Zero): continue
             
             try:
@@ -1788,15 +1853,16 @@ def perform_edging(state):
 
             if abs(d_xy - active_offset) < 1.0:
                 vec = vec_to_pt.Normalize()
-                exact_xy = flatten(p_3d) + (vec * active_offset)
+                exact_x = p_3d.X + vec.X * active_offset
+                exact_y = p_3d.Y + vec.Y * active_offset
                 road_z = z_s + t_norm * (z_e - z_s)
                 
-                t_check = XYZ(exact_xy.X, exact_xy.Y, 0)
+                t_check = XYZ(exact_x, exact_y, 0)
                 rz, hit_id = get_surface_info(intersector, t_check, ray_start_z)
                 off = 0.0
                 if rz is not None: off = get_subdivision_offset(doc, hit_id)
                 
-                to_move.append((v, XYZ(exact_xy.X, exact_xy.Y, road_z - off)))
+                to_move.append((v, XYZ(exact_x, exact_y, road_z - off)))
         
         # 2. Add new points along the exact edge
         step_t = edge_res / curve.Length
@@ -1838,7 +1904,7 @@ def perform_edging(state):
         t = Transaction(doc, "Apply Edging")
         t.Start()
         
-        occupied_points = [v.Position for v in all_verts]
+        occupied_points = [pos for v, pos in all_verts]
         
         # Apply moves
         for item in to_move:
@@ -1964,6 +2030,7 @@ def perform_smooth_region(state):
             class Node:
                 def __init__(self, x, y, z, v_ref=None):
                     self.x = x; self.y = y; self.z = z
+                    self.orig_z = z
                     self.v_ref = v_ref
                     self.next_z = z
             
@@ -1974,8 +2041,10 @@ def perform_smooth_region(state):
 
             # A. Classify existing points
             for v in editor.SlabShapeVertices:
-                n = Node(v.Position.X, v.Position.Y, v.Position.Z, v)
-                if is_inside(v.Position): interior_nodes.append(n)
+                try: pos = v.Position
+                except: continue
+                n = Node(pos.X, pos.Y, pos.Z, v)
+                if is_inside(pos): interior_nodes.append(n)
                 nodes.append(n)
                 
             # A.1 Outlier Detection
@@ -2010,26 +2079,75 @@ def perform_smooth_region(state):
                     pt = XYZ(x, y, 0)
                     if is_inside(pt):
                         if not any(math.hypot(n.x - x, n.y - y) < dynamic_res * 0.4 for n in interior_nodes):
-                            rz = 0.0
+                            rz = None
                             if intersector:
                                 z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
                                 if z_hit is not None: rz = z_hit - off
+                            
+                            if rz is None:
+                                if nodes:
+                                    nearest = min(nodes, key=lambda nd: math.hypot(nd.x - x, nd.y - y))
+                                    rz = nearest.z
+                                else:
+                                    rz = 0.0
+                                    
                             n = Node(x, y, rz)
                             interior_nodes.append(n)
                             nodes.append(n)
                     y += dynamic_res
                 x += dynamic_res
             
-            # C. Identify boundaries and Smooth
+            # B.2 Densify Boundary anchors
             smoothing_radius = dynamic_res * 1.5
+            potential_boundary_pts = set()
+            for n in interior_nodes:
+                for dx in [-dynamic_res, 0, dynamic_res]:
+                    for dy in [-dynamic_res, 0, dynamic_res]:
+                        if dx == 0 and dy == 0: continue
+                        bx = round((n.x + dx) / dynamic_res) * dynamic_res
+                        by = round((n.y + dy) / dynamic_res) * dynamic_res
+                        potential_boundary_pts.add((bx, by))
+            
+            for bx, by in potential_boundary_pts:
+                if not any(math.hypot(n.x - bx, n.y - by) < dynamic_res * 0.4 for n in nodes):
+                    pt = XYZ(bx, by, 0)
+                    if not is_inside(pt):
+                        rz = None
+                        if intersector:
+                            z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
+                            if z_hit is not None: rz = z_hit - off
+                        
+                        if rz is None:
+                            nearest = min(nodes, key=lambda nd: math.hypot(nd.x - bx, nd.y - by))
+                            rz = nearest.z
+                            
+                        n = Node(bx, by, rz)
+                        nodes.append(n)
+
+            # C. Identify boundaries and Smooth
             boundary_nodes = [n for n in nodes if n not in interior_nodes and any(math.hypot(n.x - i.x, n.y - i.y) < smoothing_radius for i in interior_nodes)]
             active_nodes = interior_nodes + boundary_nodes
             
+            # Pre-compute static neighbors and inverse-distance weights
+            node_neighbors = {}
+            for n in interior_nodes:
+                nbs = []
+                for a in active_nodes:
+                    if a != n:
+                        dist = math.hypot(n.x - a.x, n.y - a.y)
+                        if dist < smoothing_radius:
+                            nbs.append((a, 1.0 / max(dist, 0.001)))
+                node_neighbors[n] = nbs
+            
+            # Z-preservation weight (0.0 = full smoothing, higher values = more retention of original shape)
+            z_preservation_weight = 0.0
+            
             for _ in range(5):
                 for n in interior_nodes:
-                    neighbors = [a for a in active_nodes if a != n and math.hypot(n.x - a.x, n.y - a.y) < smoothing_radius]
+                    neighbors = node_neighbors[n]
                     if neighbors:
-                        n.next_z = sum(nb.z for nb in neighbors) / len(neighbors)
+                        total_weight = sum(w for a, w in neighbors) + z_preservation_weight
+                        n.next_z = (sum(a.z * w for a, w in neighbors) + (n.orig_z * z_preservation_weight)) / total_weight
                 for n in interior_nodes:
                     n.z = n.next_z
             
@@ -2187,6 +2305,7 @@ def perform_smooth_path(state):
         class Node:
             def __init__(self, x, y, z, v_ref=None):
                 self.x = x; self.y = y; self.z = z
+                self.orig_z = z
                 self.v_ref = v_ref
                 self.next_z = z
         
@@ -2196,8 +2315,10 @@ def perform_smooth_path(state):
 
         # A. Classify existing points
         for v in editor.SlabShapeVertices:
-            n = Node(v.Position.X, v.Position.Y, v.Position.Z, v)
-            if is_inside(v.Position): interior_nodes.append(n)
+            try: pos = v.Position
+            except: continue
+            n = Node(pos.X, pos.Y, pos.Z, v)
+            if is_inside(pos): interior_nodes.append(n)
             nodes.append(n)
             
         # A.1 Outlier Detection
@@ -2248,26 +2369,75 @@ def perform_smooth_path(state):
                 pt = XYZ(x, y, 0)
                 if is_inside(pt):
                     if not any(math.hypot(n.x - x, n.y - y) < dynamic_res * 0.4 for n in interior_nodes):
-                        rz = 0.0
+                        rz = None
                         if intersector:
                             z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
                             if z_hit is not None: rz = z_hit - off
+                        
+                        if rz is None:
+                            if nodes:
+                                nearest = min(nodes, key=lambda nd: math.hypot(nd.x - x, nd.y - y))
+                                rz = nearest.z
+                            else:
+                                rz = 0.0
+                                
                         n = Node(x, y, rz)
                         interior_nodes.append(n)
                         nodes.append(n)
                 y += dynamic_res
             x += dynamic_res
         
-        # C. Identify boundaries and Smooth
+        # B.2 Densify Boundary anchors
         smoothing_radius = dynamic_res * 1.5
+        potential_boundary_pts = set()
+        for n in interior_nodes:
+            for dx in [-dynamic_res, 0, dynamic_res]:
+                for dy in [-dynamic_res, 0, dynamic_res]:
+                    if dx == 0 and dy == 0: continue
+                    bx = round((n.x + dx) / dynamic_res) * dynamic_res
+                    by = round((n.y + dy) / dynamic_res) * dynamic_res
+                    potential_boundary_pts.add((bx, by))
+        
+        for bx, by in potential_boundary_pts:
+            if not any(math.hypot(n.x - bx, n.y - by) < dynamic_res * 0.4 for n in nodes):
+                pt = XYZ(bx, by, 0)
+                if not is_inside(pt):
+                    rz = None
+                    if intersector:
+                        z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
+                        if z_hit is not None: rz = z_hit - off
+                    
+                    if rz is None:
+                        nearest = min(nodes, key=lambda nd: math.hypot(nd.x - bx, nd.y - by))
+                        rz = nearest.z
+                        
+                    n = Node(bx, by, rz)
+                    nodes.append(n)
+
+        # C. Identify boundaries and Smooth
         boundary_nodes = [n for n in nodes if n not in interior_nodes and any(math.hypot(n.x - i.x, n.y - i.y) < smoothing_radius for i in interior_nodes)]
         active_nodes = interior_nodes + boundary_nodes
         
+        # Pre-compute static neighbors and inverse-distance weights
+        node_neighbors = {}
+        for n in interior_nodes:
+            nbs = []
+            for a in active_nodes:
+                if a != n:
+                    dist = math.hypot(n.x - a.x, n.y - a.y)
+                    if dist < smoothing_radius:
+                        nbs.append((a, 1.0 / max(dist, 0.001)))
+            node_neighbors[n] = nbs
+        
+        # Z-preservation weight (0.0 = full smoothing, higher values = more retention of original shape)
+        z_preservation_weight = 0.0
+        
         for _ in range(5): 
             for n in interior_nodes:
-                neighbors = [a for a in active_nodes if a != n and math.hypot(n.x - a.x, n.y - a.y) < smoothing_radius]
+                neighbors = node_neighbors[n]
                 if neighbors:
-                    n.next_z = sum(nb.z for nb in neighbors) / len(neighbors)
+                    total_weight = sum(w for a, w in neighbors) + z_preservation_weight
+                    n.next_z = (sum(a.z * w for a, w in neighbors) + (n.orig_z * z_preservation_weight)) / total_weight
             for n in interior_nodes:
                 n.z = n.next_z
         
@@ -2335,13 +2505,16 @@ def perform_add_points_along_line(state):
             if all_curves:
                 min_x, max_x = float('inf'), float('-inf')
                 min_y, max_y = float('inf'), float('-inf')
+                tessellated_segments = []
                 for c in all_curves:
-                    for i in range(11):
-                        pt = c.Evaluate(i / 10.0, True)
-                        min_x = min(min_x, pt.X)
-                        max_x = max(max_x, pt.X)
-                        min_y = min(min_y, pt.Y)
-                        max_y = max(max_y, pt.Y)
+                    pts = c.Tessellate()
+                    for i in range(len(pts) - 1):
+                        p1, p2 = pts[i], pts[i+1]
+                        tessellated_segments.append(((p1.X, p1.Y), (p2.X, p2.Y)))
+                        min_x = min(min_x, p1.X, p2.X)
+                        max_x = max(max_x, p1.X, p2.X)
+                        min_y = min(min_y, p1.Y, p2.Y)
+                        max_y = max(max_y, p1.Y, p2.Y)
                 start_x = math.floor(min_x / g_int) * g_int
                 end_x   = math.ceil(max_x / g_int) * g_int
                 start_y = math.floor(min_y / g_int) * g_int
@@ -2351,19 +2524,15 @@ def perform_add_points_along_line(state):
                     x = start_x
                     while x <= end_x:
                         intersections = 0
-                        ray_y = y + 0.000137
-                        for c in all_curves:
-                            c_z = c.GetEndPoint(0).Z
-                            ray_line_z = Line.CreateBound(XYZ(x, ray_y, c_z), XYZ(max_x + 100.0, ray_y, c_z))
-                            res_array = clr.Reference[IntersectionResultArray]()
-                            res = c.Intersect(ray_line_z, res_array)
-                            if res == SetComparisonResult.Overlap and res_array.Value is not None:
-                                intersections += res_array.Value.Size
+                        for (ax, ay), (bx, by) in tessellated_segments:
+                            if ((ay > y) != (by > y)):
+                                intersect_x = (bx - ax) * (y - ay) / (by - ay) + ax
+                                if x < intersect_x: intersections += 1
                         if intersections % 2 != 0:
                             internal_pts.append(XYZ(x, y, z_val))
                         x += g_int
                     y += g_int
-                region_info = (all_curves, z_val, max_x, min_x, min_y, max_y)
+                region_info = (tessellated_segments, z_val, max_x, min_x, min_y, max_y)
         return crvs, internal_pts, region_info
 
     try:
@@ -2424,21 +2593,19 @@ def perform_add_points_along_line(state):
                 log.info("Reset Mode: Removing existing points in target area.")
                 to_delete = []
                 for v in editor.SlabShapeVertices:
-                    pos = v.Position
+                    try: pos = v.Position
+                    except: continue
                     should_delete = False
                     if target_region_infos:
                         for r_info in target_region_infos:
-                            all_curves, reg_z, max_x, min_x, min_y, max_y = r_info
+                            tess_segs, reg_z, max_x, min_x, min_y, max_y = r_info
                             if min_x <= pos.X <= max_x and min_y <= pos.Y <= max_y:
                                 intersections = 0
-                                ray_y = pos.Y + 0.000137
-                                for c in all_curves:
-                                    c_z = c.GetEndPoint(0).Z
-                                    ray_line_z = Line.CreateBound(XYZ(pos.X, ray_y, c_z), XYZ(max_x + 100.0, ray_y, c_z))
-                                    res_array = clr.Reference[IntersectionResultArray]()
-                                    res = c.Intersect(ray_line_z, res_array)
-                                    if res == SetComparisonResult.Overlap and res_array.Value is not None:
-                                        intersections += res_array.Value.Size
+                                px, py = pos.X, pos.Y
+                                for (ax, ay), (bx, by) in tess_segs:
+                                    if ((ay > py) != (by > py)):
+                                        intersect_x = (bx - ax) * (py - ay) / (by - ay) + ax
+                                        if px < intersect_x: intersections += 1
                                 if intersections % 2 != 0:
                                     should_delete = True
                                     break
@@ -2514,33 +2681,63 @@ def perform_add_points_along_line(state):
             if toposolid.Id != raw_elem.Id:
                 off = get_subdivision_offset(doc, raw_elem.Id)
             
+            # Spatial Hashing for fast pure Python deduplication
+            cell_size = max(MIN_DIST_TOLERANCE, 0.25)
+            pts_grid = {}
             unique_pts = []
+            
             for pt in pts_to_add:
+                cx = int(math.floor(pt.X / cell_size))
+                cy = int(math.floor(pt.Y / cell_size))
                 conflict_idx = None
-                cand_flat = flatten(pt)
-                for i, u_pt in enumerate(unique_pts):
-                    if flatten(u_pt).DistanceTo(cand_flat) < MIN_DIST_TOLERANCE:
-                        conflict_idx = i
-                        break
+                
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for idx in pts_grid.get((cx + dx, cy + dy), []):
+                            if dist_2d(unique_pts[idx], pt) < MIN_DIST_TOLERANCE:
+                                conflict_idx = idx
+                                break
+                        if conflict_idx is not None: break
+                        
                 if conflict_idx is not None:
                     unique_pts[conflict_idx] = pt
                 else:
+                    pts_grid.setdefault((cx, cy), []).append(len(unique_pts))
                     unique_pts.append(pt)
             
             added = 0
             modified = 0
             all_verts = [v for v in editor.SlabShapeVertices]
             
+            # Spatial Hash for existing vertices to avoid O(N*M) lookups
+            verts_grid = {}
+            for v in all_verts:
+                try:
+                    pos = v.Position
+                    cx = int(math.floor(pos.X / cell_size))
+                    cy = int(math.floor(pos.Y / cell_size))
+                    verts_grid.setdefault((cx, cy), []).append((v, pos))
+                except: continue
+            
             for pt in unique_pts:
                 adjusted_pt = XYZ(pt.X, pt.Y, pt.Z - off)
-                cand_flat = flatten(adjusted_pt)
                 matched_vert = None
-                for v in all_verts:
-                    if flatten(v.Position).DistanceTo(cand_flat) < MIN_DIST_TOLERANCE:
-                        matched_vert = v
-                        break
+                matched_pos = None
+                
+                cx = int(math.floor(adjusted_pt.X / cell_size))
+                cy = int(math.floor(adjusted_pt.Y / cell_size))
+                
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for v, pos in verts_grid.get((cx + dx, cy + dy), []):
+                            if dist_2d(pos, adjusted_pt) < MIN_DIST_TOLERANCE:
+                                matched_vert = v
+                                matched_pos = pos
+                                break
+                        if matched_vert: break
+                        
                 if matched_vert:
-                    if abs(matched_vert.Position.Z - adjusted_pt.Z) > 0.005:
+                    if abs(matched_pos.Z - adjusted_pt.Z) > 0.005:
                         try:
                             editor.DeletePoint(matched_vert)
                             editor.AddPoint(adjusted_pt)
@@ -2554,23 +2751,20 @@ def perform_add_points_along_line(state):
             
             if target_region_infos and not state.reset_mode:
                 for r_info in target_region_infos:
-                    all_curves, reg_z, max_x, min_x, min_y, max_y = r_info
+                    tess_segs, reg_z, max_x, min_x, min_y, max_y = r_info
                     target_z = reg_z - off + g_z_off
                     for v in editor.SlabShapeVertices:
-                        pos = v.Position
+                        try: pos = v.Position
+                        except: continue
                         if pos.X < min_x or pos.X > max_x or pos.Y < min_y or pos.Y > max_y:
                             continue
                         if abs(pos.Z - target_z) > 0.005:
                             intersections = 0
-                            ray_y = pos.Y + 0.000137
-                            ray_end_x = max_x + 100.0
-                            for c in all_curves:
-                                c_z = c.GetEndPoint(0).Z
-                                ray_line_z = Line.CreateBound(XYZ(pos.X, ray_y, c_z), XYZ(ray_end_x, ray_y, c_z))
-                                res_array = clr.Reference[IntersectionResultArray]()
-                                res = c.Intersect(ray_line_z, res_array)
-                                if res == SetComparisonResult.Overlap and res_array.Value is not None:
-                                    intersections += res_array.Value.Size
+                            px, py = pos.X, pos.Y
+                            for (ax, ay), (bx, by) in tess_segs:
+                                if ((ay > py) != (by > py)):
+                                    intersect_x = (bx - ax) * (py - ay) / (by - ay) + ax
+                                    if px < intersect_x: intersections += 1
                             if intersections % 2 != 0:
                                 try:
                                     editor.DeletePoint(v)
@@ -2586,8 +2780,7 @@ def perform_add_points_along_line(state):
             if tg is not None and tg.HasStarted(): tg.RollBack()
             log.error("Failed to add points.", "{}\n{}".format(loop_e, traceback.format_exc()))
             
-    finally:
-        log.show()
+    log.show()
 
 # NOTE: Future enhancement for triangulation control
 # The Revit API allows modifying triangulation via SlabShapeEditor.DrawSplitLine(v1, v2).
@@ -2707,3 +2900,7 @@ if __name__ == '__main__':
         elif action == "load_recipe": 
             perform_load_recipe(state)
             save_state_to_disk(state)
+                
+        # Clear the evaluation cache to free memory before reopening the UI
+        _curve_eval_cache.clear()
+        _subdivision_offset_cache.clear()
