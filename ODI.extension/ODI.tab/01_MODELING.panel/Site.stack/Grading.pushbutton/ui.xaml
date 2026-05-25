@@ -458,9 +458,8 @@
                             <ComboBox Name="Cmb_PlanOffsetDir" Grid.Column="2" Height="22" Margin="4,0,0,0"
                                       IsEnabled="{Binding ElementName=Cb_PlanOffset, Path=IsChecked}"
                                       VerticalContentAlignment="Center">
-                                <ComboBoxItem Content="Center"/>
-                                <ComboBoxItem Content="Left"/>
-                                <ComboBoxItem Content="Right"/>
+                                <ComboBoxItem Content="Inside"/>
+                                <ComboBoxItem Content="Outside"/>
                                 <ComboBoxItem Content="Both" IsSelected="True"/>
                             </ComboBox>
                             <TextBlock Name="Lbl_PlanOffset_Unit" Text="ft" Grid.Column="3"

@@ -24,7 +24,8 @@ from Autodesk.Revit.DB import (
     ReferenceIntersector, FindReferenceTarget, Options, Solid, ViewType, View3D, Edge,
     ElementTransformUtils, CurveElement, UnitUtils, SpecTypeId, Line,
     FilteredElementCollector, Family, Toposolid, FilledRegion, IntersectionResultArray, SetComparisonResult,
-    UnitFormatUtils
+    UnitFormatUtils, IFailuresPreprocessor, FailureProcessingResult,
+    FailureSeverity, TransactionStatus
 )
 from Autodesk.Revit.Exceptions import OperationCanceledException
 from Autodesk.Revit.UI.Selection import ObjectType, ISelectionFilter
@@ -145,6 +146,27 @@ class BatchLogger(object):
             out.print_html('<strong>--- INFO ---</strong>')
             for i in self._infos:
                 out.print_html('<div style="color:gray;">{}</div>'.format(i))
+
+class SilentErrorPreprocessor(IFailuresPreprocessor):
+    def PreprocessFailures(self, failuresAccessor):
+        failures = failuresAccessor.GetFailureMessages()
+        if failures.Count == 0:
+            return FailureProcessingResult.Continue
+            
+        has_error = False
+        for failure in failures:
+            severity = failure.GetSeverity()
+            if severity == FailureSeverity.Error or severity == FailureSeverity.DocumentCorruption:
+                has_error = True
+            elif severity == FailureSeverity.Warning:
+                try:
+                    failuresAccessor.DeleteWarning(failure)
+                except: pass
+                
+        if has_error:
+            return FailureProcessingResult.ProceedWithRollBack
+            
+        return FailureProcessingResult.Continue
 
 def get_id_val(element):
     if not element: return -1
@@ -1478,6 +1500,9 @@ def perform_manual_stitch(state):
         
         t = Transaction(doc, "Stitch")
         t.Start()
+        fail_opts = t.GetFailureHandlingOptions()
+        fail_opts.SetFailuresPreprocessor(SilentErrorPreprocessor())
+        t.SetFailureHandlingOptions(fail_opts)
         
         try:
             tracker = VirtualVertexTracker(doc, toposolid)
@@ -1545,8 +1570,12 @@ def perform_manual_stitch(state):
             
             log.info("Successfully Added Points: {}".format(added_count))
 
-            t.Commit()
-            tg.Assimilate()
+            status = t.Commit()
+            if status == TransactionStatus.Committed:
+                tg.Assimilate()
+            else:
+                if tg.HasStarted(): tg.RollBack()
+                log.error("Revit rejected the changes.", "The Toposolid geometry may have become invalid.")
             
         except Exception as e:
             t.RollBack()
@@ -1705,6 +1734,9 @@ def perform_sculpt(state):
             log.info("--- PHASE 0: RESET POINTS ---")
             t0 = Transaction(doc, "Reset Points")
             t0.Start()
+            fail_opts0 = t0.GetFailureHandlingOptions()
+            fail_opts0.SetFailuresPreprocessor(SilentErrorPreprocessor())
+            t0.SetFailureHandlingOptions(fail_opts0)
             try:
                 to_delete = []
                 for v, pos in tracker.get_all():
@@ -1720,7 +1752,9 @@ def perform_sculpt(state):
                     log.info("Removed {} old points to clear resolution.".format(count_del))
                 else:
                     log.info("No points found within grading zone to remove.")
-                t0.Commit()
+                status0 = t0.Commit()
+                if status0 != TransactionStatus.Committed:
+                    log.error("Reset Points transaction was rejected by Revit.")
             except Exception as e:
                 t0.RollBack()
                 log.error("Failed to reset points.", e)
@@ -1763,6 +1797,9 @@ def perform_sculpt(state):
         log.info("--- PHASE 1: DENSIFY ---")
         t1 = Transaction(doc, "Densify")
         t1.Start()
+        fail_opts1 = t1.GetFailureHandlingOptions()
+        fail_opts1.SetFailuresPreprocessor(SilentErrorPreprocessor())
+        t1.SetFailureHandlingOptions(fail_opts1)
         try:
             log.info("Initial Vertex Count: {}".format(len(tracker.get_all())))
             occupied_points = [pos for v, pos in tracker.get_all()]
@@ -1802,7 +1839,9 @@ def perform_sculpt(state):
                     if tracker.add(p):
                         occupied_points.append(p)
                         added_count += 1
-            t1.Commit()
+            status1 = t1.Commit()
+            if status1 != TransactionStatus.Committed:
+                raise Exception("Densify transaction was rejected by Revit.")
             log.info("Points Added: {}".format(added_count))
         except:
             t1.RollBack()
@@ -1812,6 +1851,9 @@ def perform_sculpt(state):
         log.info("--- PHASE 2: SCULPT ---")
         t2 = Transaction(doc, "Sculpt")
         t2.Start()
+        fail_opts2 = t2.GetFailureHandlingOptions()
+        fail_opts2.SetFailuresPreprocessor(SilentErrorPreprocessor())
+        t2.SetFailureHandlingOptions(fail_opts2)
         modified_count = 0
         try:
             updates = []
@@ -1865,7 +1907,9 @@ def perform_sculpt(state):
             for p in updates:
                 tracker.add(p)
             
-            t2.Commit()
+            status2 = t2.Commit()
+            if status2 != TransactionStatus.Committed:
+                raise Exception("Sculpt transaction was rejected by Revit (Toposolid may be too thin).")
         except:
             t2.RollBack()
             raise
@@ -1875,6 +1919,9 @@ def perform_sculpt(state):
             log.info("--- PHASE 3: TRIANGULATE ---")
             t3 = Transaction(doc, "Triangulate Path")
             t3.Start()
+            fail_opts3 = t3.GetFailureHandlingOptions()
+            fail_opts3.SetFailuresPreprocessor(SilentErrorPreprocessor())
+            t3.SetFailureHandlingOptions(fail_opts3)
             split_lines_count = 0
             try:
                 all_verts = tracker.get_all()
@@ -1926,8 +1973,11 @@ def perform_sculpt(state):
                     
                     current_len += step_len
 
-                t3.Commit()
-                log.info("Triangulation Complete. Split Lines Added: {}".format(split_lines_count))
+                status3 = t3.Commit()
+                if status3 == TransactionStatus.Committed:
+                    log.info("Triangulation Complete. Split Lines Added: {}".format(split_lines_count))
+                else:
+                    log.error("Triangulation transaction was rejected by Revit.")
             except:
                 t3.RollBack()
                 raise
@@ -2038,8 +2088,8 @@ def perform_edging(state):
             if g_plan_off != 0.0:
                 if g_plan_dir == "Both": active_offset += g_plan_off
                 elif g_plan_dir == "Center": active_offset += (g_plan_off / 2.0)
-                elif g_plan_dir == "Left" and side_sign > 0: active_offset += g_plan_off
-                elif g_plan_dir == "Right" and side_sign < 0: active_offset += g_plan_off
+                elif g_plan_dir == "Inside" and side_sign > 0: active_offset += g_plan_off
+                elif g_plan_dir == "Outside" and side_sign < 0: active_offset += g_plan_off
 
             if abs(d_xy - active_offset) < 1.0:
                 vec = vec_to_pt.Normalize()
@@ -2061,8 +2111,8 @@ def perform_edging(state):
             if g_plan_off != 0.0:
                 if g_plan_dir == "Both": active_offset += g_plan_off
                 elif g_plan_dir == "Center": active_offset += (g_plan_off / 2.0)
-                elif g_plan_dir == "Left" and side > 0: active_offset += g_plan_off
-                elif g_plan_dir == "Right" and side < 0: active_offset += g_plan_off
+                elif g_plan_dir == "Inside" and side > 0: active_offset += g_plan_off
+                elif g_plan_dir == "Outside" and side < 0: active_offset += g_plan_off
             offset_lines.append(generate_offset_polyline(pts, side * active_offset))
             
         for off_line in offset_lines:
@@ -2086,6 +2136,9 @@ def perform_edging(state):
             
         t = Transaction(doc, "Apply Edging")
         t.Start()
+        fail_opts = t.GetFailureHandlingOptions()
+        fail_opts.SetFailuresPreprocessor(SilentErrorPreprocessor())
+        t.SetFailureHandlingOptions(fail_opts)
         
         occupied_points = [pos for v, pos in tracker.get_all()]
         
@@ -2101,9 +2154,13 @@ def perform_edging(state):
                 if tracker.add(pt):
                     occupied_points.append(pt)
         
-        t.Commit()
-        tg.Assimilate()
-        log.info("Edging Complete.\nSnapped: {}\nAdded: {}".format(len(to_move), len(to_add)))
+        status = t.Commit()
+        if status == TransactionStatus.Committed:
+            tg.Assimilate()
+            log.info("Edging Complete.\nSnapped: {}\nAdded: {}".format(len(to_move), len(to_add)))
+        else:
+            if tg.HasStarted(): tg.RollBack()
+            log.error("Revit rejected the changes.", "The Toposolid geometry may have become invalid (e.g., too thin).")
         
     except Exception as e:
         tg.RollBack()
@@ -2271,6 +2328,9 @@ def perform_smooth_region(state):
             
             t = Transaction(doc, "Smooth Points")
             t.Start()
+            fail_opts = t.GetFailureHandlingOptions()
+            fail_opts.SetFailuresPreprocessor(SilentErrorPreprocessor())
+            t.SetFailureHandlingOptions(fail_opts)
             
             nodes = []
             interior_nodes = []
@@ -2366,7 +2426,7 @@ def perform_smooth_region(state):
                         else:
                             rz = 0.0
                             
-                    n = SmoothingNode(x, y, rz)
+                    n = SmoothingNode(px, py, rz)
                     interior_nodes.append(n)
                     nodes.append(n)
             
@@ -2437,9 +2497,13 @@ def perform_smooth_region(state):
                     if tracker.add(final_pt):
                         add_count += 1
                     
-            t.Commit()
-            tg.Assimilate()
-            log.info("Smooth Region Complete.\nAdded {} new points, Smoothed {} existing points.\n".format(add_count, mod_count))
+            status = t.Commit()
+            if status == TransactionStatus.Committed:
+                tg.Assimilate()
+                log.info("Smooth Region Complete.\nAdded {} new points, Smoothed {} existing points.\n".format(add_count, mod_count))
+            else:
+                if tg.HasStarted(): tg.RollBack()
+                log.error("Revit rejected the changes.", "The Toposolid geometry may have become invalid (e.g., too thin).")
             
         except Exception as loop_e:
             if 't' in locals() and t.HasStarted(): t.RollBack()
@@ -2575,6 +2639,9 @@ def perform_smooth_path(state):
         
         t = Transaction(doc, "Smooth Points")
         t.Start()
+        fail_opts = t.GetFailureHandlingOptions()
+        fail_opts.SetFailuresPreprocessor(SilentErrorPreprocessor())
+        t.SetFailureHandlingOptions(fail_opts)
         
         nodes = []
         interior_nodes = []
@@ -2764,9 +2831,13 @@ def perform_smooth_path(state):
                 if tracker.add(final_pt):
                     add_count += 1
                 
-        t.Commit()
-        tg.Assimilate()
-        log.info("Smooth Path Complete.\nAdded {} new points, Smoothed {} existing points.".format(add_count, mod_count))
+        status = t.Commit()
+        if status == TransactionStatus.Committed:
+            tg.Assimilate()
+            log.info("Smooth Path Complete.\nAdded {} new points, Smoothed {} existing points.".format(add_count, mod_count))
+        else:
+            if tg.HasStarted(): tg.RollBack()
+            log.error("Revit rejected the changes.", "The Toposolid geometry may have become invalid (e.g., too thin).")
         
     except Exception as e:
         if 'tg' in locals() and tg.HasStarted(): tg.RollBack()
@@ -2786,6 +2857,22 @@ def get_region_z(px, py, region_infos):
                     if px < intersect_x: intersections += 1
             if intersections % 2 != 0: return reg_z
     return None
+
+def is_in_graded_region(px, py, target_region_infos, target_curves, p_off, p_dir):
+    if not target_region_infos: return False
+    is_in_orig = get_region_z(px, py, target_region_infos) is not None
+    if p_off == 0.0 or p_dir == "Center": return is_in_orig
+    
+    min_d = float('inf')
+    pt = XYZ(px, py, 0)
+    for c, override_z in target_curves:
+        if override_z is not None:
+            _, _, d_xy = project_2d(c, pt)
+            if d_xy < min_d: min_d = d_xy
+            
+    if p_dir == "Outside" or p_dir == "Both": return is_in_orig or (min_d <= p_off - 0.01)
+    elif p_dir == "Inside": return is_in_orig and (min_d >= p_off + 0.01)
+    return is_in_orig
 
 def apply_triangulation_halo(state, doc, tracker, target_curves, target_region_infos, 
                              intersector, ray_start_z, off, g_int, g_plan_off, 
@@ -2843,23 +2930,18 @@ def apply_triangulation_halo(state, doc, tracker, target_curves, target_region_i
                     pts.append(pt)
         
         offset_lines = []
-        if is_region:
-            offset_lines.append(generate_offset_polyline(pts, halo_offset_inner))
-            offset_lines.append(generate_offset_polyline(pts, -halo_offset_inner))
-            offset_lines.append(generate_offset_polyline(pts, halo_offset_outer))
-            offset_lines.append(generate_offset_polyline(pts, -halo_offset_outer))
-        else:
-            if g_plan_off == 0.0 or g_plan_dir == "Both" or g_plan_dir == "Center":
-                offset_lines.append(generate_offset_polyline(pts, halo_offset_inner))
-                offset_lines.append(generate_offset_polyline(pts, -halo_offset_inner))
-                offset_lines.append(generate_offset_polyline(pts, halo_offset_outer))
-                offset_lines.append(generate_offset_polyline(pts, -halo_offset_outer))
-            elif g_plan_dir == "Left":
-                offset_lines.append(generate_offset_polyline(pts, halo_offset_inner))
-                offset_lines.append(generate_offset_polyline(pts, halo_offset_outer))
-            elif g_plan_dir == "Right":
-                offset_lines.append(generate_offset_polyline(pts, -halo_offset_inner))
-                offset_lines.append(generate_offset_polyline(pts, -halo_offset_outer))
+        active_offsets = [0.0]
+        if g_plan_off != 0.0:
+            if g_plan_dir == "Inside": active_offsets = [g_plan_off]
+            elif g_plan_dir == "Outside": active_offsets = [-g_plan_off]
+            elif g_plan_dir == "Both": active_offsets = [g_plan_off, -g_plan_off]
+            elif g_plan_dir == "Center": active_offsets = [g_plan_off / 2.0, -g_plan_off / 2.0]
+            
+        for a_off in active_offsets:
+            offset_lines.append(generate_offset_polyline(pts, a_off + halo_offset_inner))
+            offset_lines.append(generate_offset_polyline(pts, a_off - halo_offset_inner))
+            offset_lines.append(generate_offset_polyline(pts, a_off + halo_offset_outer))
+            offset_lines.append(generate_offset_polyline(pts, a_off - halo_offset_outer))
         
         valid_halos = []
         for off_line in offset_lines:
@@ -2878,7 +2960,7 @@ def apply_triangulation_halo(state, doc, tracker, target_curves, target_region_i
                     if t > 1.0: t = 1.0
                     hp = p_start + vec * t
                     
-                    if is_region and get_region_z(hp.X, hp.Y, target_region_infos) is not None:
+                    if is_region and is_in_graded_region(hp.X, hp.Y, target_region_infos, target_curves, g_plan_off, g_plan_dir):
                         continue
                         
                     valid_halos.append(hp)
@@ -2915,7 +2997,7 @@ def apply_triangulation_halo(state, doc, tracker, target_curves, target_region_i
     for v, pos in tracker.get_all():
             is_region = False
             if target_region_infos:
-                if get_region_z(pos.X, pos.Y, target_region_infos) is not None:
+                if is_in_graded_region(pos.X, pos.Y, target_region_infos, target_curves, g_plan_off, g_plan_dir):
                     is_region = True
             if is_region: continue
             
@@ -2934,8 +3016,23 @@ def apply_triangulation_halo(state, doc, tracker, target_curves, target_region_i
             if conflict_with_new: continue
             
             min_d = float('inf')
-            for curve, _ in target_curves:
+            for curve, override_z in target_curves:
                 _, _, d_xy = project_2d(curve, pos)
+                
+                if g_plan_off != 0.0 and g_plan_dir != "Center" and override_z is None:
+                    vec_to_pt = XYZ(pos.X - p_3d.X, pos.Y - p_3d.Y, 0)
+                    try:
+                        t_fwd = curve.ComputeDerivatives(t_norm, True).BasisX.Normalize()
+                        normal = XYZ(0,1,0) if t_fwd.IsAlmostEqualTo(XYZ.Zero) else XYZ.BasisZ.CrossProduct(t_fwd).Normalize()
+                        side_sign = 1.0 if vec_to_pt.DotProduct(normal) >= 0 else -1.0
+                    except: side_sign = 1.0
+                    if g_plan_dir == "Inside": d_xy = abs((side_sign * d_xy) - g_plan_off)
+                    elif g_plan_dir == "Outside": d_xy = abs((side_sign * d_xy) + g_plan_off)
+                    elif g_plan_dir == "Both": d_xy = min(abs(d_xy - g_plan_off), abs(d_xy + g_plan_off))
+                elif g_plan_off != 0.0 and override_z is not None:
+                    if g_plan_dir == "Outside" or g_plan_dir == "Both": d_xy = max(0.0, d_xy - g_plan_off)
+                    elif g_plan_dir == "Inside": d_xy = d_xy + g_plan_off
+                    
                 if d_xy < min_d: min_d = d_xy
                 
             if min_d <= halo_offset_outer + 0.1:
@@ -2997,7 +3094,7 @@ def perform_add_points_along_line(state):
             g_plan_dir = getattr(state, "plan_offset_dir", "Both")
         except: pass
     
-    def get_curves_from_elem(elem, g_int):
+    def get_curves_from_elem(elem, g_int, p_off=0.0, p_dir="Both"):
         crvs = []
         internal_pts = []
         region_info = None
@@ -3030,10 +3127,12 @@ def perform_add_points_along_line(state):
                         max_x = max(max_x, p1.X, p2.X)
                         min_y = min(min_y, p1.Y, p2.Y)
                         max_y = max(max_y, p1.Y, p2.Y)
-                start_x = math.floor(min_x / g_int) * g_int
-                end_x   = math.ceil(max_x / g_int) * g_int
-                start_y = math.floor(min_y / g_int) * g_int
-                end_y   = math.ceil(max_y / g_int) * g_int
+                
+                search_pad = p_off + g_int if (p_off > 0 and p_dir in ["Outside", "Both"]) else g_int
+                start_x = math.floor((min_x - search_pad) / g_int) * g_int
+                end_x   = math.ceil((max_x + search_pad) / g_int) * g_int
+                start_y = math.floor((min_y - search_pad) / g_int) * g_int
+                end_y   = math.ceil((max_y + search_pad) / g_int) * g_int
                 
                 y_vals = []
                 y_temp = start_y
@@ -3054,8 +3153,23 @@ def perform_add_points_along_line(state):
                             if ((ay > y) != (by > y)):
                                 intersect_x = (bx - ax) * (y - ay) / (by - ay) + ax
                                 if x < intersect_x: intersections += 1
-                        if intersections % 2 != 0:
-                            row_pts.append((x, y))
+                                
+                        is_in_orig = (intersections % 2 != 0)
+                        if p_off != 0.0 and p_dir != "Center":
+                            pt_3d = XYZ(x, y, z_val)
+                            min_d = float('inf')
+                            for c in all_curves:
+                                _, _, d_xy = project_2d(c, pt_3d)
+                                if d_xy < min_d: min_d = d_xy
+                                
+                            if p_dir == "Outside" or p_dir == "Both":
+                                if is_in_orig or min_d <= p_off + 0.01: row_pts.append((x, y))
+                            elif p_dir == "Inside":
+                                if is_in_orig and min_d >= p_off + 0.01: row_pts.append((x, y))
+                        else:
+                            if is_in_orig:
+                                row_pts.append((x, y))
+                                
                         x += g_int
                     with bag_lock:
                         bag.extend(row_pts)
@@ -3118,7 +3232,7 @@ def perform_add_points_along_line(state):
         target_region_infos = []
         
         for elem in target_elems:
-            crvs, int_pts, r_info = get_curves_from_elem(elem, g_int)
+            crvs, int_pts, r_info = get_curves_from_elem(elem, g_int, g_plan_off, g_plan_dir)
             if crvs: target_curves.extend(crvs)
             if int_pts: target_internal_pts.extend(int_pts)
             if r_info: target_region_infos.append(r_info)
@@ -3169,22 +3283,43 @@ def perform_add_points_along_line(state):
             
             t = Transaction(doc, "Add Points")
             t.Start()
+            fail_opts = t.GetFailureHandlingOptions()
+            fail_opts.SetFailuresPreprocessor(SilentErrorPreprocessor())
+            t.SetFailureHandlingOptions(fail_opts)
             
             if state.reset_mode:
                 log.info("Reset Mode: Removing existing points in target area.")
                 to_delete = []
                 for v, pos in tracker.get_all():
                     should_delete = False
-                    if get_region_z(pos.X, pos.Y, target_region_infos) is not None:
+                    if is_in_graded_region(pos.X, pos.Y, target_region_infos, target_curves, g_plan_off, g_plan_dir):
                         should_delete = True
+                        
                     if not should_delete:
-                        for curve, _ in target_curves:
+                        for curve, override_z in target_curves:
+                            if override_z is not None: continue
+                            
                             p_3d, t_norm, d_xy = project_2d(curve, pos)
-                            if d_xy < (g_int * 0.75):
-                                should_delete = True
-                                break
                             if g_plan_off != 0.0 and g_plan_dir != "Center":
-                                if abs(d_xy - g_plan_off) < (g_int * 0.75):
+                                vec_to_pt = XYZ(pos.X - p_3d.X, pos.Y - p_3d.Y, 0)
+                                try:
+                                    t_fwd = curve.ComputeDerivatives(t_norm, True).BasisX.Normalize()
+                                    normal = XYZ(0,1,0) if t_fwd.IsAlmostEqualTo(XYZ.Zero) else XYZ.BasisZ.CrossProduct(t_fwd).Normalize()
+                                    side_sign = 1.0 if vec_to_pt.DotProduct(normal) >= 0 else -1.0
+                                except: side_sign = 1.0
+                                
+                                active_offset = g_plan_off if g_plan_dir == "Inside" else -g_plan_off
+                                if g_plan_dir == "Both":
+                                    if abs(d_xy - g_plan_off) < (g_int * 0.75) or abs(d_xy + g_plan_off) < (g_int * 0.75):
+                                        should_delete = True
+                                        break
+                                else:
+                                    dist_to_shifted = abs((side_sign * d_xy) - active_offset)
+                                    if dist_to_shifted < (g_int * 0.75):
+                                        should_delete = True
+                                        break
+                            else:
+                                if d_xy < (g_int * 0.75):
                                     should_delete = True
                                     break
                     if should_delete:
@@ -3256,8 +3391,8 @@ def perform_add_points_along_line(state):
                 if g_plan_off != 0.0:
                     offsets = []
                     if g_plan_dir == "Center": offsets = [g_plan_off / 2.0, -g_plan_off / 2.0]
-                    elif g_plan_dir == "Left": offsets = [g_plan_off]
-                    elif g_plan_dir == "Right": offsets = [-g_plan_off]
+                    elif g_plan_dir == "Inside": offsets = [g_plan_off]
+                    elif g_plan_dir == "Outside": offsets = [-g_plan_off]
                     elif g_plan_dir == "Both": offsets = [g_plan_off, -g_plan_off]
                     
                     is_endpoint = (param == 0.0 or param == 1.0)
@@ -3486,9 +3621,9 @@ def perform_add_points_along_line(state):
                                 valid_halos.extend([h1_in, h2_in, h1_out, h2_out])
                             elif g_plan_dir == "Center":
                                 valid_halos.extend([h1_in, h2_in, h1_out, h2_out])
-                            elif g_plan_dir == "Left":
+                            elif g_plan_dir == "Inside":
                                 valid_halos.extend([h2_in, h2_out])
-                            elif g_plan_dir == "Right":
+                            elif g_plan_dir == "Outside":
                                 valid_halos.extend([h1_in, h1_out])
                                 
                         for hp in valid_halos:
@@ -3501,7 +3636,7 @@ def perform_add_points_along_line(state):
                                 for dy in (-1, 0, 1):
                                     for pos in halo_verts_grid.get((hcx_halo + dx, hcy_halo + dy), []):
                                         if dist_2d(pos, hp) < halo_search_rad:
-                                            if is_region and get_region_z(pos.X, pos.Y, target_region_infos) is not None:
+                                            if override_z is not None and is_in_graded_region(pos.X, pos.Y, target_region_infos, target_curves, g_plan_off, g_plan_dir):
                                                 continue
                                             nearby_z.append(pos.Z)
                                             
@@ -3530,7 +3665,7 @@ def perform_add_points_along_line(state):
                 for v, pos in tracker.get_all():
                         is_region = False
                         if target_region_infos:
-                            if get_region_z(pos.X, pos.Y, target_region_infos) is not None:
+                            if is_in_graded_region(pos.X, pos.Y, target_region_infos, target_curves, g_plan_off, g_plan_dir):
                                 is_region = True
                         if is_region: continue
                         
@@ -3596,11 +3731,15 @@ def perform_add_points_along_line(state):
                             pts_grid.setdefault((cx, cy), []).append(len(unique_pts) - 1)
                             halo_added += 1
             
-            t.Commit()
-            tg.Assimilate()
-            log.info("Successfully graded elements: Added {} new points, Modified {} existing points.".format(added, modified))
-            if enable_halo:
-                log.info("Triangulation Anchors: Cleared {} boundary points and added {} halo points for clean blending.\n".format(eliminated_count, halo_added))
+            status = t.Commit()
+            if status == TransactionStatus.Committed:
+                tg.Assimilate()
+                log.info("Successfully graded elements: Added {} new points, Modified {} existing points.".format(added, modified))
+                if enable_halo:
+                    log.info("Triangulation Anchors: Cleared {} boundary points and added {} halo points for clean blending.\n".format(eliminated_count, halo_added))
+            else:
+                if tg.HasStarted(): tg.RollBack()
+                log.error("Revit rejected the changes.", "The Toposolid geometry may have become invalid (e.g., too thin).")
         except Exception as loop_e:
             if 't' in locals() and t.HasStarted(): t.RollBack()
             if tg is not None and tg.HasStarted(): tg.RollBack()
