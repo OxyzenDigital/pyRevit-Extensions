@@ -240,6 +240,7 @@ def load_settings_from_disk():
     defaults = {
         "width": "6.0", "falloff": "10.0", "grid": "3.0", "slope": "2.0", "mode": "stakes",
         "outlier_tol": "1.0", "point_dist_tol": "0.25",
+        "elevation_ref": "Survey Point",
         "win_top": "100", "win_left": "100"
     }
     try:
@@ -267,6 +268,7 @@ def save_state_to_disk(state):
         "square_ends": state.square_ends,
         "sharp_smoothing": getattr(state, 'sharp_smoothing', False),
         "draw_split_lines": getattr(state, 'draw_split_lines', False),
+        "elevation_ref": getattr(state, 'elevation_ref', "Survey Point"),
         "win_top": str(state.win_top),
         "win_left": str(state.win_left)
     }
@@ -297,6 +299,7 @@ class GradingState(object):
         self.plan_offset_val = sets.get("plan_offset_val", "0.0")
         self.plan_offset_dir = sets.get("plan_offset_dir", "Both")
         self.draw_split_lines = sets.get("draw_split_lines", False)
+        self.elevation_ref = sets.get("elevation_ref", "Survey Point")
         self.reset_mode = False
         
         try:
@@ -494,6 +497,15 @@ class GradingWindow(forms.WPFWindow):
 
         if hasattr(self, "Cb_Triangulate"):
             self.Cb_Triangulate.IsChecked = getattr(self.state, "draw_split_lines", False)
+
+        if hasattr(self, "Cmb_ElevationRef"):
+            ref_val = getattr(self.state, "elevation_ref", "Survey Point")
+            for i in range(self.Cmb_ElevationRef.Items.Count):
+                item = self.Cmb_ElevationRef.Items[i]
+                content = getattr(item, "Content", None)
+                if content == ref_val or str(item) == ref_val:
+                    self.Cmb_ElevationRef.SelectedIndex = i
+                    break
 
         # Re-run validation so buttons are correct
         self.validate_ui()
@@ -698,6 +710,10 @@ class GradingWindow(forms.WPFWindow):
             
         if hasattr(self, "Cb_Triangulate"):
             self.state.draw_split_lines = self.Cb_Triangulate.IsChecked
+            
+        if hasattr(self, "Cmb_ElevationRef") and self.Cmb_ElevationRef.SelectedItem:
+            item = self.Cmb_ElevationRef.SelectedItem
+            self.state.elevation_ref = getattr(item, "Content", str(item))
 
     def _raise(self, action):
         self.update_state_from_ui()
@@ -718,6 +734,27 @@ class GradingWindow(forms.WPFWindow):
 # ==========================================
 # 3. HELPERS
 # ==========================================
+def get_elevation_datum_offset(doc, ref_mode):
+    """Returns the Z elevation of the selected datum relative to the Internal Origin."""
+    offset = 0.0
+    try:
+        from Autodesk.Revit.DB import FilteredElementCollector, BuiltInCategory, BuiltInParameter
+        ref_str = str(ref_mode).lower()
+        if "project" in ref_str:
+            col = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_ProjectBasePoint).WhereElementIsNotElementType().ToElements()
+            if col: 
+                p = col[0].get_Parameter(BuiltInParameter.BASEPOINT_ELEVATION_PARAM)
+                if p: offset = p.AsDouble()
+                else: offset = col[0].get_BoundingBox(None).Min.Z
+        elif "survey" in ref_str:
+            col = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_SharedBasePoint).WhereElementIsNotElementType().ToElements()
+            if col: 
+                p = col[0].get_Parameter(BuiltInParameter.BASEPOINT_ELEVATION_PARAM)
+                if p: offset = p.AsDouble()
+                else: offset = col[0].get_BoundingBox(None).Min.Z
+    except: pass
+    return offset
+
 class UniversalFilter(ISelectionFilter):
     def AllowElement(self, e): return True
     def AllowReference(self, r, p): return True
@@ -982,7 +1019,7 @@ def is_too_close(candidate_pt, occupied_points, tolerance=MIN_DIST_TOLERANCE):
         if (cx - existing.X)**2 + (cy - existing.Y)**2 < tol_sq: return True
     return False
 
-def get_surface_info(intersector, pt, start_z):
+def get_surface_info(intersector, pt, start_z, datum_offset=0.0):
     """Returns (Z_value, ElementId) of the surface hit at pt (x,y)."""
     if not intersector: return (None, None)
     origin = XYZ(pt.X, pt.Y, start_z + 50.0) # Start high
@@ -991,7 +1028,7 @@ def get_surface_info(intersector, pt, start_z):
         context = intersector.FindNearest(origin, XYZ(0, 0, -1))
         if context: 
             ref = context.GetReference()
-            return (ref.GlobalPoint.Z, ref.ElementId)
+            return (ref.GlobalPoint.Z - datum_offset, ref.ElementId)
     except: pass
     return (None, None)
 
@@ -1172,7 +1209,7 @@ def validate_input(state, log):
 
     return True
 
-def calculate_and_adjust_stakes(state, log):
+def calculate_and_adjust_stakes(state, log, datum_offset=0.0):
     """Calculates Z levels and adjusts end stake if needed."""
     if not state.grading_lines:
         log.error("Invalid Guide Lines selected.")
@@ -1191,7 +1228,8 @@ def calculate_and_adjust_stakes(state, log):
         raise Exception("Invalid Stake")
 
     u_start_pt = state.start_stake.Location.Point
-    z_start = u_start_pt.Z
+    z_start_internal = u_start_pt.Z
+    z_start = z_start_internal - datum_offset
     dist_start = u_start_pt.DistanceTo(l_start)
     dist_end = u_start_pt.DistanceTo(l_end)
     is_flipped = dist_end < dist_start 
@@ -1207,7 +1245,8 @@ def calculate_and_adjust_stakes(state, log):
                 t_move.Start()
                 try:
                     current_pt = state.end_stake.Location.Point
-                    diff_z = z_end - current_pt.Z
+                    z_end_internal = z_end + datum_offset
+                    diff_z = z_end_internal - current_pt.Z
                     if abs(diff_z) > 0.001:
                         vec = XYZ(0, 0, diff_z)
                         ElementTransformUtils.MoveElement(doc, state.end_stake.Id, vec)
@@ -1215,7 +1254,7 @@ def calculate_and_adjust_stakes(state, log):
                     # Fallback for families constrained to host
                     try:
                         p = state.end_stake.get_Parameter(BuiltInParameter.INSTANCE_FREE_HOST_OFFSET_PARAM)
-                        if p and not p.IsReadOnly: p.Set(z_end)
+                        if p and not p.IsReadOnly: p.Set(z_end_internal)
                     except: pass
                 t_move.Commit()
         except Exception as e:
@@ -1225,7 +1264,8 @@ def calculate_and_adjust_stakes(state, log):
         if not state.end_stake or not hasattr(state.end_stake.Location, "Point"):
              log.error("End Stake is missing or invalid for 'Match Stakes' mode.")
              raise Exception("Invalid End Stake")
-        z_end = state.end_stake.Location.Point.Z
+        z_end_internal = state.end_stake.Location.Point.Z
+        z_end = z_end_internal - datum_offset
         
     return (z_end, z_start) if is_flipped else (z_start, z_end)
 
@@ -1258,6 +1298,7 @@ def perform_load_recipe(state):
             state.square_ends = data.get("square_ends", False)
             state.sharp_smoothing = data.get("sharp_smoothing", False)
             state.draw_split_lines = data.get("draw_split_lines", False)
+            state.elevation_ref = data.get("elevation_ref", "Survey Point")
             log.info("Recipe loaded successfully.")
         else:
             log.info("No grading recipe found on this element.")
@@ -1639,6 +1680,8 @@ def perform_sculpt(state):
     tg = TransactionGroup(doc, "Sculpt Terrain")
     tg.Start()
     
+    datum_offset = get_elevation_datum_offset(doc, getattr(state, "elevation_ref", "Survey Point"))
+    
     try:
         # Save Recipe
         rec = {
@@ -1655,7 +1698,8 @@ def perform_sculpt(state):
             "plan_offset_dir": getattr(state, 'plan_offset_dir', "Both"),
             "mode": state.mode,
             "sharp_smoothing": getattr(state, "sharp_smoothing", False),
-            "draw_split_lines": getattr(state, "draw_split_lines", False)
+            "draw_split_lines": getattr(state, "draw_split_lines", False),
+            "elevation_ref": getattr(state, "elevation_ref", "Survey Point")
         }
         
         t_rec = Transaction(doc, "Save Recipe")
@@ -1668,7 +1712,7 @@ def perform_sculpt(state):
         tracker = VirtualVertexTracker(doc, toposolid)
 
         # Calculation
-        z_s, z_e = calculate_and_adjust_stakes(state, log)
+        z_s, z_e = calculate_and_adjust_stakes(state, log, datum_offset)
         if state.apply_offset:
             try:
                 g_z_off = float(state.offset_val)
@@ -1809,7 +1853,7 @@ def perform_sculpt(state):
                 p_3d, t_norm, d_xy = project_2d_chain(chain, t_pt)
                 if d_xy < (total_rad + 0.01):
                     if is_point_on_solid(intersector, t_pt, ray_start_z):
-                        rz, hit_id = get_surface_info(intersector, t_pt, ray_start_z)
+                        rz, hit_id = get_surface_info(intersector, t_pt, ray_start_z, datum_offset)
                         off_val = get_subdivision_offset(doc, hit_id) if rz is not None else 0.0
                         if rz is None: rz = z_s + t_norm * (z_e - z_s)
                         grid_pts.append(XYZ(t_pt.X, t_pt.Y, rz - off_val))
@@ -1867,7 +1911,7 @@ def perform_sculpt(state):
                 p_3d, t_norm, d_xy = project_2d_chain(chain, pos)
                 if d_xy > total_rad: continue
                 
-                rz, hit_id = get_surface_info(intersector, pos, ray_start_z)
+                rz, hit_id = get_surface_info(intersector, pos, ray_start_z, datum_offset)
                 off = 0.0
                 if rz is not None:
                      off = get_subdivision_offset(doc, hit_id)
@@ -2016,8 +2060,10 @@ def perform_edging(state):
     tg = TransactionGroup(doc, "Edging")
     tg.Start()
     
+    datum_offset = get_elevation_datum_offset(doc, getattr(state, "elevation_ref", "Survey Point"))
+    
     try:
-        z_s, z_e = calculate_and_adjust_stakes(state, log)
+        z_s, z_e = calculate_and_adjust_stakes(state, log, datum_offset)
         if state.apply_offset:
             try:
                 g_z_off = float(state.offset_val)
@@ -2098,7 +2144,7 @@ def perform_edging(state):
                 road_z = z_s + t_norm * (z_e - z_s)
                 
                 t_check = XYZ(exact_x, exact_y, 0)
-                rz, hit_id = get_surface_info(intersector, t_check, ray_start_z)
+                rz, hit_id = get_surface_info(intersector, t_check, ray_start_z, datum_offset)
                 off = 0.0
                 if rz is not None: off = get_subdivision_offset(doc, hit_id)
                 
@@ -2129,7 +2175,7 @@ def perform_edging(state):
                     _, t_norm, _ = project_2d_chain(chain, hp)
                     road_z = z_s + t_norm * (z_e - z_s)
                     
-                    rz, hit_id = get_surface_info(intersector, hp, ray_start_z)
+                    rz, hit_id = get_surface_info(intersector, hp, ray_start_z, datum_offset)
                     if rz is not None:
                         off_val = get_subdivision_offset(doc, hit_id)
                         to_add.append(XYZ(hp.X, hp.Y, road_z - off_val))
@@ -2271,6 +2317,8 @@ def perform_smooth_region(state):
             continue
             
         log.info("--- SMOOTH REGION STARTED ---")
+        
+        datum_offset = get_elevation_datum_offset(doc, getattr(state, "elevation_ref", "Survey Point"))
         
         try:
             # 1. Parameters
@@ -2416,7 +2464,7 @@ def perform_smooth_region(state):
                     pt = XYZ(px, py, 0)
                     rz = None
                     if intersector:
-                        z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
+                        z_hit, _ = get_surface_info(intersector, pt, ray_start_z, datum_offset)
                         if z_hit is not None: rz = z_hit - off
                     
                     if rz is None:
@@ -2447,7 +2495,7 @@ def perform_smooth_region(state):
                         pt = XYZ(bx, by, 0)
                         rz = None
                         if intersector:
-                            z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
+                            z_hit, _ = get_surface_info(intersector, pt, ray_start_z, datum_offset)
                             if z_hit is not None: rz = z_hit - off
                         
                         if rz is None:
@@ -2630,6 +2678,8 @@ def perform_smooth_path(state):
                 if not v.IsTemplate: view3d = v; break
         if view3d:
             intersector = ReferenceIntersector(toposolid.Id, FindReferenceTarget.Element, view3d)
+            
+        datum_offset = get_elevation_datum_offset(doc, getattr(state, "elevation_ref", "Survey Point"))
         
         # 4. Laplacian Smoothing Process
         tg = TransactionGroup(doc, "Smooth Path")
@@ -2725,7 +2775,7 @@ def perform_smooth_path(state):
                     if not any(math.hypot(n.x - x, n.y - y) < dynamic_res * 0.4 for n in interior_nodes):
                         rz = None
                         if intersector:
-                            z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
+                            z_hit, _ = get_surface_info(intersector, pt, ray_start_z, datum_offset)
                             if z_hit is not None: rz = z_hit - off
                         
                         if rz is None:
@@ -2758,7 +2808,7 @@ def perform_smooth_path(state):
                 if not is_inside(pt):
                     rz = None
                     if intersector:
-                        z_hit, _ = get_surface_info(intersector, pt, ray_start_z)
+                        z_hit, _ = get_surface_info(intersector, pt, ray_start_z, datum_offset)
                         if z_hit is not None: rz = z_hit - off
                     
                     if rz is None:
@@ -2876,7 +2926,7 @@ def is_in_graded_region(px, py, target_region_infos, target_curves, p_off, p_dir
 
 def apply_triangulation_halo(state, doc, tracker, target_curves, target_region_infos, 
                              intersector, ray_start_z, off, g_int, g_plan_off, 
-                             g_plan_dir, g_z_off, pts_grid, unique_pts, cell_size):
+                             g_plan_dir, g_z_off, pts_grid, unique_pts, cell_size, datum_offset=0.0):
     eliminated_count = 0
     halo_added = 0
     halo_offset_inner = float(getattr(state, "halo_inner", "0.25"))
@@ -3094,7 +3144,7 @@ def perform_add_points_along_line(state):
             g_plan_dir = getattr(state, "plan_offset_dir", "Both")
         except: pass
     
-    def get_curves_from_elem(elem, g_int, p_off=0.0, p_dir="Both"):
+    def get_curves_from_elem(elem, g_int, p_off=0.0, p_dir="Both", datum_offset=0.0):
         crvs = []
         internal_pts = []
         region_info = None
@@ -3108,7 +3158,7 @@ def perform_add_points_along_line(state):
             view = doc.GetElement(elem.OwnerViewId)
             z_val = 0.0
             if view and hasattr(view, "GenLevel") and view.GenLevel:
-                z_val = view.GenLevel.Elevation
+                z_val = view.GenLevel.Elevation - datum_offset
             all_curves = []
             for loop in elem.GetBoundaries():
                 for c in loop:
@@ -3227,12 +3277,14 @@ def perform_add_points_along_line(state):
         if getattr(state, "apply_plan_offset", False) and g_plan_off != 0.0:
             log.info("Applied Plan Offset: {} ({})".format(UnitHelper.to_formatted_string(g_plan_off), g_plan_dir))
 
+        datum_offset = get_elevation_datum_offset(doc, getattr(state, "elevation_ref", "Survey Point"))
+
         target_curves = []
         target_internal_pts = []
         target_region_infos = []
         
         for elem in target_elems:
-            crvs, int_pts, r_info = get_curves_from_elem(elem, g_int, g_plan_off, g_plan_dir)
+            crvs, int_pts, r_info = get_curves_from_elem(elem, g_int, g_plan_off, g_plan_dir, datum_offset)
             if crvs: target_curves.extend(crvs)
             if int_pts: target_internal_pts.extend(int_pts)
             if r_info: target_region_infos.append(r_info)
@@ -3646,7 +3698,7 @@ def perform_add_points_along_line(state):
                             
                             # 2. Attempt Exact Surface Raycast
                             if intersector:
-                                z_hit, hit_id = get_surface_info(intersector, hp, ray_start_z)
+                                z_hit, hit_id = get_surface_info(intersector, hp, ray_start_z, datum_offset)
                                 if z_hit is not None:
                                     ray_z = z_hit - get_subdivision_offset(doc, hit_id)
                                     # 3. Tolerance Check: Reject wildly deviating raycasts
