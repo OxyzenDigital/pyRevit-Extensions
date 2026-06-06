@@ -182,9 +182,48 @@ class NodeBase(ViewModelBase):
         self._is_checked = True
         self._is_expanded = True
         self._is_selected = False
+        self._is_traced = False
+        self.ParentNode = None
         self.Children = []
         self.NodeType = "Item"
         self.FontWeight = "Normal"
+
+    def set_checked(self, value, cascade_down=True, cascade_up=True):
+        if self._is_checked != value:
+            self._is_checked = value
+            self.OnPropertyChanged("IsChecked")
+            
+            if cascade_down:
+                for child in self.Children:
+                    child.set_checked(value, cascade_down=True, cascade_up=False)
+                if hasattr(self, "Views"):
+                    for v in self.Views:
+                        v.set_checked(value, cascade_down=True, cascade_up=False)
+                        
+            if cascade_up and self.ParentNode:
+                self.ParentNode.evaluate_checked_state()
+                
+            if self.vm: self.vm.refresh_commands()
+
+    def evaluate_checked_state(self):
+        all_states = []
+        if hasattr(self, "Children") and self.Children:
+            all_states.extend([c.IsChecked for c in self.Children])
+        if hasattr(self, "Views") and self.Views:
+            all_states.extend([v.IsChecked for v in self.Views])
+        
+        if not all_states: return
+        
+        if all(s == True for s in all_states): new_state = True
+        elif all(s == False for s in all_states): new_state = False
+        else: new_state = None
+            
+        if self._is_checked != new_state:
+            self._is_checked = new_state
+            self.OnPropertyChanged("IsChecked")
+            if self.ParentNode:
+                self.ParentNode.evaluate_checked_state()
+            if self.vm: self.vm.refresh_commands()
 
     @property
     def IsSelected(self): return self._is_selected
@@ -193,21 +232,23 @@ class NodeBase(ViewModelBase):
         if self._is_selected != value:
             self._is_selected = value
             self.OnPropertyChanged("IsSelected")
+            
+    @property
+    def IsTraced(self): return self._is_traced
+    @IsTraced.setter
+    def IsTraced(self, value):
+        if self._is_traced != value:
+            self._is_traced = value
+            self.OnPropertyChanged("IsTraced")
 
     @property
     def IsChecked(self): return self._is_checked
     @IsChecked.setter
     def IsChecked(self, value):
-        if self._is_checked != value:
-            self._is_checked = value
-            self.OnPropertyChanged("IsChecked")
-            for child in self.Children:
-                child.IsChecked = value
-            # Cascade to views if this is a SheetNode
-            if hasattr(self, "Views"):
-                for v in self.Views:
-                    v.IsChecked = value
-            if self.vm: self.vm.refresh_commands()
+        # Intercept null values from WPF indeterminate clicks to act as False
+        if value is None: 
+            value = False
+        self.set_checked(value, cascade_down=True, cascade_up=True)
         
     @property
     def IsExpanded(self): return self._is_expanded
@@ -229,6 +270,9 @@ class ViewNode(NodeBase):
         self.ScaleText = get_view_scale_string(self.ScaleVal)
         self._status = "Missing"
         self.LinkedSymbol = None # Holds the actual Graphic Scale Element if found
+        self.LinkedNorthArrow = None
+        self.IsPlanView = view.ViewType in [ViewType.FloorPlan, ViewType.EngineeringPlan, ViewType.CeilingPlan, ViewType.AreaPlan]
+        self._na_status = "N/A"
         
         detail_param = viewport.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
         self.DetailNumber = detail_param.AsString() if detail_param and detail_param.HasValue else "-"
@@ -244,6 +288,13 @@ class ViewNode(NodeBase):
     def Status(self, value):
         self._status = value
         self.OnPropertyChanged("Status")
+        
+    @property
+    def NorthArrowStatus(self): return self._na_status
+    @NorthArrowStatus.setter
+    def NorthArrowStatus(self, value):
+        self._na_status = value
+        self.OnPropertyChanged("NorthArrowStatus")
         
     @property
     def LocalFamily(self): return self._local_family
@@ -298,8 +349,10 @@ class GraphicScaleViewModel(ViewModelBase):
         self._selected_family = None
         self._offset_x = UnitHelper.to_formatted_string((1.0 / 4.0) / 12.0)
         self._offset_y = UnitHelper.to_formatted_string((17.0 / 32.0) / 12.0)
+        self._include_north_arrow = True
         self._current_views = []
         self.existing_scales_by_sheet = {}
+        self.existing_nas_by_sheet = {}
         
         self.load_config()
         
@@ -336,13 +389,21 @@ class GraphicScaleViewModel(ViewModelBase):
                     data = json.load(f)
                     if "OffsetX" in data: self._offset_x = data["OffsetX"]
                     if "OffsetY" in data: self._offset_y = data["OffsetY"]
+                    if "IncludeNorthArrow" in data: self._include_north_arrow = data["IncludeNorthArrow"]
             except: pass
             
     def save_config(self):
         try:
             with open(CONFIG_FILE, 'w') as f:
-                json.dump({"OffsetX": self.OffsetX, "OffsetY": self.OffsetY}, f)
+                json.dump({"OffsetX": self.OffsetX, "OffsetY": self.OffsetY, "IncludeNorthArrow": self.IncludeNorthArrow}, f)
         except: pass
+
+    @property
+    def IncludeNorthArrow(self): return self._include_north_arrow
+    @IncludeNorthArrow.setter
+    def IncludeNorthArrow(self, value):
+        self._include_north_arrow = value
+        self.OnPropertyChanged("IncludeNorthArrow")
 
     @property
     def Sheets(self): return self._sheets
@@ -429,10 +490,17 @@ class GraphicScaleViewModel(ViewModelBase):
         # Find existing Generic Annotations with a "View Scale" parameter
         symbols = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_GenericAnnotation).OfClass(FamilySymbol).ToElements()
         processed_fams = set()
+        self._north_arrow_symbol = None
         
         for sym in symbols:
             fam = sym.Family
             if fam.Id in processed_fams: continue
+            
+            if "north arrow" in fam.Name.lower():
+                if not self._north_arrow_symbol:
+                    self._north_arrow_symbol = sym
+                    if not sym.IsActive: sym.Activate()
+                continue
             
             has_scale_param = False
             for p in sym.Parameters:
@@ -466,6 +534,29 @@ class GraphicScaleViewModel(ViewModelBase):
                         t.Commit()
                 except Exception as e:
                     print("Error loading Graphic Scale family: {}".format(e))
+                    
+        if not self._north_arrow_symbol:
+            res_dir = os.path.join(os.path.dirname(__file__), 'Resources')
+            res_path = None
+            if os.path.exists(res_dir):
+                for f in os.listdir(res_dir):
+                    if f.lower().endswith('.rfa') and 'north arrow' in f.lower():
+                        res_path = os.path.join(res_dir, f)
+                        break
+            if res_path and os.path.exists(res_path):
+                try:
+                    with Transaction(doc, "Load North Arrow Family") as t:
+                        t.Start()
+                        loaded_fam_ref = clr.Reference[Family]()
+                        if doc.LoadFamily(res_path, loaded_fam_ref):
+                            fam = loaded_fam_ref.Value
+                            sym_id = list(fam.GetFamilySymbolIds())[0]
+                            sym = doc.GetElement(sym_id)
+                            if not sym.IsActive: sym.Activate()
+                            self._north_arrow_symbol = sym
+                        t.Commit()
+                except Exception as e:
+                    print("Error loading North Arrow family: {}".format(e))
 
         self._families = fam_options
         if fam_options:
@@ -530,19 +621,28 @@ class GraphicScaleViewModel(ViewModelBase):
             recurse(root)
             
     def prefetch_project_data(self):
-        """Pre-caches all graphic scales in the project to speed up tree generation."""
-        fam_name_filter = self.SelectedFamily.Name if self.SelectedFamily else None
+        """Pre-caches all graphic scales and north arrows in the project to speed up tree generation."""
         self.existing_scales_by_sheet = {}
-        if fam_name_filter:
-            annos = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_GenericAnnotation).WhereElementIsNotElementType().ToElements()
-            for a in annos:
-                try:
-                    if a.Symbol.Family.Name == fam_name_filter:
-                        sid = str(get_id(a.OwnerViewId))
-                        if sid not in self.existing_scales_by_sheet:
-                            self.existing_scales_by_sheet[sid] = []
-                        self.existing_scales_by_sheet[sid].append(a)
-                except: pass
+        self.existing_nas_by_sheet = {}
+        annos = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_GenericAnnotation).WhereElementIsNotElementType().ToElements()
+        for a in annos:
+            try:
+                fam_name = a.Symbol.Family.Name
+                sid = str(get_id(a.OwnerViewId))
+                
+                is_na = "north arrow" in fam_name.lower()
+                has_scale_param = any(p.Definition.Name.lower() in ["view scale", "scale value"] for p in a.Symbol.Parameters)
+                is_scale = has_scale_param or "scale" in fam_name.lower()
+                
+                if is_na:
+                    if sid not in self.existing_nas_by_sheet:
+                        self.existing_nas_by_sheet[sid] = []
+                    self.existing_nas_by_sheet[sid].append(a)
+                elif is_scale:
+                    if sid not in self.existing_scales_by_sheet:
+                        self.existing_scales_by_sheet[sid] = []
+                    self.existing_scales_by_sheet[sid].append(a)
+            except: pass
 
     def get_valid_viewports(self, sheet):
         """Gets Viewports that contain scalable views (Plans, Sections, Drafting, etc.)."""
@@ -570,6 +670,9 @@ class GraphicScaleViewModel(ViewModelBase):
         existing_scales = self.existing_scales_by_sheet.get(sid, [])
         unclaimed_scales = list(existing_scales)
         
+        existing_nas = self.existing_nas_by_sheet.get(sid, [])
+        unclaimed_nas = list(existing_nas)
+        
         for vp, view in vps:
             v_node = ViewNode(vp, view, self)
             vp_id_str = str(get_id(vp.Id))
@@ -590,6 +693,27 @@ class GraphicScaleViewModel(ViewModelBase):
                         matched_symbol = scale_inst
                         unclaimed_scales.remove(scale_inst)
                         break
+            
+            # Match North Arrows
+            matched_na = None
+            if v_node.IsPlanView:
+                for na_inst in list(unclaimed_nas):
+                    if get_linked_id(na_inst) == vp_id_str:
+                        matched_na = na_inst
+                        unclaimed_nas.remove(na_inst)
+                        break
+                if not matched_na and unclaimed_nas:
+                    for na_inst in list(unclaimed_nas):
+                        if not get_linked_id(na_inst):
+                            matched_na = na_inst
+                            unclaimed_nas.remove(na_inst)
+                            break
+            v_node.LinkedNorthArrow = matched_na
+            
+            if v_node.IsPlanView:
+                v_node.NorthArrowStatus = "Match" if matched_na else "Missing"
+            else:
+                v_node.NorthArrowStatus = "N/A"
             
             if matched_symbol:
                 v_node.LinkedSymbol = matched_symbol
@@ -615,6 +739,7 @@ class GraphicScaleViewModel(ViewModelBase):
             else:
                 v_node.Status = "Missing"
                 
+            v_node.ParentNode = s_node
             s_node.Views.append(v_node)
             
         return s_node
@@ -676,6 +801,7 @@ class GraphicScaleViewModel(ViewModelBase):
             root = SheetSetNode("Current View", self)
             s_node = self.build_sheet_node(active_view)
             if s_node.Views:
+                s_node.ParentNode = root
                 root.Children.append(s_node)
                 
             self.Sheets = [root]
@@ -710,6 +836,7 @@ class GraphicScaleViewModel(ViewModelBase):
         for sheet in all_sheets:
             s_node = self.build_sheet_node(sheet)
             if s_node.Views:
+                s_node.ParentNode = all_node
                 all_node.Children.append(s_node)
         if all_node.Children:
             tree_nodes.append(all_node)
@@ -722,6 +849,7 @@ class GraphicScaleViewModel(ViewModelBase):
                 if isinstance(sheet, ViewSheet):
                     s_node = self.build_sheet_node(sheet)
                     if s_node.Views:
+                        s_node.ParentNode = sset_node
                         sset_node.Children.append(s_node)
             if sset_node.Children:
                 tree_nodes.append(sset_node)
@@ -835,13 +963,13 @@ class GraphicScaleViewModel(ViewModelBase):
                     annos = FilteredElementCollector(doc, sheet_id).OfCategory(BuiltInCategory.OST_GenericAnnotation).WhereElementIsNotElementType().ToElements()
                     for a in annos:
                         try:
-                            # Delete ALL Graphic Scales found on checked sheets regardless of family
-                            has_scale_param = False
-                            for p in a.Symbol.Parameters:
-                                if p.Definition.Name.lower() in ["view scale", "scale value"]:
-                                    has_scale_param = True
-                                    break
-                            if has_scale_param or "scale" in a.Symbol.Family.Name.lower():
+                            fam_name = a.Symbol.Family.Name
+                            is_na_fam = "north arrow" in fam_name.lower()
+                            is_scale_fam = any(p.Definition.Name.lower() in ["view scale", "scale value"] for p in a.Symbol.Parameters) or "scale" in fam_name.lower()
+                            
+                            if is_na_fam and self.IncludeNorthArrow:
+                                doc.Delete(a.Id)
+                            elif is_scale_fam and not is_na_fam:
                                 doc.Delete(a.Id)
                                 deleted_count += 1
                         except: pass
@@ -918,11 +1046,20 @@ class GraphicScaleViewModel(ViewModelBase):
                         elif scale_param.StorageType == StorageType.Double:
                             scale_param.Set(float(v_node.ScaleVal))
 
+                    # North Arrow Create/Link
+                    if self.IncludeNorthArrow and v_node.IsPlanView and self._north_arrow_symbol:
+                        na_inst = v_node.LinkedNorthArrow
+                        if not na_inst:
+                            na_inst = doc.Create.NewFamilyInstance(XYZ.Zero, self._north_arrow_symbol, doc.GetElement(sheet))
+                            v_node.LinkedNorthArrow = na_inst
+                            set_linked_id(na_inst, vp_id_str)
+
                 # Third pass (Moved up): Cleanup Ambiguous/Unchecked scales on modified sheets
                 touched_sheets = set(v_node.Viewport.SheetId for v_node in checked_views)
                 deleted_count = 0
                 
                 keep_ids = set(v_node.LinkedSymbol.Id for v_node in checked_views if v_node.LinkedSymbol)
+                keep_na_ids = set(v_node.LinkedNorthArrow.Id for v_node in checked_views if v_node.LinkedNorthArrow)
                 target_family_names = set(v_node.LocalFamily.Name for v_node in checked_views if v_node.LocalFamily)
                 
                 for sheet_id in touched_sheets:
@@ -930,10 +1067,13 @@ class GraphicScaleViewModel(ViewModelBase):
                     for a in annos:
                         try:
                             fam_name = a.Symbol.Family.Name
-                            # If it's a Graphic Scale family and it wasn't claimed by a viewport, delete it!
+                            is_na_fam = "north arrow" in fam_name.lower()
                             is_scale_fam = any(p.Definition.Name.lower() in ["view scale", "scale value"] for p in a.Symbol.Parameters) or "scale" in fam_name.lower()
                             
-                            if is_scale_fam:
+                            if is_na_fam and self.IncludeNorthArrow:
+                                if a.Id not in keep_na_ids:
+                                    doc.Delete(a.Id)
+                            elif is_scale_fam and not is_na_fam:
                                 if a.Id not in keep_ids:
                                     doc.Delete(a.Id)
                                     deleted_count += 1
@@ -948,6 +1088,7 @@ class GraphicScaleViewModel(ViewModelBase):
                 # Second pass: Align instances based on their actual resized bounding boxes
                 for v_node in checked_views:
                     inst = v_node.LinkedSymbol
+                    na_inst = v_node.LinkedNorthArrow
                     vp = v_node.Viewport
                     sheet = v_node.Viewport.SheetId
                     
@@ -964,26 +1105,43 @@ class GraphicScaleViewModel(ViewModelBase):
                         box = vp.GetBoxOutline()
                         target_pt = XYZ(box.MaximumPoint.X, box.MinimumPoint.Y, 0)
                         
-                    # 2. Determine current insertion point of the graphic scale
-                    loc = inst.Location
-                    if hasattr(loc, "Point"):
-                        current_pt = loc.Point
-                        
-                        # Use the 'Unit' parameter from the family for the leftward offset
-                        unit_offset = 0.0
-                        unit_param = inst.LookupParameter("Unit")
-                        if unit_param and unit_param.HasValue:
-                            if unit_param.StorageType == StorageType.Double:
-                                unit_offset = unit_param.AsDouble()
-                            elif unit_param.StorageType == StorageType.Integer:
-                                unit_offset = float(unit_param.AsInteger())
+                    unit_offset = 0.0
+                    if inst:
+                        # 2. Determine current insertion point of the graphic scale
+                        loc = inst.Location
+                        if hasattr(loc, "Point"):
+                            current_pt = loc.Point
                             
-                        # Apply offsets (Subtract X to move left, Add Y to move up)
-                        target_pt = XYZ(target_pt.X - unit_offset - user_offset_x, target_pt.Y + user_offset_y, 0)
+                            # Use the 'Unit' parameter from the family for the leftward offset
+                            unit_param = inst.LookupParameter("Unit")
+                            if unit_param and unit_param.HasValue:
+                                if unit_param.StorageType == StorageType.Double:
+                                    unit_offset = unit_param.AsDouble()
+                                elif unit_param.StorageType == StorageType.Integer:
+                                    unit_offset = float(unit_param.AsInteger())
+                                
+                            # Apply offsets (Subtract X to move left, Add Y to move up)
+                            gs_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x, target_pt.Y + user_offset_y, 0)
+                                
+                            translation = gs_target_pt - current_pt
+                            if not translation.IsZeroLength():
+                                ElementTransformUtils.MoveElement(doc, inst.Id, translation)
+                                
+                    if na_inst and self.IncludeNorthArrow and v_node.IsPlanView:
+                        loc = na_inst.Location
+                        if hasattr(loc, "Point"):
+                            current_pt = loc.Point
                             
-                        translation = target_pt - current_pt
-                        if not translation.IsZeroLength():
-                            ElementTransformUtils.MoveElement(doc, inst.Id, translation)
+                            na_offset_x = 3.0 / 12.0
+                            
+                            # Constant difference: Graphic Scale is at 17/32", North Arrow needs to be at 3/8" (12/32")
+                            # Difference: 12/32" - 17/32" = -5/32"
+                            na_y_diff = (-5.0 / 32.0) / 12.0
+                            na_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x - na_offset_x, target_pt.Y + user_offset_y + na_y_diff, 0)
+                            
+                            translation = na_target_pt - current_pt
+                            if not translation.IsZeroLength():
+                                ElementTransformUtils.MoveElement(doc, na_inst.Id, translation)
 
                 t2.Commit()
                 
@@ -1049,15 +1207,22 @@ class GraphicScaleWindow(forms.WPFWindow):
             pass
             
     def grid_selection_changed(self, sender, args):
-        """Auto-zooms to the selected viewport on the sheet when Auto Zoom is checked."""
+        """Traces the parent sheet in the tree, and auto-zooms if checked."""
         try:
-            if not self.Cb_AutoZoom.IsChecked:
-                return
-            selected_items = self.sysDataGrid.SelectedItems
+            def clear_traces(nodes):
+                for n in nodes:
+                    n.IsTraced = False
+                    if hasattr(n, "Children") and n.Children:
+                        clear_traces(n.Children)
+                        
+            clear_traces(self.viewModel.Sheets)
+            
+            selected_items = list(self.sysDataGrid.SelectedItems)
             if not selected_items: return
             
             elem_ids = List[ElementId]()
             sheet_id = None
+            
             for item in selected_items:
                 if hasattr(item, "LinkedSymbol") and item.LinkedSymbol:
                     elem_ids.Add(item.LinkedSymbol.Id)
@@ -1066,14 +1231,38 @@ class GraphicScaleWindow(forms.WPFWindow):
                 if not sheet_id and hasattr(item, "Viewport") and item.Viewport:
                     sheet_id = item.Viewport.SheetId
                     
+                # Expand parent nodes in the tree
+                sheet_node = getattr(item, "ParentNode", None)
+                curr_node = sheet_node
+                while curr_node:
+                    curr_node.IsExpanded = True
+                    curr_node = getattr(curr_node, "ParentNode", None)
+                    
+                if sheet_node:
+                    sheet_node.IsTraced = True
+                    # Attempt to scroll the tree to the traced item
+                    try:
+                        parent = getattr(sheet_node, "ParentNode", None)
+                        if parent:
+                            p_container = self.systemTree.ItemContainerGenerator.ContainerFromItem(parent)
+                            if p_container:
+                                p_container.IsExpanded = True
+                                p_container.UpdateLayout() # Force render of children
+                                c_container = p_container.ItemContainerGenerator.ContainerFromItem(sheet_node)
+                                if c_container:
+                                    c_container.BringIntoView()
+                    except: pass
+
+            if not self.Cb_AutoZoom.IsChecked:
+                return
+
             if sheet_id and doc.ActiveView.Id != sheet_id:
                 revit.uidoc.ActiveView = doc.GetElement(sheet_id)
                 
             if elem_ids:
                 revit.uidoc.ShowElements(elem_ids)
                 revit.uidoc.Selection.SetElementIds(elem_ids)
-        except Exception:
-            pass
+        except Exception: pass
 
     def format_textbox(self, sender, args):
         """Hooks into standard project unit string conversion and sets border color."""
@@ -1117,10 +1306,11 @@ class GraphicScaleWindow(forms.WPFWindow):
     def grid_double_click(self, sender, args):
         """Zooms to the selected viewport or graphic scale in Revit on double-click."""
         try:
-            selected_items = self.sysDataGrid.SelectedItems
+            selected_items = list(self.sysDataGrid.SelectedItems)
             if selected_items:
                 elem_ids = List[ElementId]()
                 sheet_id = None
+                
                 for item in selected_items:
                     if hasattr(item, "LinkedSymbol") and item.LinkedSymbol:
                         elem_ids.Add(item.LinkedSymbol.Id)
@@ -1129,6 +1319,27 @@ class GraphicScaleWindow(forms.WPFWindow):
                     if not sheet_id and hasattr(item, "Viewport") and item.Viewport:
                         sheet_id = item.Viewport.SheetId
                         
+                    # Expand parent nodes in the tree
+                    sheet_node = getattr(item, "ParentNode", None)
+                    curr_node = sheet_node
+                    while curr_node:
+                        curr_node.IsExpanded = True
+                        curr_node = getattr(curr_node, "ParentNode", None)
+                        
+                    if sheet_node:
+                        sheet_node.IsTraced = True
+                        try:
+                            parent = getattr(sheet_node, "ParentNode", None)
+                            if parent:
+                                p_container = self.systemTree.ItemContainerGenerator.ContainerFromItem(parent)
+                                if p_container:
+                                    p_container.IsExpanded = True
+                                    p_container.UpdateLayout()
+                                    c_container = p_container.ItemContainerGenerator.ContainerFromItem(sheet_node)
+                                    if c_container:
+                                        c_container.BringIntoView()
+                        except: pass
+
                 if sheet_id and doc.ActiveView.Id != sheet_id:
                     revit.uidoc.ActiveView = doc.GetElement(sheet_id)
                     
@@ -1160,6 +1371,12 @@ class GraphicScaleWindow(forms.WPFWindow):
             res["BorderBrush"] = SolidColorBrush(WpfColor.FromRgb(75, 85, 100))
             res["ButtonBrush"] = SolidColorBrush(WpfColor.FromRgb(60, 68, 82))
             res["HoverBrush"] = SolidColorBrush(WpfColor.FromRgb(70, 85, 105))
+            res["SelectionBrush"] = SolidColorBrush(WpfColor.FromRgb(30, 58, 138))
+            res["SelectionBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(59, 130, 246))
+            res["SelectionTextBrush"] = SolidColorBrush(Colors.White)
+            res["TracedBrush"] = SolidColorBrush(WpfColor.FromRgb(75, 85, 100))
+            res["TracedBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(156, 163, 175))
+            res["TracedTextBrush"] = SolidColorBrush(Colors.White)
 
 if __name__ == '__main__':
     GraphicScaleWindow().ShowDialog()
