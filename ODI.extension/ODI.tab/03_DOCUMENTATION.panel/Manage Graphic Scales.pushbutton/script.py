@@ -16,6 +16,7 @@ from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventAr
 from System import Double
 from System.Windows.Media import SolidColorBrush, Color as WpfColor, Colors
 from System.Windows.Input import Cursors, ICommand, Key
+from System.Windows.Controls import ContextMenu, MenuItem
 
 from Autodesk.Revit.DB import (
     FilteredElementCollector, BuiltInCategory, Transaction, TransactionGroup, ViewSheetSet, 
@@ -350,6 +351,7 @@ class GraphicScaleViewModel(ViewModelBase):
         self._offset_x = UnitHelper.to_formatted_string((1.0 / 4.0) / 12.0)
         self._offset_y = UnitHelper.to_formatted_string((17.0 / 32.0) / 12.0)
         self._include_north_arrow = True
+        self._invert_threshold = UnitHelper.to_formatted_string(7.0 / 12.0)
         self._current_views = []
         self.existing_scales_by_sheet = {}
         self.existing_nas_by_sheet = {}
@@ -390,12 +392,18 @@ class GraphicScaleViewModel(ViewModelBase):
                     if "OffsetX" in data: self._offset_x = data["OffsetX"]
                     if "OffsetY" in data: self._offset_y = data["OffsetY"]
                     if "IncludeNorthArrow" in data: self._include_north_arrow = data["IncludeNorthArrow"]
+                    if "InvertThreshold" in data: self._invert_threshold = data["InvertThreshold"]
             except: pass
             
     def save_config(self):
         try:
             with open(CONFIG_FILE, 'w') as f:
-                json.dump({"OffsetX": self.OffsetX, "OffsetY": self.OffsetY, "IncludeNorthArrow": self.IncludeNorthArrow}, f)
+                json.dump({
+                    "OffsetX": self.OffsetX, 
+                    "OffsetY": self.OffsetY, 
+                    "IncludeNorthArrow": self.IncludeNorthArrow, 
+                    "InvertThreshold": self.InvertThreshold
+                }, f)
         except: pass
 
     @property
@@ -404,6 +412,13 @@ class GraphicScaleViewModel(ViewModelBase):
     def IncludeNorthArrow(self, value):
         self._include_north_arrow = value
         self.OnPropertyChanged("IncludeNorthArrow")
+
+    @property
+    def InvertThreshold(self): return self._invert_threshold
+    @InvertThreshold.setter
+    def InvertThreshold(self, value):
+        self._invert_threshold = value
+        self.OnPropertyChanged("InvertThreshold")
 
     @property
     def Sheets(self): return self._sheets
@@ -741,6 +756,9 @@ class GraphicScaleViewModel(ViewModelBase):
                 
             v_node.ParentNode = s_node
             s_node.Views.append(v_node)
+            
+        if s_node.Views:
+            s_node.Name += " ({})".format(len(s_node.Views))
             
         return s_node
 
@@ -1097,13 +1115,29 @@ class GraphicScaleViewModel(ViewModelBase):
                     
                     if not inst: continue
                     
+                    label_len = 0.0
                     # 1. Get Viewport Label Location
                     try:
                         vp_outline = vp.GetLabelOutline()
                         target_pt = XYZ(vp_outline.MaximumPoint.X, vp_outline.MinimumPoint.Y, 0)
+                        
+                        # Check native LabelLineLength first (Revit 2022+), fallback to outline width
+                        if hasattr(vp, "LabelLineLength"):
+                            label_len = vp.LabelLineLength
+                        else:
+                            label_len = vp_outline.MaximumPoint.X - vp_outline.MinimumPoint.X
                     except:
                         box = vp.GetBoxOutline()
                         target_pt = XYZ(box.MaximumPoint.X, box.MinimumPoint.Y, 0)
+                        
+                    # Invert the Y offset to place it down if the label length matches the configured threshold
+                    invert_thresh_internal = UnitHelper.to_internal(self.InvertThreshold)
+                    if invert_thresh_internal > 0.01 and abs(label_len - invert_thresh_internal) < 0.05:
+                        applied_offset_y = -user_offset_y
+                        na_y_diff_multiplier = -1
+                    else:
+                        applied_offset_y = user_offset_y
+                        na_y_diff_multiplier = 1
                         
                     unit_offset = 0.0
                     if inst:
@@ -1120,8 +1154,8 @@ class GraphicScaleViewModel(ViewModelBase):
                                 elif unit_param.StorageType == StorageType.Integer:
                                     unit_offset = float(unit_param.AsInteger())
                                 
-                            # Apply offsets (Subtract X to move left, Add Y to move up)
-                            gs_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x, target_pt.Y + user_offset_y, 0)
+                            # Apply offsets (Subtract X to move left, Add Y to move up/down)
+                            gs_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x, target_pt.Y + applied_offset_y, 0)
                                 
                             translation = gs_target_pt - current_pt
                             if not translation.IsZeroLength():
@@ -1136,8 +1170,8 @@ class GraphicScaleViewModel(ViewModelBase):
                             
                             # Constant difference: Graphic Scale is at 17/32", North Arrow needs to be at 3/8" (12/32")
                             # Difference: 12/32" - 17/32" = -5/32"
-                            na_y_diff = (-5.0 / 32.0) / 12.0
-                            na_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x - na_offset_x, target_pt.Y + user_offset_y + na_y_diff, 0)
+                            na_y_diff = ((-5.0 / 32.0) / 12.0) * na_y_diff_multiplier
+                            na_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x - na_offset_x, target_pt.Y + applied_offset_y + na_y_diff, 0)
                             
                             translation = na_target_pt - current_pt
                             if not translation.IsZeroLength():
@@ -1176,10 +1210,15 @@ class GraphicScaleWindow(forms.WPFWindow):
         self.sysDataGrid.MouseDoubleClick += self.grid_double_click
         self.sysDataGrid.SelectionChanged += self.grid_selection_changed
         
+        self.setup_grid_context_menu()
+        self.setup_tree_context_menu()
+        
         self.Tb_OffsetX.LostFocus += self.format_textbox
         self.Tb_OffsetX.KeyDown += self.format_textbox
         self.Tb_OffsetY.LostFocus += self.format_textbox
         self.Tb_OffsetY.KeyDown += self.format_textbox
+        self.Tb_InvertThreshold.LostFocus += self.format_textbox
+        self.Tb_InvertThreshold.KeyDown += self.format_textbox
         
         self.apply_revit_theme()
         self.viewModel = GraphicScaleViewModel(self)
@@ -1276,6 +1315,7 @@ class GraphicScaleWindow(forms.WPFWindow):
                 # Ensure View Model gets the updated formatted text
                 if sender.Name == "Tb_OffsetX": self.viewModel.OffsetX = sender.Text
                 if sender.Name == "Tb_OffsetY": self.viewModel.OffsetY = sender.Text
+                if sender.Name == "Tb_InvertThreshold": self.viewModel.InvertThreshold = sender.Text
                 
                 if hasattr(sender, "BorderBrush"):
                     default_color = WpfColor.FromRgb(75, 85, 99) if getattr(self, "_is_dark", False) else WpfColor.FromRgb(209, 213, 219)
@@ -1289,6 +1329,7 @@ class GraphicScaleWindow(forms.WPFWindow):
         except: pass
 
     def close_window(self, sender, args):
+        self.viewModel.save_config()
         self.Close()
 
     def tree_double_click(self, sender, args):
@@ -1304,7 +1345,7 @@ class GraphicScaleWindow(forms.WPFWindow):
         except Exception: pass
 
     def grid_double_click(self, sender, args):
-        """Zooms to the selected viewport or graphic scale in Revit on double-click."""
+        """Zooms to the selected viewport or graphic scale in Revit and selects parent sheet in Tree."""
         try:
             selected_items = list(self.sysDataGrid.SelectedItems)
             if selected_items:
@@ -1319,26 +1360,8 @@ class GraphicScaleWindow(forms.WPFWindow):
                     if not sheet_id and hasattr(item, "Viewport") and item.Viewport:
                         sheet_id = item.Viewport.SheetId
                         
-                    # Expand parent nodes in the tree
-                    sheet_node = getattr(item, "ParentNode", None)
-                    curr_node = sheet_node
-                    while curr_node:
-                        curr_node.IsExpanded = True
-                        curr_node = getattr(curr_node, "ParentNode", None)
-                        
-                    if sheet_node:
-                        sheet_node.IsTraced = True
-                        try:
-                            parent = getattr(sheet_node, "ParentNode", None)
-                            if parent:
-                                p_container = self.systemTree.ItemContainerGenerator.ContainerFromItem(parent)
-                                if p_container:
-                                    p_container.IsExpanded = True
-                                    p_container.UpdateLayout()
-                                    c_container = p_container.ItemContainerGenerator.ContainerFromItem(sheet_node)
-                                    if c_container:
-                                        c_container.BringIntoView()
-                        except: pass
+                # Trigger "Select Parent Sheet in Tree" action
+                self.ctx_select_parent(sender, args)
 
                 if sheet_id and doc.ActiveView.Id != sheet_id:
                     revit.uidoc.ActiveView = doc.GetElement(sheet_id)
@@ -1377,6 +1400,130 @@ class GraphicScaleWindow(forms.WPFWindow):
             res["TracedBrush"] = SolidColorBrush(WpfColor.FromRgb(75, 85, 100))
             res["TracedBorderBrush"] = SolidColorBrush(WpfColor.FromRgb(156, 163, 175))
             res["TracedTextBrush"] = SolidColorBrush(Colors.White)
+
+    def setup_tree_context_menu(self):
+        ctx_menu = ContextMenu()
+        
+        item_zoom = MenuItem()
+        item_zoom.Header = "Zoom to Sheet"
+        item_zoom.Click += self.ctx_tree_zoom
+        ctx_menu.Items.Add(item_zoom)
+        
+        item_isolate = MenuItem()
+        item_isolate.Header = "Check Sheet (Uncheck Others)"
+        item_isolate.Click += self.ctx_tree_isolate
+        ctx_menu.Items.Add(item_isolate)
+        
+        self.systemTree.ContextMenu = ctx_menu
+
+    def ctx_tree_zoom(self, sender, args):
+        # Reuses the exact same logic as double-clicking the tree
+        self.tree_double_click(sender, args)
+
+    def ctx_tree_isolate(self, sender, args):
+        try:
+            selected_node = self.systemTree.SelectedItem
+            if not selected_node: return
+            
+            for node in self.viewModel.Sheets:
+                node.IsChecked = False
+                
+            selected_node.IsChecked = True
+            self.viewModel.refresh_commands()
+        except Exception: pass
+
+    def setup_grid_context_menu(self):
+        ctx_menu = ContextMenu()
+        
+        item_apply = MenuItem()
+        item_apply.Header = "Apply Graphic Scale to Selected Rows"
+        item_apply.Click += self.ctx_apply_selected
+        ctx_menu.Items.Add(item_apply)
+        
+        item_remove = MenuItem()
+        item_remove.Header = "Remove Graphic Scale from Selected Rows"
+        item_remove.Click += self.ctx_remove_selected
+        ctx_menu.Items.Add(item_remove)
+        
+        item_parent = MenuItem()
+        item_parent.Header = "Select Parent Sheet"
+        item_parent.Click += self.ctx_select_parent
+        ctx_menu.Items.Add(item_parent)
+        
+        item_highlight = MenuItem()
+        item_highlight.Header = "Highlight All Children"
+        item_highlight.Click += self.ctx_highlight_children
+        ctx_menu.Items.Add(item_highlight)
+        
+        self.sysDataGrid.ContextMenu = ctx_menu
+
+    def ctx_apply_selected(self, sender, args):
+        try:
+            selected_items = list(self.sysDataGrid.SelectedItems)
+            if not selected_items: return
+            self.viewModel._apply_scales_core(selected_items)
+        except Exception: pass
+
+    def ctx_remove_selected(self, sender, args):
+        try:
+            selected_items = list(self.sysDataGrid.SelectedItems)
+            if not selected_items: return
+            self.viewModel._remove_scales_core(selected_items)
+        except Exception: pass
+
+    def ctx_highlight_children(self, sender, args):
+        try:
+            selected_items = list(self.sysDataGrid.SelectedItems)
+            if not selected_items: return
+            
+            target_parent = getattr(selected_items[0], "ParentNode", None)
+            if not target_parent: return
+            
+            # Ensure parent is selected so the grid filters to its children
+            self.ctx_select_parent(sender, args)
+            
+            for node in self.viewModel.Sheets:
+                node.IsChecked = False
+                
+            # Cascades check state to all children views of this specific sheet
+            target_parent.IsChecked = True
+                    
+            self.viewModel.refresh_commands()
+            
+            # Select all rows in the DataGrid to trigger Revit highlight
+            self.sysDataGrid.SelectAll()
+        except Exception: pass
+
+    def ctx_select_parent(self, sender, args):
+        try:
+            selected_items = list(self.sysDataGrid.SelectedItems)
+            if not selected_items: return
+            
+            item = selected_items[0]
+            if hasattr(item, "ParentNode") and item.ParentNode:
+                curr_node = getattr(item.ParentNode, "ParentNode", None)
+                while curr_node:
+                    curr_node.IsExpanded = True
+                    curr_node = getattr(curr_node, "ParentNode", None)
+                
+                item.ParentNode.IsSelected = True
+                
+                try:
+                    parent = getattr(item.ParentNode, "ParentNode", None)
+                    if parent:
+                        p_container = self.systemTree.ItemContainerGenerator.ContainerFromItem(parent)
+                        if p_container:
+                            p_container.IsExpanded = True
+                            p_container.UpdateLayout()
+                            c_container = p_container.ItemContainerGenerator.ContainerFromItem(item.ParentNode)
+                            if c_container:
+                                c_container.BringIntoView()
+                    else:
+                        container = self.systemTree.ItemContainerGenerator.ContainerFromItem(item.ParentNode)
+                        if container:
+                            container.BringIntoView()
+                except: pass
+        except Exception: pass
 
 if __name__ == '__main__':
     GraphicScaleWindow().ShowDialog()

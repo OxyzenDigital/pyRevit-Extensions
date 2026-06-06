@@ -191,7 +191,9 @@
                     <Button Content="Scan Active Sheet" Command="{Binding ScanActiveCommand}" Margin="0,0,10,0" Padding="12,4"/>
                     <Button Content="Scan Project" Command="{Binding ScanProjectCommand}" Margin="0,0,20,0" Padding="12,4"/>
                     <CheckBox x:Name="Cb_AutoZoom" Content="Auto Zoom" VerticalAlignment="Center" Margin="0,0,15,0" Foreground="{DynamicResource TextBrush}"/>
-                    <CheckBox x:Name="Cb_IncludeNorthArrow" Content="Include North Arrow (Plans)" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" IsChecked="{Binding IncludeNorthArrow, Mode=TwoWay}"/>
+                    <CheckBox x:Name="Cb_IncludeNorthArrow" Content="Include North Arrow (Plans)" VerticalAlignment="Center" Margin="0,0,15,0" Foreground="{DynamicResource TextBrush}" IsChecked="{Binding IncludeNorthArrow, Mode=TwoWay}"/>
+                    <TextBlock Text="Invert on Title Width:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                    <TextBox x:Name="Tb_InvertThreshold" Width="80" Text="{Binding InvertThreshold, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"/>
                 </StackPanel>
                 
                 <!-- Global Settings Override -->
