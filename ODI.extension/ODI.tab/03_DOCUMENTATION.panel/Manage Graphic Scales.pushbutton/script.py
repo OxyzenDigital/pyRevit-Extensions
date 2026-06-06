@@ -619,11 +619,54 @@ class GraphicScaleViewModel(ViewModelBase):
             
         return s_node
 
+    def _get_node_states(self, nodes=None):
+        states = {}
+        if nodes is None:
+            nodes = self.Sheets
+            if not nodes: return states
+            
+        for node in nodes:
+            uid = None
+            if hasattr(node, "Viewport") and node.Viewport: uid = "VP_" + str(get_id(node.Viewport.Id))
+            elif hasattr(node, "Sheet") and node.Sheet: uid = "SH_" + str(get_id(node.Sheet.Id))
+            elif node.NodeType == "SheetSet": uid = "SS_" + node.Name
+                
+            if uid:
+                states[uid] = {"checked": node.IsChecked, "expanded": node.IsExpanded}
+                
+            if hasattr(node, "Children") and node.Children: states.update(self._get_node_states(node.Children))
+            if hasattr(node, "Views") and node.Views: states.update(self._get_node_states(node.Views))
+                
+        return states
+
+    def _restore_node_states(self, states, nodes=None):
+        if nodes is None:
+            nodes = self.Sheets
+            if not nodes: return
+            
+        for node in nodes:
+            uid = None
+            if hasattr(node, "Viewport") and node.Viewport: uid = "VP_" + str(get_id(node.Viewport.Id))
+            elif hasattr(node, "Sheet") and node.Sheet: uid = "SH_" + str(get_id(node.Sheet.Id))
+            elif node.NodeType == "SheetSet": uid = "SS_" + node.Name
+                
+            if uid and uid in states:
+                vm_temp = node.vm
+                node.vm = None  # Temporarily detach ViewModel so it doesn't spam UI updates while restoring
+                node.IsChecked = states[uid]["checked"]
+                node.IsExpanded = states[uid]["expanded"]
+                node.vm = vm_temp
+                
+            if hasattr(node, "Children") and node.Children: self._restore_node_states(states, node.Children)
+            if hasattr(node, "Views") and node.Views: self._restore_node_states(states, node.Views)
+
     def scan_active(self, param=None):
         selected_name = None
         if self.window.systemTree.SelectedItem:
             selected_name = self.window.systemTree.SelectedItem.Name
             
+        saved_states = self._get_node_states()
+        
         self._current_scope = "active"
         active_view = doc.ActiveView
         if isinstance(active_view, ViewSheet):
@@ -636,6 +679,7 @@ class GraphicScaleViewModel(ViewModelBase):
                 root.Children.append(s_node)
                 
             self.Sheets = [root]
+            self._restore_node_states(saved_states)
             self._restore_selection(selected_name)
             self.StatusText = "Scanned active sheet."
             self.window.Cursor = Cursors.Arrow
@@ -649,6 +693,8 @@ class GraphicScaleViewModel(ViewModelBase):
         if self.window.systemTree.SelectedItem:
             selected_name = self.window.systemTree.SelectedItem.Name
             
+        saved_states = self._get_node_states()
+        
         self._current_scope = "project"
         self.window.Cursor = Cursors.Wait
         self.StatusText = "Scanning project..."
@@ -681,6 +727,7 @@ class GraphicScaleViewModel(ViewModelBase):
                 tree_nodes.append(sset_node)
                 
         self.Sheets = tree_nodes
+        self._restore_node_states(saved_states)
         self._restore_selection(selected_name)
         self.StatusText = "Scanned {} sheet sets.".format(len(tree_nodes)-1)
         self.window.Cursor = Cursors.Arrow
