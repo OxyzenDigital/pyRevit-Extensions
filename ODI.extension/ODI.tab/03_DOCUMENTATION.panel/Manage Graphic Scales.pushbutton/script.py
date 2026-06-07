@@ -4,27 +4,27 @@ __doc__ = "Pairs and aligns graphic scales to viewports across sheets."
 __author__ = "ODI"
 
 import os
-import clr
+import clr  # type: ignore
 import json
 clr.AddReference("System")
 clr.AddReference("PresentationCore")
 clr.AddReference("PresentationFramework")
 clr.AddReference("WindowsBase")
-import System
-from System.Collections.Generic import List
-from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
-from System import Double
-from System.Windows.Media import SolidColorBrush, Color as WpfColor, Colors
-from System.Windows.Input import Cursors, ICommand, Key
-from System.Windows.Controls import ContextMenu, MenuItem
+import System  # type: ignore
+from System.Collections.Generic import List  # type: ignore
+from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs  # type: ignore
+from System import Double  # type: ignore
+from System.Windows.Media import SolidColorBrush, Color as WpfColor, Colors  # type: ignore
+from System.Windows.Input import Cursors, ICommand, Key  # type: ignore
+from System.Windows.Controls import ContextMenu, MenuItem  # type: ignore
 
-from Autodesk.Revit.DB import (
+from Autodesk.Revit.DB import (  # type: ignore
     FilteredElementCollector, BuiltInCategory, Transaction, TransactionGroup, ViewSheetSet, 
     ViewType, FamilySymbol, Family, XYZ, SaveAsOptions, Viewport,
     ViewSheet, StorageType, ElementTransformUtils, BuiltInParameter,
-    UnitUtils, SpecTypeId, UnitFormatUtils
+    UnitUtils, SpecTypeId, UnitFormatUtils, ElementId
 )
-from pyrevit import revit, forms, script, HOST_APP
+from pyrevit import revit, forms, script, HOST_APP  # type: ignore
 
 doc = revit.doc
 uidoc = revit.uidoc
@@ -1376,7 +1376,7 @@ class GraphicScaleWindow(forms.WPFWindow):
         is_dark = False
         try:
             if int(HOST_APP.version) >= 2024:
-                from Autodesk.Revit.UI import UIThemeManager, UITheme
+                from Autodesk.Revit.UI import UIThemeManager, UITheme  # type: ignore
                 if UIThemeManager.CurrentTheme == UITheme.Dark:
                     self._is_dark = is_dark = True
         except: pass
