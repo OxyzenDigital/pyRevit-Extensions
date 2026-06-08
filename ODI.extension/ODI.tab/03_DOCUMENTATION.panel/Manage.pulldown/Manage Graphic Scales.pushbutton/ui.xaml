@@ -143,8 +143,9 @@
         </Style>
     </Window.Resources>
 
-    <Grid Background="{DynamicResource WindowBrush}">
-        <Grid.RowDefinitions>
+    <Border BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" Background="{DynamicResource WindowBrush}">
+        <Grid>
+            <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
@@ -160,6 +161,7 @@
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal" Grid.Column="0" VerticalAlignment="Center">
                     <TextBlock Text="Manage Graphic Scales" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource HeaderTextBrush}"/>
+                    <TextBlock Text=" | Standardization" Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center" Margin="5,0,0,0"/>
                 </StackPanel>
                 <!-- Close Button -->
                 <Button x:Name="Btn_WinClose" Grid.Column="1" Width="30" Height="30" Background="Transparent" BorderThickness="0" Cursor="Hand">
@@ -486,5 +488,6 @@
                 </StackPanel>
             </Grid>
         </Border>
-    </Grid>
+        </Grid>
+    </Border>
 </Window>
