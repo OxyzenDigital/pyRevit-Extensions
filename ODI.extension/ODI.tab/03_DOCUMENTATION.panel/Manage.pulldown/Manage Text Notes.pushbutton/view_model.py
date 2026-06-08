@@ -27,7 +27,6 @@ class ManageTextNotesViewModel(forms.Reactive):
         
         self._status_text = "Ready."
         self._file_path = "Unsaved Canvas"
-        self._zoom_scale = 1.5
         
         # UI Button States
         self._can_tree_select_all = False
@@ -113,13 +112,6 @@ class ManageTextNotesViewModel(forms.Reactive):
     def FilePath(self, value):
         self._file_path = value
         self.OnPropertyChanged('FilePath')
-
-    @property
-    def ZoomScale(self): return self._zoom_scale
-    @ZoomScale.setter
-    def ZoomScale(self, value):
-        self._zoom_scale = value
-        self.OnPropertyChanged('ZoomScale')
 
     # --- Button States ---
     @property
@@ -586,41 +578,139 @@ class ManageTextNotesViewModel(forms.Reactive):
             if doc.ActiveView.Id != sheet.Id:
                 uidoc.ActiveView = sheet
                 
-            if viewport:
-                elem = doc.GetElement(viewport.Id)
-                elem_ids = List[DB.ElementId]([viewport.Id])
-            else:
-                elem = doc.GetElement(note_item.Id)
-                elem_ids = List[DB.ElementId]([note_item.Id])
-                
+            elem = doc.GetElement(note_item.Id)
+            elem_ids = List[DB.ElementId]([note_item.Id])
             uidoc.Selection.SetElementIds(elem_ids)
+            
+            # Constant context padding to ensure note is visible 
+            # and absorbs any Viewport coordinate transform inaccuracies.
+            # 0.6 feet (~7 inches) on the sheet provides good readability context.
+            MIN_CONTEXT_SIZE = 0.6 
+            CONTEXT_MULTIPLIER = 1.2
 
-            # BoundingBox Zoom Math
-            bbox = elem.get_BoundingBox(sheet)
-            if bbox:
-                min_pt = bbox.Min
-                max_pt = bbox.Max
-                
-                center = (min_pt + max_pt) / 2.0
-                width = max_pt.X - min_pt.X
-                height = max_pt.Y - min_pt.Y
-                
-                scale = self.ZoomScale
-                new_width = width * scale
-                new_height = height * scale
-                
-                if new_width < 0.1: new_width = 1.0
-                if new_height < 0.1: new_height = 1.0
-                
-                new_min = DB.XYZ(center.X - new_width/2.0, center.Y - new_height/2.0, min_pt.Z)
-                new_max = DB.XYZ(center.X + new_width/2.0, center.Y + new_height/2.0, max_pt.Z)
-                
-                for uiview in uidoc.GetOpenUIViews():
-                    if uiview.ViewId == sheet.Id:
-                        uiview.ZoomAndCenterRectangle(new_min, new_max)
-                        break
+            if viewport:
+                view = doc.GetElement(viewport.ViewId)
+                bbox_view = elem.get_BoundingBox(view)
+                if bbox_view:
+                    # Use native API for 100% accurate coordinate mapping
+                    try:
+                        proj_to_sheet = viewport.GetProjectionToSheetTransform()
+                        model_to_proj = view.GetModelToProjectionTransform()
+                        total_transform = proj_to_sheet.Multiply(model_to_proj)
+                        
+                        min_pt = bbox_view.Min
+                        max_pt = bbox_view.Max
+                        
+                        # Transform corner points to sheet coordinates
+                        sheet_min = total_transform.OfPoint(min_pt)
+                        sheet_max = total_transform.OfPoint(max_pt)
+                        
+                        sheet_center_x = (sheet_min.X + sheet_max.X) / 2.0
+                        sheet_center_y = (sheet_min.Y + sheet_max.Y) / 2.0
+                        
+                        width = abs(sheet_max.X - sheet_min.X)
+                        height = abs(sheet_max.Y - sheet_min.Y)
+                        
+                        new_width = max(width * CONTEXT_MULTIPLIER, MIN_CONTEXT_SIZE)
+                        new_height = max(height * CONTEXT_MULTIPLIER, MIN_CONTEXT_SIZE)
+                        
+                        new_min = DB.XYZ(sheet_center_x - new_width/2.0, sheet_center_y - new_height/2.0, 0)
+                        new_max = DB.XYZ(sheet_center_x + new_width/2.0, sheet_center_y + new_height/2.0, 0)
+                        
+                        for uiview in uidoc.GetOpenUIViews():
+                            if uiview.ViewId == sheet.Id:
+                                uiview.ZoomAndCenterRectangle(new_min, new_max)
+                                break
+                    except Exception:
+                        # Fallback for Revit < 2024
+                        # Calculate center based on CropBox (Model Space) to Viewport Box (Sheet Space)
+                        crop_box = view.CropBox
+                        
+                        # In model space, this is the center of the cropped view
+                        v_center_model_x = (crop_box.Min.X + crop_box.Max.X) / 2.0
+                        v_center_model_y = (crop_box.Min.Y + crop_box.Max.Y) / 2.0
+                        
+                        vp_outline = viewport.GetBoxOutline()
+                        vp_center_x = (vp_outline.MinimumPoint.X + vp_outline.MaximumPoint.X) / 2.0
+                        vp_center_y = (vp_outline.MinimumPoint.Y + vp_outline.MaximumPoint.Y) / 2.0
+                        
+                        # Correct Y center if View Title is at the bottom
+                        try:
+                            label_outline = viewport.GetLabelOutline()
+                            if label_outline.MinimumPoint.Y <= vp_outline.MinimumPoint.Y + 0.05:
+                                true_bottom_y = label_outline.MaximumPoint.Y
+                                vp_center_y = (vp_outline.MaximumPoint.Y + true_bottom_y) / 2.0
+                        except:
+                            pass
+                        
+                        vp_scale = 1.0 / view.Scale if view.Scale != 0 else 1.0
+                        
+                        n_center_model_x = (bbox_view.Min.X + bbox_view.Max.X) / 2.0
+                        n_center_model_y = (bbox_view.Min.Y + bbox_view.Max.Y) / 2.0
+                        
+                        # Distance from center of view to note (in Model Space)
+                        delta_x_model = n_center_model_x - v_center_model_x
+                        delta_y_model = n_center_model_y - v_center_model_y
+                        
+                        try:
+                            rot = viewport.Rotation
+                        except:
+                            rot = 0 # Default if property missing
+                            
+                        # Apply viewport rotation on sheet
+                        if str(rot) == "Clockwise" or str(rot) == "1":
+                            sheet_delta_x = delta_y_model * vp_scale
+                            sheet_delta_y = -delta_x_model * vp_scale
+                            width = abs(bbox_view.Max.Y - bbox_view.Min.Y) * vp_scale
+                            height = abs(bbox_view.Max.X - bbox_view.Min.X) * vp_scale
+                        elif str(rot) == "Counterclockwise" or str(rot) == "2":
+                            sheet_delta_x = -delta_y_model * vp_scale
+                            sheet_delta_y = delta_x_model * vp_scale
+                            width = abs(bbox_view.Max.Y - bbox_view.Min.Y) * vp_scale
+                            height = abs(bbox_view.Max.X - bbox_view.Min.X) * vp_scale
+                        else:
+                            sheet_delta_x = delta_x_model * vp_scale
+                            sheet_delta_y = delta_y_model * vp_scale
+                            width = abs(bbox_view.Max.X - bbox_view.Min.X) * vp_scale
+                            height = abs(bbox_view.Max.Y - bbox_view.Min.Y) * vp_scale
+                            
+                        sheet_center_x = vp_center_x + sheet_delta_x
+                        sheet_center_y = vp_center_y + sheet_delta_y
+                        
+                        new_width = max(width * CONTEXT_MULTIPLIER, MIN_CONTEXT_SIZE)
+                        new_height = max(height * CONTEXT_MULTIPLIER, MIN_CONTEXT_SIZE)
+                        
+                        new_min = DB.XYZ(sheet_center_x - new_width/2.0, sheet_center_y - new_height/2.0, 0)
+                        new_max = DB.XYZ(sheet_center_x + new_width/2.0, sheet_center_y + new_height/2.0, 0)
+                        
+                        for uiview in uidoc.GetOpenUIViews():
+                            if uiview.ViewId == sheet.Id:
+                                uiview.ZoomAndCenterRectangle(new_min, new_max)
+                                break
+                else:
+                    uidoc.ShowElements(elem_ids)
             else:
-                uidoc.ShowElements(elem_ids)
+                bbox = elem.get_BoundingBox(sheet)
+                if bbox:
+                    min_pt = bbox.Min
+                    max_pt = bbox.Max
+                    
+                    center = (min_pt + max_pt) / 2.0
+                    width = max_pt.X - min_pt.X
+                    height = max_pt.Y - min_pt.Y
+                    
+                    new_width = max(width * CONTEXT_MULTIPLIER, MIN_CONTEXT_SIZE)
+                    new_height = max(height * CONTEXT_MULTIPLIER, MIN_CONTEXT_SIZE)
+                    
+                    new_min = DB.XYZ(center.X - new_width/2.0, center.Y - new_height/2.0, min_pt.Z)
+                    new_max = DB.XYZ(center.X + new_width/2.0, center.Y + new_height/2.0, max_pt.Z)
+                    
+                    for uiview in uidoc.GetOpenUIViews():
+                        if uiview.ViewId == sheet.Id:
+                            uiview.ZoomAndCenterRectangle(new_min, new_max)
+                            break
+                else:
+                    uidoc.ShowElements(elem_ids)
                 
         except Exception as e:
             forms.alert("Could not zoom to note: {}".format(str(e)))
