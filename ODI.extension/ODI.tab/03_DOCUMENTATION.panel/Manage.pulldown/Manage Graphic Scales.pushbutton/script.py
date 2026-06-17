@@ -22,7 +22,7 @@ from Autodesk.Revit.DB import (  # type: ignore
     FilteredElementCollector, BuiltInCategory, Transaction, TransactionGroup, ViewSheetSet, 
     ViewType, FamilySymbol, Family, XYZ, SaveAsOptions, Viewport,
     ViewSheet, StorageType, ElementTransformUtils, BuiltInParameter,
-    UnitUtils, SpecTypeId, UnitFormatUtils, ElementId
+    UnitUtils, SpecTypeId, UnitFormatUtils, ElementId, ElementType, ScheduleSheetInstance
 )
 from pyrevit import revit, forms, script, HOST_APP  # type: ignore
 
@@ -139,12 +139,59 @@ class UnitHelper:
             raise ValueError("Invalid unit format")
 
     @staticmethod
+    def parse_unit_to_internal(value_str):
+        value_str = str(value_str).strip()
+        
+        # Force evaluation as project unit if no explicit unit is present
+        test_str = value_str
+        sym = UnitHelper.get_unit_symbol()
+        if sym in ['in', 'ft'] and not any(c in test_str for c in ['"', "'", 'm', 'c', 'f']):
+            test_str += '"' if sym == 'in' else "'"
+            
+        units = doc.GetUnits()
+        parsed_val = clr.Reference[Double]()
+        if UnitFormatUtils.TryParse(units, SpecTypeId.Length, test_str, parsed_val):
+            return parsed_val.Value
+            
+        try:
+            val = 0.0
+            if "/" in value_str:
+                parts = value_str.split()
+                if len(parts) == 2:
+                    val = float(parts[0]) + (float(parts[1].split("/")[0]) / float(parts[1].split("/")[1])) * (1 if float(parts[0]) >= 0 else -1)
+                else:
+                    val = float(value_str.split("/")[0]) / float(value_str.split("/")[1])
+            else:
+                clean_str = ''.join(c for c in value_str if c.isdigit() or c in '.-')
+                if clean_str: val = float(clean_str)
+            unit_id = UnitHelper.get_project_length_unit()
+            return UnitUtils.ConvertToInternalUnits(val, unit_id)
+        except: raise ValueError("Invalid unit format")
+
+    @staticmethod
     def to_formatted_string(value_in_internal_units):
         try:
             val = float(value_in_internal_units)
             units = doc.GetUnits()
             return UnitFormatUtils.Format(units, SpecTypeId.Length, val, False)
         except: return "0.0"
+
+    @staticmethod
+    def to_formatted_string_with_symbol(value_in_internal_units):
+        try:
+            val = float(value_in_internal_units)
+            units = doc.GetUnits()
+            # show unit symbol when formatting
+            return UnitFormatUtils.Format(units, SpecTypeId.Length, val, True)
+        except: return "0\""
+
+    @staticmethod
+    def to_display_value(value_in_internal_units):
+        try:
+            val = float(value_in_internal_units)
+            unit_id = UnitHelper.get_project_length_unit()
+            return UnitUtils.ConvertFromInternalUnits(val, unit_id)
+        except: return 0.0
 
 # --- Data Models ---
 class RelayCommand(ICommand):
@@ -270,18 +317,20 @@ class ViewNode(NodeBase):
         self.ScaleVal = get_view_scale_val(view)
         self.ScaleText = get_view_scale_string(self.ScaleVal)
         self._status = "Missing"
+        self._title_status = "-"
         self.LinkedSymbol = None # Holds the actual Graphic Scale Element if found
         self.LinkedNorthArrow = None
         self.IsPlanView = view.ViewType in [ViewType.FloorPlan, ViewType.EngineeringPlan, ViewType.CeilingPlan, ViewType.AreaPlan]
         self._na_status = "N/A"
         
         detail_param = viewport.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
-        self.DetailNumber = detail_param.AsString() if detail_param and detail_param.HasValue else "-"
+        self._detail_number = detail_param.AsString() if detail_param and detail_param.HasValue else "-"
         self.ViewTypeDisplay = str(view.ViewType)
         
         self._local_family = global_vm.SelectedFamily
         self._local_offset_x = global_vm.OffsetX
         self._local_offset_y = global_vm.OffsetY
+        self._local_alignment = global_vm.Alignment
 
     @property
     def Status(self): return self._status
@@ -289,6 +338,20 @@ class ViewNode(NodeBase):
     def Status(self, value):
         self._status = value
         self.OnPropertyChanged("Status")
+
+    @property
+    def TitleStatus(self): return self._title_status
+    @TitleStatus.setter
+    def TitleStatus(self, value):
+        self._title_status = value
+        self.OnPropertyChanged("TitleStatus")
+
+    @property
+    def DetailNumber(self): return self._detail_number
+    @DetailNumber.setter
+    def DetailNumber(self, value):
+        self._detail_number = value
+        self.OnPropertyChanged("DetailNumber")
         
     @property
     def NorthArrowStatus(self): return self._na_status
@@ -317,6 +380,13 @@ class ViewNode(NodeBase):
     def LocalOffsetY(self, value):
         self._local_offset_y = value
         self.OnPropertyChanged("LocalOffsetY")
+        
+    @property
+    def LocalAlignment(self): return self._local_alignment
+    @LocalAlignment.setter
+    def LocalAlignment(self, value):
+        self._local_alignment = value
+        self.OnPropertyChanged("LocalAlignment")
 
 class SheetNode(NodeBase):
     def __init__(self, sheet, vm=None):
@@ -348,10 +418,12 @@ class GraphicScaleViewModel(ViewModelBase):
         self._sheets = []
         self._families = []
         self._selected_family = None
-        self._offset_x = UnitHelper.to_formatted_string((1.0 / 4.0) / 12.0)
-        self._offset_y = UnitHelper.to_formatted_string((17.0 / 32.0) / 12.0)
+        self._offset_x = "0.25"
+        self._offset_y = "0.53"
         self._include_north_arrow = True
-        self._invert_threshold = UnitHelper.to_formatted_string(7.0 / 12.0)
+        self._invert_threshold = "7\""
+        self._alignment = "Right"
+        self._alignment_options = ["Left", "Center", "Right"]
         self._current_views = []
         self.existing_scales_by_sheet = {}
         self.existing_nas_by_sheet = {}
@@ -389,10 +461,25 @@ class GraphicScaleViewModel(ViewModelBase):
             try:
                 with open(CONFIG_FILE, 'r') as f:
                     data = json.load(f)
-                    if "OffsetX" in data: self._offset_x = data["OffsetX"]
-                    if "OffsetY" in data: self._offset_y = data["OffsetY"]
+                    
+                    def parse_to_unit(val_str):
+                        try:
+                            internal = UnitHelper.parse_unit_to_internal(val_str)
+                            return UnitHelper.to_formatted_string_with_symbol(internal)
+                        except ValueError:
+                            return "0\""
+                        
+                    if "OffsetX" in data: self._offset_x = parse_to_unit(data["OffsetX"])
+                    if "OffsetY" in data: self._offset_y = parse_to_unit(data["OffsetY"])
                     if "IncludeNorthArrow" in data: self._include_north_arrow = data["IncludeNorthArrow"]
-                    if "InvertThreshold" in data: self._invert_threshold = data["InvertThreshold"]
+                    if "InvertThreshold" in data: self._invert_threshold = parse_to_unit(data["InvertThreshold"])
+                    if "Alignment" in data: self._alignment = data["Alignment"]
+                    if "WinTop" in data and "WinLeft" in data:
+                        self.window.WindowStartupLocation = 0  # 0 = Manual
+                        self.window.Top = data["WinTop"]
+                        self.window.Left = data["WinLeft"]
+                    if "WinWidth" in data: self.window.Width = data["WinWidth"]
+                    if "WinHeight" in data: self.window.Height = data["WinHeight"]
             except: pass
             
     def save_config(self):
@@ -401,8 +488,13 @@ class GraphicScaleViewModel(ViewModelBase):
                 json.dump({
                     "OffsetX": self.OffsetX, 
                     "OffsetY": self.OffsetY, 
-                    "IncludeNorthArrow": self.IncludeNorthArrow, 
-                    "InvertThreshold": self.InvertThreshold
+                    "IncludeNorthArrow": self.IncludeNorthArrow,
+                    "Alignment": self.Alignment,
+                    "InvertThreshold": self.InvertThreshold,
+                    "WinTop": self.window.Top,
+                    "WinLeft": self.window.Left,
+                    "WinWidth": self.window.Width,
+                    "WinHeight": self.window.Height
                 }, f)
         except: pass
 
@@ -481,6 +573,21 @@ class GraphicScaleViewModel(ViewModelBase):
             for s_node in root.Children:
                 for v_node in s_node.Views:
                     v_node.LocalOffsetY = value
+                    
+    @property
+    def AlignmentOptions(self): return self._alignment_options
+    
+    @property
+    def Alignment(self): return self._alignment
+    @Alignment.setter
+    def Alignment(self, value):
+        self._alignment = value
+        self.OnPropertyChanged("Alignment")
+        # Cascade global alignment change to all views
+        for root in self.Sheets:
+            for s_node in root.Children:
+                for v_node in s_node.Views:
+                    v_node.LocalAlignment = value
 
     @property
     def StatusText(self): return self._status_text
@@ -664,7 +771,7 @@ class GraphicScaleViewModel(ViewModelBase):
         valid_types = [
             ViewType.FloorPlan, ViewType.CeilingPlan, ViewType.EngineeringPlan, 
             ViewType.AreaPlan, ViewType.Section, ViewType.Elevation, 
-            ViewType.DraftingView, ViewType.Detail
+            ViewType.DraftingView, ViewType.Detail, ViewType.Legend
         ]
         
         vps = []
@@ -814,20 +921,22 @@ class GraphicScaleViewModel(ViewModelBase):
         active_view = doc.ActiveView
         if isinstance(active_view, ViewSheet):
             self.window.Cursor = Cursors.Wait
-            self.prefetch_project_data()
-            
-            root = SheetSetNode("Current View", self)
-            s_node = self.build_sheet_node(active_view)
-            if s_node.Views:
-                s_node.ParentNode = root
-                root.Children.append(s_node)
+            try:
+                self.prefetch_project_data()
                 
-            self.Sheets = [root]
-            self._restore_node_states(saved_states)
-            self._restore_selection(selected_name)
-            self.StatusText = "Scanned active sheet."
-            self.window.Cursor = Cursors.Arrow
-            self.refresh_commands()
+                root = SheetSetNode("Current View", self)
+                s_node = self.build_sheet_node(active_view)
+                if s_node.Views:
+                    s_node.ParentNode = root
+                    root.Children.append(s_node)
+                    
+                self.Sheets = [root]
+                self._restore_node_states(saved_states)
+                self._restore_selection(selected_name)
+                self.StatusText = "Scanned active sheet."
+            finally:
+                self.window.Cursor = Cursors.Arrow
+                self.refresh_commands()
         else:
             forms.alert("Active view is not a Sheet. Scanning full project instead.")
             self.scan_project()
@@ -842,42 +951,44 @@ class GraphicScaleViewModel(ViewModelBase):
         self._current_scope = "project"
         self.window.Cursor = Cursors.Wait
         self.StatusText = "Scanning project..."
-        self.prefetch_project_data()
-        
-        tree_nodes = []
-        
-        # All Sheets Node
-        all_sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
-        all_sheets = sorted(all_sheets, key=lambda s: s.SheetNumber)
-        
-        all_node = SheetSetNode("< All Sheets >", self)
-        for sheet in all_sheets:
-            s_node = self.build_sheet_node(sheet)
-            if s_node.Views:
-                s_node.ParentNode = all_node
-                all_node.Children.append(s_node)
-        if all_node.Children:
-            tree_nodes.append(all_node)
+        try:
+            self.prefetch_project_data()
             
-        # Print Sets Nodes
-        sheet_sets = FilteredElementCollector(doc).OfClass(ViewSheetSet).ToElements()
-        for sset in sorted(sheet_sets, key=lambda s: s.Name):
-            sset_node = SheetSetNode(sset.Name, self)
-            for sheet in sset.Views:
-                if isinstance(sheet, ViewSheet):
-                    s_node = self.build_sheet_node(sheet)
-                    if s_node.Views:
-                        s_node.ParentNode = sset_node
-                        sset_node.Children.append(s_node)
-            if sset_node.Children:
-                tree_nodes.append(sset_node)
+            tree_nodes = []
+            
+            # All Sheets Node
+            all_sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
+            all_sheets = sorted(all_sheets, key=lambda s: s.SheetNumber)
+            
+            all_node = SheetSetNode("< All Sheets >", self)
+            for sheet in all_sheets:
+                s_node = self.build_sheet_node(sheet)
+                if s_node.Views:
+                    s_node.ParentNode = all_node
+                    all_node.Children.append(s_node)
+            if all_node.Children:
+                tree_nodes.append(all_node)
                 
-        self.Sheets = tree_nodes
-        self._restore_node_states(saved_states)
-        self._restore_selection(selected_name)
-        self.StatusText = "Scanned {} sheet sets.".format(len(tree_nodes)-1)
-        self.window.Cursor = Cursors.Arrow
-        self.refresh_commands()
+            # Print Sets Nodes
+            sheet_sets = FilteredElementCollector(doc).OfClass(ViewSheetSet).ToElements()
+            for sset in sorted(sheet_sets, key=lambda s: s.Name):
+                sset_node = SheetSetNode(sset.Name, self)
+                for sheet in sset.Views:
+                    if isinstance(sheet, ViewSheet):
+                        s_node = self.build_sheet_node(sheet)
+                        if s_node.Views:
+                            s_node.ParentNode = sset_node
+                            sset_node.Children.append(s_node)
+                if sset_node.Children:
+                    tree_nodes.append(sset_node)
+                    
+            self.Sheets = tree_nodes
+            self._restore_node_states(saved_states)
+            self._restore_selection(selected_name)
+            self.StatusText = "Scanned {} sheet sets.".format(len(tree_nodes)-1)
+        finally:
+            self.window.Cursor = Cursors.Arrow
+            self.refresh_commands()
 
     def _restore_selection(self, selected_name):
         """Restores the previous tree selection and filters the CurrentViews grid."""
@@ -1020,164 +1131,194 @@ class GraphicScaleViewModel(ViewModelBase):
             with TransactionGroup(doc, "Manage Graphic Scales") as tg:
                 tg.Start()
                 
-                t1 = Transaction(doc, "Create and Update Scales")
-                t1.Start()
-                
-                # Activate all potential symbols
-                for fam_opt in self.Families:
-                    if not fam_opt.Symbol.IsActive:
-                        fam_opt.Symbol.Activate()
-                doc.Regenerate()
-                
-                placed_count = 0
-                updated_count = 0
-                
-                for v_node in checked_views:
-                    if not v_node.LocalFamily: continue
-                    symbol = v_node.LocalFamily.Symbol
-                    sheet = v_node.Viewport.SheetId
-                    vp_id_str = str(get_id(v_node.Viewport.Id))
+                with Transaction(doc, "Create and Update Scales") as t1:
+                    t1.Start()
                     
-                    inst = v_node.LinkedSymbol
+                    # Activate all potential symbols
+                    for fam_opt in self.Families:
+                        if not fam_opt.Symbol.IsActive:
+                            fam_opt.Symbol.Activate()
+                    doc.Regenerate()
                     
-                    if not inst:
-                        # Create new
-                        inst = doc.Create.NewFamilyInstance(XYZ.Zero, symbol, doc.GetElement(sheet))
-                        v_node.LinkedSymbol = inst
-                        placed_count += 1
+                    placed_count = 0
+                    updated_count = 0
+                    
+                    for v_node in checked_views:
+                        if not v_node.LocalFamily: continue
+                        symbol = v_node.LocalFamily.Symbol
+                        sheet = v_node.Viewport.SheetId
+                        vp_id_str = str(get_id(v_node.Viewport.Id))
                         
-                        # Link it
-                        set_linked_id(inst, vp_id_str)
-                    else:
-                        # Change Symbol if the family type was overridden
-                        if inst.Symbol.Id != symbol.Id:
-                            inst.Symbol = symbol
-                        updated_count += 1
-
-                    # Update View Scale Parameter
-                    scale_param = inst.LookupParameter("Scale Value")
-                    if not scale_param:
-                        scale_param = inst.LookupParameter("View Scale")
-                    if scale_param and not scale_param.IsReadOnly:
-                        if scale_param.StorageType == StorageType.Integer:
-                            scale_param.Set(v_node.ScaleVal)
-                        elif scale_param.StorageType == StorageType.Double:
-                            scale_param.Set(float(v_node.ScaleVal))
-
-                    # North Arrow Create/Link
-                    if self.IncludeNorthArrow and v_node.IsPlanView and self._north_arrow_symbol:
-                        na_inst = v_node.LinkedNorthArrow
-                        if not na_inst:
-                            na_inst = doc.Create.NewFamilyInstance(XYZ.Zero, self._north_arrow_symbol, doc.GetElement(sheet))
-                            v_node.LinkedNorthArrow = na_inst
-                            set_linked_id(na_inst, vp_id_str)
-
-                # Third pass (Moved up): Cleanup Ambiguous/Unchecked scales on modified sheets
-                touched_sheets = set(v_node.Viewport.SheetId for v_node in checked_views)
-                deleted_count = 0
-                
-                keep_ids = set(v_node.LinkedSymbol.Id for v_node in checked_views if v_node.LinkedSymbol)
-                keep_na_ids = set(v_node.LinkedNorthArrow.Id for v_node in checked_views if v_node.LinkedNorthArrow)
-                target_family_names = set(v_node.LocalFamily.Name for v_node in checked_views if v_node.LocalFamily)
-                
-                for sheet_id in touched_sheets:
-                    annos = FilteredElementCollector(doc, sheet_id).OfCategory(BuiltInCategory.OST_GenericAnnotation).WhereElementIsNotElementType().ToElements()
-                    for a in annos:
-                        try:
-                            fam_name = a.Symbol.Family.Name
-                            is_na_fam = "north arrow" in fam_name.lower()
-                            is_scale_fam = any(p.Definition.Name.lower() in ["view scale", "scale value"] for p in a.Symbol.Parameters) or "scale" in fam_name.lower()
+                        inst = v_node.LinkedSymbol
+                        
+                        if not inst:
+                            # Create new
+                            inst = doc.Create.NewFamilyInstance(XYZ.Zero, symbol, doc.GetElement(sheet))
+                            v_node.LinkedSymbol = inst
+                            placed_count += 1
                             
-                            if is_na_fam and self.IncludeNorthArrow:
-                                if a.Id not in keep_na_ids:
-                                    doc.Delete(a.Id)
-                            elif is_scale_fam and not is_na_fam:
-                                if a.Id not in keep_ids:
-                                    doc.Delete(a.Id)
-                                    deleted_count += 1
-                        except: pass
-                        
-                t1.Commit()
-                
-                t2 = Transaction(doc, "Align Graphic Scales")
-                t2.Start()
-                doc.Regenerate() # Force geometry update for newly created symbols
-                
-                # Second pass: Align instances based on their actual resized bounding boxes
-                for v_node in checked_views:
-                    inst = v_node.LinkedSymbol
-                    na_inst = v_node.LinkedNorthArrow
-                    vp = v_node.Viewport
-                    sheet = v_node.Viewport.SheetId
-                    
-                    user_offset_x = UnitHelper.to_internal(v_node.LocalOffsetX)
-                    user_offset_y = UnitHelper.to_internal(v_node.LocalOffsetY)
-                    
-                    if not inst: continue
-                    
-                    label_len = 0.0
-                    # 1. Get Viewport Label Location
-                    try:
-                        vp_outline = vp.GetLabelOutline()
-                        target_pt = XYZ(vp_outline.MaximumPoint.X, vp_outline.MinimumPoint.Y, 0)
-                        
-                        # Check native LabelLineLength first (Revit 2022+), fallback to outline width
-                        if hasattr(vp, "LabelLineLength"):
-                            label_len = vp.LabelLineLength
+                            # Link it
+                            set_linked_id(inst, vp_id_str)
                         else:
-                            label_len = vp_outline.MaximumPoint.X - vp_outline.MinimumPoint.X
-                    except:
-                        box = vp.GetBoxOutline()
-                        target_pt = XYZ(box.MaximumPoint.X, box.MinimumPoint.Y, 0)
+                            # Change Symbol if the family type was overridden
+                            if inst.Symbol.Id != symbol.Id:
+                                inst.Symbol = symbol
+                            updated_count += 1
+    
+                        # Update View Scale Parameter
+                        scale_param = inst.LookupParameter("Scale Value")
+                        if not scale_param:
+                            scale_param = inst.LookupParameter("View Scale")
+                        if scale_param and not scale_param.IsReadOnly:
+                            if scale_param.StorageType == StorageType.Integer:
+                                scale_param.Set(v_node.ScaleVal)
+                            elif scale_param.StorageType == StorageType.Double:
+                                scale_param.Set(float(v_node.ScaleVal))
+    
+                        # North Arrow Create/Link
+                        if self.IncludeNorthArrow and v_node.IsPlanView and self._north_arrow_symbol:
+                            na_inst = v_node.LinkedNorthArrow
+                            if not na_inst:
+                                na_inst = doc.Create.NewFamilyInstance(XYZ.Zero, self._north_arrow_symbol, doc.GetElement(sheet))
+                                v_node.LinkedNorthArrow = na_inst
+                                set_linked_id(na_inst, vp_id_str)
+    
+                    # Third pass (Moved up): Cleanup Ambiguous/Unchecked scales on modified sheets
+                    touched_sheets = set(v_node.Viewport.SheetId for v_node in checked_views)
+                    deleted_count = 0
+                    
+                    keep_ids = set(v_node.LinkedSymbol.Id for v_node in checked_views if v_node.LinkedSymbol)
+                    keep_na_ids = set(v_node.LinkedNorthArrow.Id for v_node in checked_views if v_node.LinkedNorthArrow)
+                    target_family_names = set(v_node.LocalFamily.Name for v_node in checked_views if v_node.LocalFamily)
+                    
+                    for sheet_id in touched_sheets:
+                        annos = FilteredElementCollector(doc, sheet_id).OfCategory(BuiltInCategory.OST_GenericAnnotation).WhereElementIsNotElementType().ToElements()
+                        for a in annos:
+                            try:
+                                fam_name = a.Symbol.Family.Name
+                                is_na_fam = "north arrow" in fam_name.lower()
+                                is_scale_fam = any(p.Definition.Name.lower() in ["view scale", "scale value"] for p in a.Symbol.Parameters) or "scale" in fam_name.lower()
+                                
+                                if is_na_fam and self.IncludeNorthArrow:
+                                    if a.Id not in keep_na_ids:
+                                        doc.Delete(a.Id)
+                                elif is_scale_fam and not is_na_fam:
+                                    if a.Id not in keep_ids:
+                                        doc.Delete(a.Id)
+                                        deleted_count += 1
+                            except: pass
+                            
+                    t1.Commit()
+                
+                with Transaction(doc, "Align Graphic Scales") as t2:
+                    t2.Start()
+                    doc.Regenerate() # Force geometry update for newly created symbols
+                    
+                    # Second pass: Align instances based on their actual resized bounding boxes
+                    for v_node in checked_views:
+                        inst = v_node.LinkedSymbol
+                        na_inst = v_node.LinkedNorthArrow
+                        vp = v_node.Viewport
+                        sheet = v_node.Viewport.SheetId
                         
-                    # Invert the Y offset to place it down if the label length matches the configured threshold
-                    invert_thresh_internal = UnitHelper.to_internal(self.InvertThreshold)
-                    if invert_thresh_internal > 0.01 and abs(label_len - invert_thresh_internal) < 0.05:
-                        applied_offset_y = -user_offset_y
-                        na_y_diff_multiplier = -1
-                    else:
-                        applied_offset_y = user_offset_y
-                        na_y_diff_multiplier = 1
+                        is_m = UnitHelper.is_metric()
+                        try:
+                            user_offset_x = UnitHelper.parse_unit_to_internal(v_node.LocalOffsetX)
+                        except:
+                            user_offset_x = UnitUtils.ConvertToInternalUnits(6.0 if is_m else 0.25, UnitHelper.get_sheet_length_unit())
+                        try:
+                            user_offset_y = UnitHelper.parse_unit_to_internal(v_node.LocalOffsetY)
+                        except:
+                            user_offset_y = UnitUtils.ConvertToInternalUnits(13.0 if is_m else 0.53, UnitHelper.get_sheet_length_unit())
                         
-                    unit_offset = 0.0
-                    if inst:
-                        # 2. Determine current insertion point of the graphic scale
-                        loc = inst.Location
-                        if hasattr(loc, "Point"):
-                            current_pt = loc.Point
+                        if not inst: continue
+                        
+                        label_len = 0.0
+                        # 1. Get Viewport Label Location
+                        try:
+                            vp_outline = vp.GetLabelOutline()
                             
-                            # Use the 'Unit' parameter from the family for the leftward offset
-                            unit_param = inst.LookupParameter("Unit")
-                            if unit_param and unit_param.HasValue:
-                                if unit_param.StorageType == StorageType.Double:
-                                    unit_offset = unit_param.AsDouble()
-                                elif unit_param.StorageType == StorageType.Integer:
-                                    unit_offset = float(unit_param.AsInteger())
+                            # Apply alignment logic to base X coordinate
+                            if v_node.LocalAlignment == "Left":
+                                base_x = vp_outline.MinimumPoint.X
+                            elif v_node.LocalAlignment == "Center":
+                                base_x = (vp_outline.MinimumPoint.X + vp_outline.MaximumPoint.X) / 2.0
+                            else: # Right (Default)
+                                base_x = vp_outline.MaximumPoint.X
                                 
-                            # Apply offsets (Subtract X to move left, Add Y to move up/down)
-                            gs_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x, target_pt.Y + applied_offset_y, 0)
+                            target_pt = XYZ(base_x, vp_outline.MinimumPoint.Y, 0)
+                            
+                            # Check native LabelLineLength first (Revit 2022+), fallback to outline width
+                            if hasattr(vp, "LabelLineLength"):
+                                label_len = vp.LabelLineLength
+                            else:
+                                label_len = vp_outline.MaximumPoint.X - vp_outline.MinimumPoint.X
+                        except:
+                            box = vp.GetBoxOutline()
+                            
+                            if v_node.LocalAlignment == "Left":
+                                base_x = box.MinimumPoint.X
+                            elif v_node.LocalAlignment == "Center":
+                                base_x = (box.MinimumPoint.X + box.MaximumPoint.X) / 2.0
+                            else: # Right (Default)
+                                base_x = box.MaximumPoint.X
                                 
-                            translation = gs_target_pt - current_pt
-                            if not translation.IsZeroLength():
-                                ElementTransformUtils.MoveElement(doc, inst.Id, translation)
+                            target_pt = XYZ(base_x, box.MinimumPoint.Y, 0)
+                            
+                        # Invert the Y offset to place it down if the label length matches the configured threshold
+                        try:
+                            invert_thresh_internal = UnitHelper.parse_unit_to_internal(self.InvertThreshold)
+                        except:
+                            invert_thresh_internal = UnitUtils.ConvertToInternalUnits(175.0 if is_m else 7.0, UnitHelper.get_sheet_length_unit())
+                            
+                        if invert_thresh_internal > 0.01 and abs(label_len - invert_thresh_internal) < 0.05:
+                            applied_offset_y = -user_offset_y
+                            na_y_diff_multiplier = -1
+                        else:
+                            applied_offset_y = user_offset_y
+                            na_y_diff_multiplier = 1
+                            
+                        unit_offset = 0.0
+                        if inst:
+                            # 2. Determine current insertion point of the graphic scale
+                            loc = inst.Location
+                            if hasattr(loc, "Point"):
+                                current_pt = loc.Point
                                 
-                    if na_inst and self.IncludeNorthArrow and v_node.IsPlanView:
-                        loc = na_inst.Location
-                        if hasattr(loc, "Point"):
-                            current_pt = loc.Point
-                            
-                            na_offset_x = 3.0 / 12.0
-                            
-                            # Constant difference: Graphic Scale is at 17/32", North Arrow needs to be at 3/8" (12/32")
-                            # Difference: 12/32" - 17/32" = -5/32"
-                            na_y_diff = ((-5.0 / 32.0) / 12.0) * na_y_diff_multiplier
-                            na_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x - na_offset_x, target_pt.Y + applied_offset_y + na_y_diff, 0)
-                            
-                            translation = na_target_pt - current_pt
-                            if not translation.IsZeroLength():
-                                ElementTransformUtils.MoveElement(doc, na_inst.Id, translation)
-
-                t2.Commit()
+                                # Use the 'Unit' parameter from the family for the leftward offset
+                                unit_param = inst.LookupParameter("Unit")
+                                if unit_param and unit_param.HasValue:
+                                    if unit_param.StorageType == StorageType.Double:
+                                        unit_offset = unit_param.AsDouble()
+                                    elif unit_param.StorageType == StorageType.Integer:
+                                        unit_offset = float(unit_param.AsInteger())
+                                    
+                                # Apply offsets (Subtract X to move left, Add Y to move up/down)
+                                gs_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x, target_pt.Y + applied_offset_y, 0)
+                                    
+                                translation = gs_target_pt - current_pt
+                                if not translation.IsZeroLength():
+                                    ElementTransformUtils.MoveElement(doc, inst.Id, translation)
+                                    
+                        if na_inst and self.IncludeNorthArrow and v_node.IsPlanView:
+                            loc = na_inst.Location
+                            if hasattr(loc, "Point"):
+                                current_pt = loc.Point
+                                
+                                sheet_unit = UnitHelper.get_sheet_length_unit()
+                                na_offset_x = UnitUtils.ConvertToInternalUnits(75.0 if is_m else 3.0, sheet_unit)
+                                
+                                # Constant difference: Graphic Scale is at 17/32", North Arrow needs to be at 3/8" (12/32")
+                                # Difference: -5/32" = -0.15625 inches. Metric equivalent: ~ -4.0 mm
+                                na_y_diff_val = -4.0 if is_m else -5.0/32.0
+                                na_y_diff = UnitUtils.ConvertToInternalUnits(na_y_diff_val, sheet_unit) * na_y_diff_multiplier
+                                na_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x - na_offset_x, target_pt.Y + applied_offset_y + na_y_diff, 0)
+                                
+                                translation = na_target_pt - current_pt
+                                if not translation.IsZeroLength():
+                                    ElementTransformUtils.MoveElement(doc, na_inst.Id, translation)
+    
+                    t2.Commit()
                 
                 tg.Assimilate()
                 
@@ -1204,6 +1345,7 @@ class GraphicScaleWindow(forms.WPFWindow):
         
         self.HeaderDrag.MouseLeftButtonDown += self.drag_window
         self.Btn_WinClose.Click += self.close_window
+        self.Closing += self.window_closing
         
         self.systemTree.SelectedItemChanged += self.tree_selection_changed
         self.systemTree.MouseDoubleClick += self.tree_double_click
@@ -1237,8 +1379,6 @@ class GraphicScaleWindow(forms.WPFWindow):
                 
                 # Auto Zoom to Sheet if checked
                 if self.Cb_AutoZoom.IsChecked and hasattr(selected_node, "Sheet"):
-                    if doc.ActiveView.Id != selected_node.Sheet.Id:
-                        revit.uidoc.ActiveView = selected_node.Sheet
                     elem_ids = List[ElementId]([selected_node.Sheet.Id])
                     revit.uidoc.ShowElements(elem_ids)
                     revit.uidoc.Selection.SetElementIds(elem_ids)
@@ -1294,9 +1434,6 @@ class GraphicScaleWindow(forms.WPFWindow):
 
             if not self.Cb_AutoZoom.IsChecked:
                 return
-
-            if sheet_id and doc.ActiveView.Id != sheet_id:
-                revit.uidoc.ActiveView = doc.GetElement(sheet_id)
                 
             if elem_ids:
                 revit.uidoc.ShowElements(elem_ids)
@@ -1304,18 +1441,20 @@ class GraphicScaleWindow(forms.WPFWindow):
         except Exception: pass
 
     def format_textbox(self, sender, args):
-        """Hooks into standard project unit string conversion and sets border color."""
+        """Validates input as decimal inches and sets border color."""
         if hasattr(args, "Key") and args.Key != Key.Enter:
             return
         try:
-            if hasattr(sender, "Text"):
-                val = UnitHelper.to_internal(sender.Text)
-                sender.Text = UnitHelper.to_formatted_string(val)
-                
-                # Ensure View Model gets the updated formatted text
-                if sender.Name == "Tb_OffsetX": self.viewModel.OffsetX = sender.Text
-                if sender.Name == "Tb_OffsetY": self.viewModel.OffsetY = sender.Text
-                if sender.Name == "Tb_InvertThreshold": self.viewModel.InvertThreshold = sender.Text
+                if hasattr(sender, "Text"):
+                    val_internal = UnitHelper.parse_unit_to_internal(sender.Text)
+                    # format with unit symbol for display
+                    formatted = UnitHelper.to_formatted_string_with_symbol(val_internal)
+                    sender.Text = formatted
+                    
+                    # Ensure View Model gets the updated formatted text
+                    if sender.Name == "Tb_OffsetX": self.viewModel.OffsetX = sender.Text
+                    if sender.Name == "Tb_OffsetY": self.viewModel.OffsetY = sender.Text
+                    if sender.Name == "Tb_InvertThreshold": self.viewModel.InvertThreshold = sender.Text
                 
                 if hasattr(sender, "BorderBrush"):
                     default_color = WpfColor.FromRgb(75, 85, 99) if getattr(self, "_is_dark", False) else WpfColor.FromRgb(209, 213, 219)
@@ -1327,9 +1466,11 @@ class GraphicScaleWindow(forms.WPFWindow):
     def drag_window(self, sender, args):
         try: self.DragMove()
         except: pass
+        
+    def window_closing(self, sender, args):
+        self.viewModel.save_config()
 
     def close_window(self, sender, args):
-        self.viewModel.save_config()
         self.Close()
 
     def tree_double_click(self, sender, args):
@@ -1337,8 +1478,6 @@ class GraphicScaleWindow(forms.WPFWindow):
         try:
             selected_node = self.systemTree.SelectedItem
             if selected_node and hasattr(selected_node, "Sheet"):
-                if doc.ActiveView.Id != selected_node.Sheet.Id:
-                    revit.uidoc.ActiveView = selected_node.Sheet
                 elem_ids = List[ElementId]([selected_node.Sheet.Id])
                 revit.uidoc.ShowElements(elem_ids)
                 revit.uidoc.Selection.SetElementIds(elem_ids)
@@ -1363,9 +1502,6 @@ class GraphicScaleWindow(forms.WPFWindow):
                 # Trigger "Select Parent Sheet in Tree" action
                 self.ctx_select_parent(sender, args)
 
-                if sheet_id and doc.ActiveView.Id != sheet_id:
-                    revit.uidoc.ActiveView = doc.GetElement(sheet_id)
-                    
                 if elem_ids:
                     revit.uidoc.ShowElements(elem_ids)
                     revit.uidoc.Selection.SetElementIds(elem_ids)
