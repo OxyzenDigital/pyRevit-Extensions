@@ -1,0 +1,461 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Manage Views &amp; Titles" Height="1000" Width="1300"
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBrush}"
+        WindowStyle="None" AllowsTransparency="True"
+        ResizeMode="CanResizeWithGrip">
+    
+    <Window.Resources>
+        <SolidColorBrush x:Key="WindowBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="ToolbarBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="ControlBrush" Color="#F3F4F6"/>
+        <SolidColorBrush x:Key="TextBrush" Color="#111827"/>
+        <SolidColorBrush x:Key="TextLightBrush" Color="#6B7280"/>
+        <SolidColorBrush x:Key="HeaderTextBrush" Color="#111827"/>
+        <SolidColorBrush x:Key="BorderBrush" Color="#D1D5DB"/>
+        <SolidColorBrush x:Key="ButtonBrush" Color="#E5E7EB"/>
+        <SolidColorBrush x:Key="HoverBrush" Color="#D1D5DB"/>
+        <SolidColorBrush x:Key="AccentBrush" Color="#3B82F6"/>
+        
+        <SolidColorBrush x:Key="CardBrush" Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="CardBorderBrush" Color="#E5E7EB"/>
+        <SolidColorBrush x:Key="SelectionBrush" Color="#EBF8FF"/>
+        <SolidColorBrush x:Key="SelectionBorderBrush" Color="#3B82F6"/>
+        <SolidColorBrush x:Key="SelectionTextBrush" Color="#111827"/>
+
+        <!-- Button Styles -->
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="{DynamicResource ButtonBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Name="border" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- DataGrid Styles -->
+        <Style TargetType="DataGrid">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="RowBackground" Value="{DynamicResource WindowBrush}"/>
+            <Setter Property="AlternatingRowBackground" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="HeadersVisibility" Value="Column"/>
+            <Setter Property="GridLinesVisibility" Value="None"/>
+            <Setter Property="CanUserAddRows" Value="False"/>
+            <Setter Property="AutoGenerateColumns" Value="False"/>
+        </Style>
+        <!-- ComboBox Toggle and Template (copied from Graphic Scales for consistent dropdown/selection brushes) -->
+        <ControlTemplate x:Key="ComboBoxToggleButton" TargetType="ToggleButton">
+            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="3">
+                <Path Data="M0,0 L4,4 L8,0 z" Fill="{TemplateBinding Foreground}" HorizontalAlignment="Right" Margin="0,0,8,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+            </Border>
+        </ControlTemplate>
+
+        <!-- Global ComboBox Style -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton" Template="{StaticResource ComboBoxToggleButton}" Focusable="false"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" 
+                                          BorderThickness="{TemplateBinding BorderThickness}" Foreground="{TemplateBinding Foreground}"/>
+                            <ContentPresenter x:Name="ContentSite" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              Margin="{TemplateBinding Padding}" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                            <Popup x:Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Border x:Name="DropDownBorder" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ComboBox}}">
+                                    <ScrollViewer Margin="0" SnapsToDevicePixels="True" MaxHeight="200">
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource HoverBrush}"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="{DynamicResource AccentBrush}"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextLightBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="BorderThickness" Value="0,0,0,1"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+        </Style>
+        <Style TargetType="DataGridCell">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#1E3A8A"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+        
+        <!-- Custom Single-Line GroupBox Style -->
+        <Style TargetType="GroupBox">
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextLightBrush}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GroupBox">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.RowSpan="2" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="4" Margin="0,8,0,0"/>
+                            <Border Background="{DynamicResource ToolbarBrush}" HorizontalAlignment="Left" Margin="10,0,0,0" Padding="4,0">
+                                <ContentPresenter ContentSource="Header" RecognizesAccessKey="True" />
+                            </Border>
+                            <ContentPresenter Grid.Row="1" Margin="{TemplateBinding Padding}"/>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" Background="{DynamicResource WindowBrush}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <!-- Custom Header -->
+            <Border x:Name="HeaderDrag" Grid.Row="0" Background="{DynamicResource ToolbarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="15,10" Cursor="SizeAll">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" Grid.Column="0" VerticalAlignment="Center">
+                        <TextBlock Text="Manage Views &amp; Titles" FontSize="16" FontWeight="SemiBold" Foreground="{DynamicResource HeaderTextBrush}"/>
+                        <TextBlock Text=" | Standardization" Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center" Margin="5,0,0,0"/>
+                    </StackPanel>
+                    <!-- Close Button -->
+                    <Button x:Name="Btn_WinClose" Grid.Column="1" Width="30" Height="30" Background="Transparent" BorderThickness="0" Cursor="Hand">
+                        <Button.Content>
+                            <TextBlock Text="✕" FontSize="14" FontWeight="Bold" Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </Button.Content>
+                        <Button.Style>
+                            <Style TargetType="Button">
+                                <Style.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter Property="Opacity" Value="0.7"/>
+                                    </Trigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </Grid>
+            </Border>
+
+            <!-- Toolbar -->
+            <Border Grid.Row="1" Background="{DynamicResource ToolbarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="15,8">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
+                        <Button Content="Scan Active Sheet" Command="{Binding ScanActiveCommand}" Margin="0,0,10,0" Padding="8,4"/>
+                        <Button Content="Scan Project" Command="{Binding ScanProjectCommand}" Margin="0,0,20,0" Padding="8,4"/>
+                        <CheckBox x:Name="Cb_AutoZoom" Content="Auto Zoom" VerticalAlignment="Center" Margin="0,0,15,0" Foreground="{DynamicResource TextBrush}" IsChecked="True"/>
+                    </StackPanel>
+                    
+                    <!-- Global Settings -->
+                    <GroupBox Grid.Column="1" Header="Global Defaults" Foreground="{DynamicResource TextLightBrush}" BorderBrush="{DynamicResource BorderBrush}" Padding="8,4,8,8">
+                        <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="0,4,0,0">
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Grid Size:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox x:Name="Tb_GridSize" Width="80" Text="{Binding GridSize, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Margin="0,0,15,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="Enter grid size; you may include units"/>
+                                <TextBlock Text="Title X:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox x:Name="Tb_TitleOffsetX" Width="80" Text="{Binding TitleOffsetX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Margin="0,0,15,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="Enter title X offset; you may include units"/>
+                                <TextBlock Text="Title Y:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox x:Name="Tb_TitleOffsetY" Width="80" Text="{Binding TitleOffsetY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Margin="0,0,0,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="Enter title Y offset; you may include units"/>
+                            </StackPanel>
+                            <TextBlock FontSize="11" Foreground="{DynamicResource TextLightBrush}" Margin="4,6,0,0">Examples: 1", 1'6", 1 1/2", 25mm, 1.5m</TextBlock>
+                        </StackPanel>
+                    </GroupBox>
+                    
+                    <!-- Layout Engine Settings -->
+                    <GroupBox Grid.Column="2" Header="Layout Engine" Foreground="{DynamicResource TextLightBrush}" BorderBrush="{DynamicResource BorderBrush}" Padding="8,4,8,8" Margin="10,0,0,0">
+                        <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="0,4,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <TextBlock Text="Anchor:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                <ComboBox ItemsSource="{Binding AnchorOptions}" SelectedItem="{Binding AnchorCorner, Mode=TwoWay}" Width="110" Margin="0,0,15,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"/>
+                                <TextBlock Text="Right Mgn:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox x:Name="Tb_RightMargin" Width="70" Text="{Binding RightMargin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Margin="0,0,15,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="Enter right margin; you may include units"/>
+                                <TextBlock Text="Top Mgn:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox x:Name="Tb_TopMargin" Width="70" Text="{Binding TopMargin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Margin="0,0,15,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="Enter top margin; you may include units"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Padding:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox x:Name="Tb_ViewPadding" Width="70" Text="{Binding ViewPadding, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Margin="0,0,15,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="Enter padding; you may include units"/>
+                                <TextBlock Text="Btm Mgn:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                <TextBox x:Name="Tb_BottomMargin" Width="70" Text="{Binding BottomMargin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Margin="0,0,15,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="Enter bottom margin; you may include units"/>
+                                <CheckBox Content="View Cleanup" IsChecked="{Binding RunViewCleanup, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,15,0" Foreground="{DynamicResource TextBrush}" ToolTip="Hides unreferenced tags, scope boxes, and reference planes before packing to prevent bounds from ballooning."/>
+                                <CheckBox Content="Sync Numbers" IsChecked="{Binding SyncDetailNumbers, Mode=TwoWay}" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" ToolTip="Automatically numbers the packed views sequentially in the direction of the pack flow (Detail 1, 2, 3...)."/>
+                            </StackPanel>
+                        </StackPanel>
+                    </GroupBox>
+                </Grid>
+            </Border>
+
+            <!-- Main Split Content -->
+            <Grid Grid.Row="2" Margin="15">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="320" MinWidth="150"/>
+                    <ColumnDefinition Width="15"/>
+                    <ColumnDefinition Width="*" MinWidth="300"/>
+                </Grid.ColumnDefinitions>
+                
+                <!-- Left Pane: Tree View -->
+                <Grid Grid.Column="0">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    
+                    <Border Grid.Row="0" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1,1,1,0" CornerRadius="4,4,0,0">
+                        <TreeView x:Name="systemTree" Margin="5" ItemsSource="{Binding Sheets}" Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                            <TreeView.ItemContainerStyle>
+                                <Style TargetType="TreeViewItem">
+                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}"/>
+                                    <Setter Property="IsSelected" Value="{Binding IsSelected, Mode=TwoWay}"/>
+                                    <Setter Property="Template">
+                                        <Setter.Value>
+                                            <ControlTemplate TargetType="TreeViewItem">
+                                                <Grid>
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" MinWidth="19"/>
+                                                        <ColumnDefinition Width="*"/>
+                                                    </Grid.ColumnDefinitions>
+                                                    <Grid.RowDefinitions>
+                                                        <RowDefinition Height="Auto"/>
+                                                        <RowDefinition/>
+                                                    </Grid.RowDefinitions>
+                                                    <ToggleButton x:Name="Expander" ClickMode="Press" IsChecked="{Binding IsExpanded, RelativeSource={RelativeSource TemplatedParent}}" VerticalAlignment="Center">
+                                                        <ToggleButton.Template>
+                                                            <ControlTemplate TargetType="ToggleButton">
+                                                                <Border Background="Transparent" Height="16" Padding="5" Width="16">
+                                                                    <Path x:Name="ExpandPath" Data="M0,0 L0,6 L6,0 z" Fill="{DynamicResource TextLightBrush}" Stroke="{DynamicResource TextLightBrush}">
+                                                                        <Path.RenderTransform>
+                                                                            <RotateTransform Angle="135" CenterX="3" CenterY="3"/>
+                                                                        </Path.RenderTransform>
+                                                                    </Path>
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsChecked" Value="True">
+                                                                        <Setter Property="RenderTransform" TargetName="ExpandPath"><Setter.Value><RotateTransform Angle="180" CenterX="3" CenterY="3"/></Setter.Value></Setter>
+                                                                        <Setter Property="Fill" TargetName="ExpandPath" Value="{DynamicResource AccentBrush}"/>
+                                                                        <Setter Property="Stroke" TargetName="ExpandPath" Value="{DynamicResource AccentBrush}"/>
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </ToggleButton.Template>
+                                                    </ToggleButton>
+                                                    <Border x:Name="Bd" Grid.Column="1" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="true">
+                                                        <ContentPresenter x:Name="PART_Header" ContentSource="Header" HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}" SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                                    </Border>
+                                                    <ItemsPresenter x:Name="ItemsHost" Grid.Column="1" Grid.Row="1"/>
+                                                </Grid>
+                                                <ControlTemplate.Triggers>
+                                                    <Trigger Property="IsExpanded" Value="False"><Setter Property="Visibility" TargetName="ItemsHost" Value="Collapsed"/></Trigger>
+                                                    <Trigger Property="HasItems" Value="False"><Setter Property="Visibility" TargetName="Expander" Value="Hidden"/></Trigger>
+                                                </ControlTemplate.Triggers>
+                                            </ControlTemplate>
+                                        </Setter.Value>
+                                    </Setter>
+                                </Style>
+                            </TreeView.ItemContainerStyle>
+                            <TreeView.ItemTemplate>
+                                <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                    <Border BorderThickness="1" CornerRadius="4" Margin="0,2,4,2" Padding="6">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="{DynamicResource CardBrush}"/>
+                                                <Setter Property="BorderBrush" Value="{DynamicResource CardBorderBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                        <Setter Property="Background" Value="{DynamicResource SelectionBrush}"/>
+                                                        <Setter Property="BorderBrush" Value="{DynamicResource SelectionBorderBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <StackPanel Orientation="Horizontal">
+                                            <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" IsEnabled="{Binding HasTitleNumber}" IsThreeState="True" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                                            <TextBlock Text="{Binding Name}" FontWeight="{Binding FontWeight}" VerticalAlignment="Center" TextWrapping="Wrap">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                <Setter Property="Foreground" Value="{DynamicResource SelectionTextBrush}"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </Border>
+                                </HierarchicalDataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
+                    </Border>
+
+                    <Border Grid.Row="1" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="8,6" CornerRadius="0,0,4,4">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button Content="Select All" Command="{Binding SelectAllCommand}" Margin="0,0,5,0" Padding="8,2" FontSize="11"/>
+                            <Button Content="Select None" Command="{Binding SelectNoneCommand}" Margin="0,0,5,0" Padding="8,2" FontSize="11"/>
+                            <Button Content="Expand All" Command="{Binding ExpandAllCommand}" Margin="0,0,5,0" Padding="8,2" FontSize="11"/>
+                            <Button Content="Collapse All" Command="{Binding CollapseAllCommand}" Padding="8,2" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <!-- Divider Splitter -->
+                <GridSplitter Grid.Column="1" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Background="Transparent" Cursor="SizeWE" ToolTip="Drag to resize panes"/>
+
+                <!-- Right Pane: Data Grid -->
+                <DataGrid x:Name="sysDataGrid" Grid.Column="2" ItemsSource="{Binding CurrentViews}" RowHeaderWidth="0" VerticalScrollBarVisibility="Auto">
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding HasTitleNumber}" Value="False">
+                                    <Setter Property="Opacity" Value="0.55"/>
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Width="40">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding HasTitleNumber}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                        <DataGridTextColumn Header="Detail #" Binding="{Binding DetailNumber}" IsReadOnly="True" Width="60"/>
+                        <DataGridTextColumn Header="View Name" Binding="{Binding Name}" IsReadOnly="True" Width="2*"/>
+                        <DataGridTextColumn Header="View Type" Binding="{Binding ViewTypeDisplay}" IsReadOnly="True" Width="80"/>
+                        
+                        <DataGridTemplateColumn Header="Title Status" Width="85">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border CornerRadius="4" Padding="6,2" VerticalAlignment="Center" HorizontalAlignment="Center">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="Transparent"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding TitleStatus}" Value="Collision">
+                                                        <Setter Property="Background" Value="#FEE2E2"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding TitleStatus}" Value="Oversized">
+                                                        <Setter Property="Background" Value="#FEF3C7"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding TitleStatus}" Value="Arranged">
+                                                        <Setter Property="Background" Value="#D1FAE5"/>
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding TitleStatus}" Value="Packed">
+                                                        <Setter Property="Background" Value="#D1FAE5"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding TitleStatus}" FontSize="11" FontWeight="SemiBold">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Foreground" Value="{DynamicResource TextLightBrush}"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding TitleStatus}" Value="Collision">
+                                                            <Setter Property="Foreground" Value="#991B1B"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding TitleStatus}" Value="Oversized">
+                                                            <Setter Property="Foreground" Value="#92400E"/>
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding TitleStatus}" Value="Arranged">
+                                                            <Setter Property="Foreground" Value="#065F46"/>
+                                                        </DataTrigger>
+                                                    <DataTrigger Binding="{Binding TitleStatus}" Value="Packed">
+                                                        <Setter Property="Foreground" Value="#065F46"/>
+                                                    </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
+                                    </Border>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+                </DataGrid>
+            </Grid>
+
+            <!-- Footer Actions -->
+            <Border Grid.Row="3" Background="{DynamicResource ToolbarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="15">
+                <Grid>
+                    <TextBlock Text="{Binding StatusText}" VerticalAlignment="Center" Foreground="{DynamicResource TextLightBrush}"/>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <CheckBox Content="Snap Viewports to Grid" IsChecked="{Binding SnapToGrid, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,15,0" Foreground="{DynamicResource TextBrush}"/>
+                        <Button Content="Arrange Titles" Width="120" Height="30" Margin="0,0,10,0" Background="{DynamicResource AccentBrush}" Foreground="White" BorderThickness="0" Command="{Binding ArrangeTitlesCommand}"/>
+                        <Button Content="Auto-Pack Sheet" Width="120" Height="30" Margin="0,0,10,0" Background="{DynamicResource AccentBrush}" Foreground="White" BorderThickness="0" Command="{Binding AutoPackCommand}" ToolTip="Cleans view boundaries, scales down legends, and packs views logically from the anchor corner."/>
+                        <Button Content="Cancel" Width="90" Height="30" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" Command="{Binding CancelCommand}"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
