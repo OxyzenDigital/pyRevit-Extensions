@@ -246,6 +246,7 @@
                                 <TextBox x:Name="Tb_BottomMargin" Width="70" Text="{Binding BottomMargin, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Padding="4,2" Margin="0,0,15,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" ToolTip="Enter bottom margin; you may include units"/>
                                 <CheckBox Content="View Cleanup" IsChecked="{Binding RunViewCleanup, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,15,0" Foreground="{DynamicResource TextBrush}" ToolTip="Hides unreferenced tags, scope boxes, and reference planes before packing to prevent bounds from ballooning."/>
                                 <CheckBox Content="Sync Numbers" IsChecked="{Binding SyncDetailNumbers, Mode=TwoWay}" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" ToolTip="Automatically numbers the packed views sequentially in the direction of the pack flow (Detail 1, 2, 3...)."/>
+                                <CheckBox Content="Debug Layout" IsChecked="{Binding DebugLayout, Mode=TwoWay}" VerticalAlignment="Center" Margin="15,0,0,0" Foreground="{DynamicResource TextBrush}" ToolTip="Draws detail lines on the sheet to show bounding boxes calculated by Auto-Pack."/>
                             </StackPanel>
                         </StackPanel>
                     </GroupBox>
