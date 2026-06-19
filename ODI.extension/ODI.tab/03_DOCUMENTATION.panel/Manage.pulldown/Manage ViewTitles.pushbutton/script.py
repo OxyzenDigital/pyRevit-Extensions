@@ -22,7 +22,8 @@ from System.Windows.Controls import ContextMenu, MenuItem
 from Autodesk.Revit.DB import (
     FilteredElementCollector, BuiltInCategory, Transaction, ViewSheetSet, 
     ViewType, XYZ, Viewport, ViewSheet, ElementTransformUtils, BuiltInParameter, TransactionGroup,
-    UnitUtils, SpecTypeId, UnitFormatUtils, ElementId, ElementType, ScheduleSheetInstance, BoundingBoxXYZ
+    UnitUtils, SpecTypeId, UnitFormatUtils, ElementId, ElementType, ScheduleSheetInstance, BoundingBoxXYZ,
+    Line
 )
 from pyrevit import revit, forms, script, HOST_APP
 
@@ -131,8 +132,16 @@ class UnitHelper:
 
     @staticmethod
     def get_sheet_length_unit():
-        # Use project length unit for sheet-related conversions as a sensible default
-        return UnitHelper.get_project_length_unit()
+        try:
+            from Autodesk.Revit.DB import UnitTypeId
+            if UnitHelper.is_metric():
+                return UnitTypeId.Millimeters
+            return UnitTypeId.Inches
+        except:
+            from Autodesk.Revit.DB import DisplayUnitType
+            if UnitHelper.is_metric():
+                return DisplayUnitType.DUT_MILLIMETERS
+            return DisplayUnitType.DUT_FRAC_INCHES
 
 # --- Data Models ---
 class RelayCommand(ICommand):
@@ -228,8 +237,9 @@ class ViewNode(NodeBase):
         detail_param = viewport.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
         detail_value = detail_param.AsString() if detail_param and detail_param.HasValue else ""
         detail_value = detail_value.strip() if detail_value else ""
-        if detail_value and detail_value not in ["-", "---"] and any(ch.isdigit() for ch in detail_value):
-            self._detail_number = detail_value
+        is_3d_or_rendering = view.ViewType in [ViewType.ThreeD, ViewType.Rendering, ViewType.Walkthrough]
+        if (detail_value and detail_value not in ["-", "---"] and any(ch.isdigit() for ch in detail_value)) or is_3d_or_rendering:
+            self._detail_number = detail_value if (detail_value and detail_value.strip()) else "-"
             self._has_title_number = True
             self._title_status = "-"
         else:
@@ -297,7 +307,6 @@ class ManageViewsViewModel(ViewModelBase):
         self._view_padding = '1"'
         self._run_view_cleanup = True
         self._sync_detail_numbers = True
-        self._debug_layout = False
         
         self.load_config()
         
@@ -306,6 +315,7 @@ class ManageViewsViewModel(ViewModelBase):
         self.ScanActiveCommand = RelayCommand(self.scan_active)
         self.ScanProjectCommand = RelayCommand(self.scan_project)
         self.CancelCommand = RelayCommand(self.cancel_action)
+        self.DrawCrosshairCommand = RelayCommand(self.draw_crosshair)
         
         self.SelectAllCommand = RelayCommand(self.select_all, self.can_select_all)
         self.SelectNoneCommand = RelayCommand(self.select_none, self.can_select_none)
@@ -455,13 +465,6 @@ class ManageViewsViewModel(ViewModelBase):
         self.OnPropertyChanged("SyncDetailNumbers")
         
     @property
-    def DebugLayout(self): return self._debug_layout
-    @DebugLayout.setter
-    def DebugLayout(self, value):
-        self._debug_layout = value
-        self.OnPropertyChanged("DebugLayout")
-        
-    @property
     def UnitString(self):
         sym = UnitHelper.get_unit_symbol()
         if sym == "in": return "inches"
@@ -516,7 +519,12 @@ class ManageViewsViewModel(ViewModelBase):
         for root in self.Sheets: recurse(root)
 
     def get_valid_viewports(self, sheet):
-        valid_types = [ViewType.FloorPlan, ViewType.CeilingPlan, ViewType.EngineeringPlan, ViewType.AreaPlan, ViewType.Section, ViewType.Elevation, ViewType.DraftingView, ViewType.Detail, ViewType.Legend]
+        valid_types = [
+            ViewType.FloorPlan, ViewType.CeilingPlan, ViewType.EngineeringPlan, 
+            ViewType.AreaPlan, ViewType.Section, ViewType.Elevation, 
+            ViewType.DraftingView, ViewType.Detail, ViewType.Legend,
+            ViewType.ThreeD, ViewType.Rendering, ViewType.Walkthrough
+        ]
         return [(doc.GetElement(vp_id), doc.GetElement(doc.GetElement(vp_id).ViewId)) for vp_id in sheet.GetAllViewports() if doc.GetElement(doc.GetElement(vp_id).ViewId).ViewType in valid_types]
 
     def get_view_title_types(self):
@@ -685,47 +693,232 @@ class ManageViewsViewModel(ViewModelBase):
 
     def cancel_action(self, parameter): self.window.Close()
         
-
-    def draw_debug_box(self, sheet, min_pt, max_pt):
-        from Autodesk.Revit.DB import Line, XYZ
+    def draw_crosshair(self, parameter=None):
+        self.window.Cursor = Cursors.Wait
+        self.StatusText = "Aligning sheet origins to absolute (0,0)..."
+        
+        # Get all sheets in the project
+        all_sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
+        
+        table_data = []
+        
         try:
-            p1 = XYZ(min_pt.X, min_pt.Y, 0)
-            p2 = XYZ(max_pt.X, min_pt.Y, 0)
-            p3 = XYZ(max_pt.X, max_pt.Y, 0)
-            p4 = XYZ(min_pt.X, max_pt.Y, 0)
-            doc.Create.NewDetailCurve(sheet, Line.CreateBound(p1, p2))
-            doc.Create.NewDetailCurve(sheet, Line.CreateBound(p2, p3))
-            doc.Create.NewDetailCurve(sheet, Line.CreateBound(p3, p4))
-            doc.Create.NewDetailCurve(sheet, Line.CreateBound(p4, p1))
+            with Transaction(doc, "Align Title Blocks and Elements to Origin") as t:
+                t.Start()
+                
+                adjusted_sheets_count = 0
+                for sheet in sorted(all_sheets, key=lambda s: s.SheetNumber):
+                    # Find title blocks
+                    tbs = FilteredElementCollector(doc, sheet.Id).OfCategory(BuiltInCategory.OST_TitleBlocks).WhereElementIsNotElementType().ToElements()
+                    if not tbs:
+                        table_data.append([sheet.SheetNumber, sheet.Name, "N/A", "0", "No Title Block found"])
+                        continue
+                        
+                    tb = tbs[0]
+                    tb_box = tb.get_BoundingBox(sheet)
+                    if not tb_box:
+                        table_data.append([sheet.SheetNumber, sheet.Name, "N/A", "0", "Title Block has no boundary"])
+                        continue
+                        
+                    # Calculate translation vector to move bottom-left of TB to (0,0)
+                    dx = 0.0 - tb_box.Min.X
+                    dy = 0.0 - tb_box.Min.Y
+                    
+                    # Draw verification crosshair at absolute origin (0,0)
+                    half_len = 1.0 / 12.0  # 1 inch
+                    line_h = Line.CreateBound(XYZ(-half_len, 0, 0), XYZ(half_len, 0, 0))
+                    line_v = Line.CreateBound(XYZ(0, -half_len, 0), XYZ(0, half_len, 0))
+                    
+                    try:
+                        doc.Create.NewDetailCurve(sheet, line_h)
+                        doc.Create.NewDetailCurve(sheet, line_v)
+                        crosshair_status = "Yes"
+                    except:
+                        crosshair_status = "Error drawing"
+                    
+                    if abs(dx) < 0.0001 and abs(dy) < 0.0001:
+                        table_data.append([sheet.SheetNumber, sheet.Name, "(0.00, 0.00)", "0", "Already aligned (Crosshair: {})".format(crosshair_status)])
+                        continue
+                        
+                    translation_vector = XYZ(dx, dy, 0)
+                    
+                    # Collect all elements on sheet
+                    element_ids = set()
+                    
+                    # 1. Viewports
+                    for vp_id in sheet.GetAllViewports():
+                        element_ids.add(vp_id)
+                        
+                    # 2. Visible elements owned by sheet
+                    collector = FilteredElementCollector(doc, sheet.Id).WhereElementIsNotElementType()
+                    for elem in collector:
+                        if elem.Id == sheet.Id:
+                            continue
+                        if elem.Category is None:
+                            continue
+                        # Skip view references or camera references that cannot be moved
+                        cat_id = get_id(elem.Category.Id)
+                        if cat_id in [-2000279, -2000278]: 
+                            continue
+                        element_ids.add(elem.Id)
+                        
+                    # Unpin elements if needed
+                    for eid in element_ids:
+                        elem = doc.GetElement(eid)
+                        if elem and elem.Pinned:
+                            try:
+                                elem.Pinned = False
+                            except:
+                                pass
+                                
+                    # Move elements
+                    moved_count = 0
+                    for eid in element_ids:
+                        elem = doc.GetElement(eid)
+                        if not elem:
+                            continue
+                        try:
+                            if isinstance(elem, Viewport):
+                                # Handle locked 3D views (e.g. perspective views)
+                                view = doc.GetElement(elem.ViewId)
+                                was_locked = False
+                                if view and hasattr(view, "IsLocked") and view.IsLocked:
+                                    try:
+                                        view.IsLocked = False
+                                        was_locked = True
+                                    except:
+                                        pass
+                                
+                                viewport_moved = False
+                                try:
+                                    # Try moving via SetBoxCenter first
+                                    old_center = elem.GetBoxCenter()
+                                    new_center = XYZ(old_center.X + dx, old_center.Y + dy, old_center.Z)
+                                    elem.SetBoxCenter(new_center)
+                                    viewport_moved = True
+                                    moved_count += 1
+                                except:
+                                    pass
+                                    
+                                if not viewport_moved:
+                                    try:
+                                        # Fallback to ElementTransformUtils.MoveElement
+                                        ElementTransformUtils.MoveElement(doc, eid, translation_vector)
+                                        moved_count += 1
+                                    except:
+                                        pass
+                                        
+                                if was_locked:
+                                    try:
+                                        view.IsLocked = True
+                                    except:
+                                        pass
+                            elif isinstance(elem, ScheduleSheetInstance):
+                                # Move schedule sheet instance via Point property
+                                old_point = elem.Point
+                                new_point = XYZ(old_point.X + dx, old_point.Y + dy, old_point.Z)
+                                elem.Point = new_point
+                                moved_count += 1
+                            else:
+                                # Move all other elements (Title Blocks, annotations, text notes, lines, generic annotations, revision clouds, tags, images, etc.)
+                                ElementTransformUtils.MoveElement(doc, eid, translation_vector)
+                                moved_count += 1
+                        except:
+                            pass
+                                
+                    table_data.append([
+                        sheet.SheetNumber, 
+                        sheet.Name, 
+                        "({:.3f}, {:.3f})".format(tb_box.Min.X, tb_box.Min.Y), 
+                        str(moved_count), 
+                        "Moved to (0,0) (Crosshair: {})".format(crosshair_status)
+                    ])
+                    adjusted_sheets_count += 1
+                    
+                t.Commit()
+                
+            self.StatusText = "Aligned {} sheets to absolute origin.".format(adjusted_sheets_count)
+            
+            # Print the summary as a beautiful table in pyRevit output window
+            output = script.get_output()
+            output.print_table(
+                table_data=table_data,
+                title="Universal Title Block Origin Alignment Summary",
+                columns=["Sheet Number", "Sheet Name", "Original Bottom-Left", "Moved Elements", "Alignment Status"]
+            )
+            output.show()
+            
         except Exception as e:
-            print("Debug layout failed:", e)
+            self.StatusText = "Failed to align sheets."
+            forms.alert("Error occurred during alignment:\n{}".format(traceback.format_exc()))
+        finally:
+            self.window.Cursor = Cursors.Arrow
 
-
-
-
-    def get_pure_view_dimensions(self, vp, view):
+    def get_viewport_geometry(self, vp, view):
+        """Return a unified dict of RED+BLUE geometry data for a single viewport.
+        
+        This is the single source of truth for all collision detection and layout
+        calculations. It captures both the viewport's drawn frame (RED from
+        GetBoxOutline) and its rendered label (BLUE from GetLabelOutline) along
+        with derived relationships between them.
+        """
         try:
-            outline = view.Outline
-            scale = float(view.Scale)
-            if scale <= 0: scale = 1.0
-            w = (outline.Max.U - outline.Min.U) / scale
-            h = (outline.Max.V - outline.Min.V) / scale
-            from Autodesk.Revit.DB import ViewportRotation
-            rot = vp.Rotation
-            if rot == ViewportRotation.Clockwise or rot == ViewportRotation.Counterclockwise:
-                return h, w
-            return w, h
-        except:
             box = vp.GetBoxOutline()
-            return box.MaximumPoint.X - box.MinimumPoint.X, box.MaximumPoint.Y - box.MinimumPoint.Y
+            red_min_x = box.MinimumPoint.X
+            red_min_y = box.MinimumPoint.Y
+            red_max_x = box.MaximumPoint.X
+            red_max_y = box.MaximumPoint.Y
+            red_w = red_max_x - red_min_x
+            red_h = red_max_y - red_min_y
+            
+            label_box = vp.GetLabelOutline()
+            blue_label_min_y = label_box.MinimumPoint.Y
+            blue_label_max_y = label_box.MaximumPoint.Y
+            blue_label_h = blue_label_max_y - blue_label_min_y
+            blue_label_w = label_box.MaximumPoint.X - label_box.MinimumPoint.X
+            
+            geo = {
+                'red_min_x': red_min_x,
+                'red_min_y': red_min_y,
+                'red_max_x': red_max_x,
+                'red_max_y': red_max_y,
+                'red_center': vp.GetBoxCenter(),
+                'red_width': red_w,
+                'red_height': red_h,
+                'blue_label_min_y': blue_label_min_y,
+                'blue_label_max_y': blue_label_max_y,
+                'blue_label_height': blue_label_h,
+                'blue_label_width': blue_label_w,
+                'view_to_label_gap': red_max_y - blue_label_min_y,
+                'rotation': vp.Rotation,
+            }
+        except:
+            geo = {
+                'red_min_x': 0, 'red_min_y': 0, 'red_max_x': 1, 'red_max_y': 1,
+                'red_center': XYZ(0.5, 0.5, 0), 'red_width': 1, 'red_height': 1,
+                'blue_label_min_y': 0, 'blue_label_max_y': 0, 'blue_label_height': 0,
+                'blue_label_width': 1.0,
+                'view_to_label_gap': 0, 'rotation': 0,
+            }
+        
+        # Keep green clip region as optional fallback for type-matching edge cases
+        try:
+            outline = view.Outline
+            geo['green_clip_width'] = outline.Max.U - outline.Min.U
+            geo['green_clip_height'] = outline.Max.V - outline.Min.V
+        except:
+            geo['green_clip_width'] = None
+            geo['green_clip_height'] = None
+        
+        return geo
 
     def get_pure_view_dimensions(self, vp, view):
         try:
+            # view.Outline is already in paper space (Revit pre-divides by the
+            # view scale internally) - do NOT divide by scale again here.
             outline = view.Outline
-            scale = float(view.Scale)
-            if scale <= 0: scale = 1.0
-            w = (outline.Max.U - outline.Min.U) / scale
-            h = (outline.Max.V - outline.Min.V) / scale
+            w = outline.Max.U - outline.Min.U
+            h = outline.Max.V - outline.Min.V
             from Autodesk.Revit.DB import ViewportRotation
             rot = vp.Rotation
             if rot == ViewportRotation.Clockwise or rot == ViewportRotation.Counterclockwise:
@@ -736,7 +929,49 @@ class ManageViewsViewModel(ViewModelBase):
             return box.MaximumPoint.X - box.MinimumPoint.X, box.MaximumPoint.Y - box.MinimumPoint.Y
 
     def get_checked_views(self):
-        return [v_node for root in self.Sheets for s_node in root.Children for v_node in s_node.Views if v_node.IsChecked and getattr(v_node, "HasTitleNumber", False)]
+        seen_vp_ids = set()
+        checked_nodes = []
+        for root in self.Sheets:
+            for s_node in root.Children:
+                for v_node in s_node.Views:
+                    if v_node.IsChecked and getattr(v_node, "HasTitleNumber", False):
+                        vp = v_node.Viewport
+                        if vp:
+                            vp_id = get_id(vp.Id)
+                            if vp_id not in seen_vp_ids:
+                                seen_vp_ids.add(vp_id)
+                                checked_nodes.append(v_node)
+        return checked_nodes
+
+    def _arrange_titles_logic(self, pending, min_spacing, premeasured_heights=None):
+        doc.Regenerate()  # Force Revit to update element outlines after any moves
+        
+        # Read phase: measure all title heights first before making any modifications
+        title_heights = premeasured_heights or {}
+        for v_node in pending:
+            vp = v_node.Viewport
+            if not vp: continue
+            if vp.Id in title_heights: continue
+            
+            geo = self.get_viewport_geometry(vp, v_node.View)
+            title_h = geo['blue_label_height'] if geo['blue_label_height'] > 0.001 else self._get_title_height_for_type(vp.GetTypeId())
+            title_heights[vp.Id] = title_h
+            
+        # Write phase: apply offsets
+        count = 0
+        for v_node in pending:
+            vp = v_node.Viewport
+            if not vp: continue
+            
+            title_h = title_heights.get(vp.Id, self._get_title_height_for_type(vp.GetTypeId()))
+            
+            # Label is always placed below the viewport
+            shift_y = -(title_h + min_spacing)
+            
+            # Align label horizontally to the left (X=0.0) and set vertical spacing
+            vp.LabelOffset = XYZ(0.0, shift_y, 0)
+            count += 1
+        return count
 
     def arrange_titles(self, parameter):
         checked_views = self.get_checked_views()
@@ -757,33 +992,44 @@ class ManageViewsViewModel(ViewModelBase):
             
             with Transaction(doc, "Arrange View Titles") as t:
                 t.Start()
-                count = 0
+                
+                try:
+                    min_spacing = UnitHelper.parse_unit_to_internal(self.TitleOffsetY)
+                except:
+                    min_spacing = UnitUtils.ConvertToInternalUnits(0.5, UnitHelper.get_sheet_length_unit())
 
+                # Pass A: status/collision check and best-fit type assignment.
+                # Type must be finalized and regenerated before we can measure the
+                # real rendered label height in Pass B.
+                pending = []
+                type_changed = False
                 for v_node in checked_views:
                     vp = v_node.Viewport
                     view = v_node.View
                     if not vp: continue
-                    
+
                     sheet = doc.GetElement(vp.SheetId)
                     tbs = FilteredElementCollector(doc, sheet.Id).OfCategory(BuiltInCategory.OST_TitleBlocks).WhereElementIsNotElementType().ToElements()
                     tb_min_x, tb_min_y, tb_max_x, tb_max_y = 0.0, 0.0, 3.0, 2.0
                     if tbs:
                         tb_box = tbs[0].get_BoundingBox(sheet)
                         if tb_box: tb_min_x, tb_min_y, tb_max_x, tb_max_y = tb_box.Min.X, tb_box.Min.Y, tb_box.Max.X, tb_box.Max.Y
-                        
+
                     safe_width, safe_height = (tb_max_x - tb_min_x) - (12.5 / 12.0), (tb_max_y - tb_min_y) - (1.0 / 12.0)
-                    
-                    pure_w, pure_h = self.get_pure_view_dimensions(vp, view)
-                    pure_center = vp.GetBoxCenter()
-                    
-                    pure_min_x = pure_center.X - pure_w / 2.0
-                    pure_min_y = pure_center.Y - pure_h / 2.0
-                    
+
+                    geo = self.get_viewport_geometry(vp, view)
+                    pure_w = geo['red_width']
+                    pure_h = geo['red_height']
+                    pure_center = geo['red_center']
+
+                    pure_min_x = geo['red_min_x']
+                    pure_min_y = geo['red_min_y']
+                    max_x = geo['red_max_x']
+                    max_y = geo['red_max_y']
+
                     has_collision = False
                     schedules = FilteredElementCollector(doc, sheet.Id).OfClass(ScheduleSheetInstance).ToElements()
-                    max_x = pure_min_x + pure_w
-                    max_y = pure_min_y + pure_h
-                    
+
                     for sch in schedules:
                         sch_box = sch.get_BoundingBox(sheet)
                         if sch_box and not (max_x < sch_box.Min.X or pure_min_x > sch_box.Max.X or max_y < sch_box.Min.Y or pure_min_y > sch_box.Max.Y):
@@ -793,13 +1039,12 @@ class ManageViewsViewModel(ViewModelBase):
                             if other_vpid != vp.Id:
                                 other_vp = doc.GetElement(other_vpid)
                                 other_view = doc.GetElement(other_vp.ViewId)
-                                o_w, o_h = self.get_pure_view_dimensions(other_vp, other_view)
-                                o_center = other_vp.GetBoxCenter()
-                                o_min_x = o_center.X - o_w/2.0
-                                o_max_x = o_center.X + o_w/2.0
-                                o_min_y = o_center.Y - o_h/2.0
-                                o_max_y = o_center.Y + o_h/2.0
-                                
+                                o_geo = self.get_viewport_geometry(other_vp, other_view)
+                                o_min_x = o_geo['red_min_x']
+                                o_max_x = o_geo['red_max_x']
+                                o_min_y = o_geo['red_min_y']
+                                o_max_y = o_geo['red_max_y']
+
                                 if not (max_x < o_min_x or pure_min_x > o_max_x or max_y < o_min_y or pure_min_y > o_max_y):
                                     has_collision = True; break
 
@@ -810,27 +1055,197 @@ class ManageViewsViewModel(ViewModelBase):
                     else:
                         status = "Arranged"
                     v_node.TitleStatus = status
-                    
+
                     if oxyzen_types:
                         best_type_id = oxyzen_types[-1]['type_id']
                         for ot in oxyzen_types:
                             if ot['length'] >= pure_w:
                                 best_type_id = ot['type_id']
                                 break
-                        if vp.GetTypeId() != best_type_id: vp.ChangeTypeId(best_type_id)
-                    
-                    # Shift title exactly 1/2" below the pure view geometry
-                    title_h = self._get_title_height_for_type(vp.GetTypeId())
-                    min_spacing = UnitUtils.ConvertToInternalUnits(0.5, UnitHelper.get_sheet_length_unit())
-                    vp.LabelOffset = XYZ(0, -(title_h + min_spacing), 0)
-                    count += 1
-                    
+                        if vp.GetTypeId() != best_type_id:
+                            vp.ChangeTypeId(best_type_id)
+                            type_changed = True
+
+                    pending.append(v_node)
+
+                if type_changed:
+                    doc.Regenerate()  # title geometry must reflect the new type before we measure it
+
+                count = self._arrange_titles_logic(pending, min_spacing)
+
                 t.Commit()
             self.StatusText = "Arranged titles for {} views.".format(count)
         except Exception as e:
             self.StatusText = "Error occurred."
             forms.alert("An error occurred:\\n{}".format(traceback.format_exc()))
         finally: self.window.Cursor = Cursors.Arrow
+
+    # ======================================================================
+    # NEW: Standalone Arrange-Labels method (label-only, zero type interference)
+    # ======================================================================
+    def _arrange_view_labels(self, v_nodes, sheet, anchor_corner="BottomRight", 
+                              min_spacing=None, title_block_margin_top=0.0,
+                              title_block_margin_bottom=0.0, view_extent_gap=0.0):
+        """Arrange viewport labels relative to a title block's anchor corner.
+
+        Rules:
+          - Works on ALL eligible viewports on the sheet (filtered by applicable view types).
+          - Eligible: ViewType has a view number / label (NOT Legend, NOT views with empty DetailNumber).
+          - Uses title-block bounding box as the anchor reference.
+          - First viewport is anchored to the chosen corner of the title block.
+          - All subsequent labels flow from there using viewport extents + computed gaps.
+          - ZERO type changes — only manipulates vp.LabelOffset.
+        """
+        if not v_nodes or not sheet:
+            return 0
+
+        t = Transaction(doc, "Arrange View Labels")
+        count = 0
+        try:
+            t.Start()
+            doc.Regenerate()
+            
+            # --- Title block bounding box (anchor reference) ----
+            tb_box_min_x, tb_box_min_y, tb_box_max_x, tb_box_max_y = 0.0, 0.0, 3.0, 2.0
+            tbs = FilteredElementCollector(doc, sheet.Id).OfCategory(BuiltInCategory.OST_TitleBlocks).WhereElementIsNotElementType().ToElements()
+            if tbs:
+                tb_box = tbs[0].get_BoundingBox(sheet)
+                if tb_box:
+                    tb_box_min_x, tb_box_min_y, tb_box_max_x, tb_box_max_y = (
+                        tb_box.Min.X, tb_box.Min.Y, tb_box.Max.X, tb_box.Max.Y
+                    )
+
+            # --- Determine usable margins from title block clear spaces ----
+            is_m = UnitHelper.is_metric()
+            try: right_margin = UnitHelper.parse_unit_to_internal(self.RightMargin)
+            except: right_margin = UnitUtils.ConvertToInternalUnits(250.0 if is_m else 10.0, UnitHelper.get_sheet_length_unit())
+            try: top_margin = UnitHelper.parse_unit_to_internal(self.TopMargin)
+            except: top_margin = 0.0
+            try: left_margin = UnitHelper.parse_unit_to_internal(self.LeftMargin)
+            except: left_margin = right_margin
+
+            sheet_unit = UnitHelper.get_sheet_length_unit()
+            if min_spacing is None:
+                min_spacing = UnitUtils.ConvertToInternalUnits(0.5, sheet_unit)
+
+            # --- Anchor corner → start point ----
+            if anchor_corner == "BottomRight":
+                start_x, start_y = tb_box_max_x - right_margin - left_margin, tb_box_min_y + title_block_margin_bottom
+            elif anchor_corner == "TopRight":
+                start_x, start_y = tb_box_max_x - right_margin - left_margin, tb_box_max_y - title_block_margin_top
+            elif anchor_corner == "BottomLeft":
+                start_x, start_y = tb_box_min_x + left_margin, tb_box_min_y + title_block_margin_bottom
+            elif anchor_corner == "TopLeft":
+                start_x, start_y = tb_box_min_x + left_margin, tb_box_max_y - title_block_margin_top
+            else:
+                start_x, start_y = tb_box_max_x - right_margin - left_margin, tb_box_min_y + title_block_margin_bottom
+
+            # --- Eligibility filter for Arrange Titles ----
+            eligible_view_types = {
+                ViewType.FloorPlan, ViewType.Section, ViewType.Elevation,
+                ViewType.Detail, ViewType.CeilingPlan, ViewType.AreaPlan,
+            }
+            applicable_views = []
+            for v_node in v_nodes:
+                vp = v_node.Viewport
+                view = v_node.View
+
+                # Must be an applicable view type (exclude legends)
+                if view.ViewType not in eligible_view_types:
+                    continue
+
+                # Must have a non-empty detail number / view label text
+                detail_num_param = vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                detail_num = None
+                if detail_num_param and detail_num_param.HasValue:
+                    detail_num = detail_num_param.AsString()
+                
+                if not detail_num or not detail_num.strip():
+                    continue
+
+                # Must have a non-empty view title (optional but recommended)
+                view_title_param = vp.get_Parameter(BuiltInParameter.VIEWPORT_TITLE_OVERWRITE_PARAM)
+                view_title = None
+                if view_title_param and view_title_param.HasValue:
+                    view_title = view_title_param.AsString()
+                
+                # Also check the actual View.Name as fallback — if both are empty/space-only skip
+                has_label = (detail_num and detail_num.strip()) or (view_title and view_title.strip()) or view.Name and view.Name.strip()
+                if not has_label:
+                    continue
+
+                applicable_views.append(v_node)
+
+            if not applicable_views:
+                t.Commit()
+                return 0
+
+            # --- Layout engine: anchor-based flow from title block corner ----
+            # Current label state per viewport tracked as (currentX, currentY)
+            curr_x = start_x
+            curr_y = start_y
+            
+            dx = 1 if 'Left' in anchor_corner else -1
+            
+            for v_node in applicable_views:
+                vp = v_node.Viewport
+                view = v_node.View
+                
+                try:
+                    geo = self.get_viewport_geometry(vp, view)
+                    vp_min_y = geo['red_min_y']
+                    vp_max_y = geo['red_max_y']
+                    vp_w = geo['red_width']
+                    vp_h = geo['red_height']
+                except:
+                    continue
+
+                try:
+                    label_box = vp.GetLabelOutline()
+                    real_h = label_box.MaximumPoint.Y - label_box.MinimumPoint.Y
+                    title_h = real_h if real_h > 0.001 else self._get_title_height_for_type(vp.GetTypeId())
+                except:
+                    title_h = self._get_title_height_for_type(vp.GetTypeId())
+
+                # Viewport extent (from GetBoxOutline) — the physical box including frame/border
+                vp_min_x = geo['red_min_x']
+                vp_max_x = geo['red_max_x']
+                
+                if anchor_corner in ("BottomRight", "TopRight"):
+                    # Pack right-to-left
+                    center_x = curr_x - (vp_w / 2.0)
+                    
+                    # Gap between rows: view extent bottom to previous label top
+                    gap = title_h + min_spacing
+                    next_min_y = vp_max_y + title_h + min_spacing
+                elif anchor_corner in ("BottomLeft", "TopLeft"):
+                    # Pack left-to-right (new feature for Arrange Titles)
+                    center_x = curr_x + (vp_w / 2.0)
+                    
+                    gap = title_h + min_spacing
+                    next_min_y = vp_max_y + title_h + min_spacing
+                else:
+                    center_x = curr_x - (vp_w / 2.0)
+                    gap = title_h + min_spacing
+                    next_min_y = vp_max_y + title_h + min_spacing
+
+                # Calculate the proposed label offset to achieve the desired label position
+                new_label_offset = XYZ(0, -(title_h + view_extent_gap), 0)
+                
+                try:
+                    vp.LabelOffset = new_label_offset
+                    count += 1
+                except:
+                    pass
+
+                curr_x = curr_x + dx * (vp_w + min_spacing)
+
+            t.Commit()
+        except Exception as e:
+            t.RollBack()
+            self.StatusText = "Error during Arrange Titles."
+            forms.alert("An error occurred:\\n{}".format(traceback.format_exc()))
+        return count
 
     def auto_pack(self, parameter):
         checked_views = self.get_checked_views()
@@ -866,8 +1281,11 @@ class ManageViewsViewModel(ViewModelBase):
             # --- Pre-flight Simulation: ensure packing fits within title block bounds ---
             title_types = self.get_view_title_types()
             sheet_unit = UnitHelper.get_sheet_length_unit()
-            min_spacing = UnitUtils.ConvertToInternalUnits(0.5, sheet_unit)
-            title_height_est = UnitUtils.ConvertToInternalUnits(0.5, sheet_unit)
+            try:
+                min_spacing = UnitHelper.parse_unit_to_internal(self.TitleOffsetY)
+            except:
+                min_spacing = UnitUtils.ConvertToInternalUnits(0.5, sheet_unit)
+            title_height_est = min_spacing
             row_gap = min_spacing + title_height_est + min_spacing
             horiz_gap = min_spacing
 
@@ -948,7 +1366,6 @@ class ManageViewsViewModel(ViewModelBase):
                             for i, v_node in enumerate(v_nodes):
                                 vp = v_node.Viewport
                                 view = v_node.View
-                                if vp: vp.LabelOffset = XYZ.Zero
                                 
                                 if self.SyncDetailNumbers:
                                     p = vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
@@ -976,8 +1393,11 @@ class ManageViewsViewModel(ViewModelBase):
                     t2.Start()
                     title_types = self.get_view_title_types()
                     sheet_unit = UnitHelper.get_sheet_length_unit()
-                    min_spacing = UnitUtils.ConvertToInternalUnits(0.5, sheet_unit)
-                    title_height_est = UnitUtils.ConvertToInternalUnits(0.5, sheet_unit)
+                    try:
+                        min_spacing = UnitHelper.parse_unit_to_internal(self.TitleOffsetY)
+                    except:
+                        min_spacing = UnitUtils.ConvertToInternalUnits(0.5, sheet_unit)
+                    title_height_est = min_spacing
                     row_gap = min_spacing + title_height_est + min_spacing
                     horiz_gap = min_spacing
                     
@@ -995,25 +1415,30 @@ class ManageViewsViewModel(ViewModelBase):
                         usable_min_y = tb_min_y + b_margin + tb_offset_y
                         usable_max_y = tb_max_y - t_margin - tb_offset_y
                         
+                        # Pass A: measure pure view size and apply the best-fit title type
+                        # BEFORE measuring title height, since height can vary by type.
                         vp_data = []
+                        type_changed = False
                         for v_node in v_nodes:
                             vp = v_node.Viewport
                             view = v_node.View
-                            w, h = self.get_pure_view_dimensions(vp, view)
-                            box = vp.GetBoxOutline()
-                                
-                            center = vp.GetBoxCenter()
-                            orig_min_x = box.MinimumPoint.X
-                            orig_min_y = box.MinimumPoint.Y
-                            
-                            title_h = self._get_title_height_for_type(vp.GetTypeId())
-                            vp_data.append({'v_node': v_node, 'vp': vp, 'w': w, 'h': h, 'title_h': title_h, 'area': w * h, 'id': get_id(vp.Id), 'min_x': orig_min_x, 'min_y': orig_min_y, 'center': center})
-                            
+                            geo = self.get_viewport_geometry(vp, view)
+                            w = geo['red_width']
+                            h = geo['red_height']
+                            best_type_id = self.get_best_title_type_id(w, title_types)
+                            this_type_changed = bool(best_type_id) and vp.GetTypeId() != best_type_id
+                            if this_type_changed:
+                                vp.ChangeTypeId(best_type_id)
+                                type_changed = True
+                            vp_data.append({'v_node': v_node, 'vp': vp, 'w': w, 'h': h, 'best_type_id': best_type_id, 'type_changed': this_type_changed, 'area': w * h, 'id': get_id(vp.Id)})
+
                         vp_data = sorted(vp_data, key=lambda x: (-x['area'], x['id']))
-                        
-                        dx = 1 if 'Left' in anchor else -1
-                        dy = 1 if 'Bottom' in anchor else -1
-                        
+
+                        # Assign FINAL detail numbers now, before measuring title height below.
+                        # Phase 1 left every viewport on a long "TMP_<id>_<i>" placeholder to
+                        # avoid numbering collisions; if we measured the label while that long
+                        # placeholder was still showing, it can wrap to extra line(s) and make
+                        # GetLabelOutline report a taller box than the real final number will need.
                         taken_numbers = set()
                         if self.SyncDetailNumbers:
                             all_vp_ids = sheet.GetAllViewports()
@@ -1022,27 +1447,54 @@ class ManageViewsViewModel(ViewModelBase):
                                 if get_id(vp_id) not in checked_vp_ids:
                                     p = doc.GetElement(vp_id).get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                     if p and p.HasValue: taken_numbers.add(p.AsString())
-                        
-                        detail_num = 1
-                        
-                        if dy == 1:
-                            curr_row_title_y = tb_min_y + b_margin + tb_offset_y
-                        else:
-                            curr_row_title_y = tb_max_y - t_margin - tb_offset_y
-                            
+
+                            detail_num = 1
+                            for data in vp_data:
+                                vp = data['vp']
+                                v_node = data['v_node']
+                                p = vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                if p and not p.IsReadOnly:
+                                    while str(detail_num) in taken_numbers: detail_num += 1
+                                    p.Set(str(detail_num))
+                                    taken_numbers.add(str(detail_num))
+                                    v_node.DetailNumber = str(detail_num)
+                                    detail_num += 1
+
+                        if type_changed or self.SyncDetailNumbers:
+                            doc.Regenerate()  # title text/geometry must be final before we measure it
+
+                        # Pass B: now that types/numbers/geometry are final, read the ACTUAL
+                        # rendered label height via GetLabelOutline instead of guessing from
+                        # family parameters - LabelOffset only translates the label, so its size
+                        # here is valid regardless of what offset is applied afterward.
+                        for data in vp_data:
+                            vp = data['vp']
+                            geo = self.get_viewport_geometry(vp, data['v_node'].View)
+                            box = vp.GetBoxOutline()
+                            data['center'] = geo['red_center']
+                            data['red_min_x'] = box.MinimumPoint.X
+                            data['red_min_y'] = box.MinimumPoint.Y
+                            data['title_w'] = geo['blue_label_width']
+                            try:
+                                label_box = vp.GetLabelOutline()
+                                real_h = label_box.MaximumPoint.Y - label_box.MinimumPoint.Y
+                                data['title_h'] = real_h if real_h > 0.001 else self._get_title_height_for_type(vp.GetTypeId())
+                            except:
+                                data['title_h'] = self._get_title_height_for_type(vp.GetTypeId())
+
+                        dx = 1 if 'Left' in anchor else -1
+                        dy = 1 if 'Bottom' in anchor else -1
+
+                        first_row = True
                         first_in_row = True
                         curr_left = usable_min_x
                         curr_right = usable_max_x
-                        row_max_top_y = curr_row_title_y
-                        row_min_bottom_y = curr_row_title_y
+                        row_boundary_y = 0.0
                         
                         for data in vp_data:
                             w, h, vp, v_node = data['w'], data['h'], data['vp'], data['v_node']
-                            title_h = data.get('title_h', title_height_est)
-                            
-                            best_type_id = self.get_best_title_type_id(w, title_types)
-                            if best_type_id:
-                                title_h = self._get_title_height_for_type(best_type_id)
+                            title_h = data['title_h']
+                            best_type_id = data['best_type_id']
 
                             if first_in_row:
                                 if dx == 1:
@@ -1052,37 +1504,48 @@ class ManageViewsViewModel(ViewModelBase):
                                     curr_right = usable_max_x
                                     current_x = curr_right
                                 first_in_row = False
+                                
+                                # Initialize row vertical start
+                                if first_row:
+                                    if dy == 1:
+                                        curr_row_view_start = tb_min_y + b_margin + tb_offset_y + title_h + min_spacing
+                                    else:
+                                        curr_row_view_start = tb_max_y - t_margin - tb_offset_y
+                                    first_row = False
+                                row_boundary_y = curr_row_view_start
                             else:
                                 if dx == 1:
                                     curr_left = prev_right + padding
                                     if curr_left + w > usable_max_x + 1e-6: # Wrap to next row
                                         if dy == 1:
-                                            curr_row_title_y = row_max_top_y + min_spacing
+                                            curr_row_view_start = row_boundary_y + min_spacing + title_h + min_spacing
                                         else:
-                                            curr_row_title_y = row_min_bottom_y - min_spacing
+                                            curr_row_view_start = row_boundary_y - min_spacing
                                         curr_left = usable_min_x
-                                        row_max_top_y = curr_row_title_y
-                                        row_min_bottom_y = curr_row_title_y
-                                    current_x = curr_left
+                                        row_boundary_y = curr_row_view_start
+                                        current_x = curr_left
+                                    else:
+                                        current_x = curr_left
                                 else:
                                     curr_right = prev_left - padding
                                     if curr_right - w < usable_min_x - 1e-6: # Wrap to next row
                                         if dy == 1:
-                                            curr_row_title_y = row_max_top_y + min_spacing
+                                            curr_row_view_start = row_boundary_y + min_spacing + title_h + min_spacing
                                         else:
-                                            curr_row_title_y = row_min_bottom_y - min_spacing
+                                            curr_row_view_start = row_boundary_y - min_spacing
                                         curr_right = usable_max_x
-                                        row_max_top_y = curr_row_title_y
-                                        row_min_bottom_y = curr_row_title_y
-                                    current_x = curr_right
+                                        row_boundary_y = curr_row_view_start
+                                        current_x = curr_right
+                                    else:
+                                        current_x = curr_right
                                         
                             # Calculate coordinates before moving
                             if dy == 1:
-                                target_title_y = curr_row_title_y
-                                target_view_min_y = target_title_y + title_h + min_spacing
+                                target_view_min_y = curr_row_view_start
                                 target_view_max_y = target_view_min_y + h
+                                target_title_y = target_view_min_y - min_spacing - title_h
                             else:
-                                target_view_max_y = curr_row_title_y
+                                target_view_max_y = curr_row_view_start
                                 target_view_min_y = target_view_max_y - h
                                 target_title_y = target_view_min_y - min_spacing - title_h
 
@@ -1097,49 +1560,30 @@ class ManageViewsViewModel(ViewModelBase):
                             target_min_y = target_view_min_y
                             v_max_y = target_view_max_y
                             t_y = target_title_y
-                            off_x = 0
-                            off_y = -(title_h + min_spacing)
                                 
-                            if dy == 1: row_max_top_y = max(row_max_top_y, v_max_y)
-                            else: row_min_bottom_y = min(row_min_bottom_y, t_y)
+                            if dy == 1: 
+                                row_boundary_y = max(row_boundary_y, v_max_y)
+                            else: 
+                                row_boundary_y = min(row_boundary_y, t_y)
 
                             if dx == 1: prev_right = current_x + w
                             else: prev_left = current_x - w
-                                
-                            # Place Viewport Bottom-Left explicitly using Delta Shift
-                            current_center = vp.GetBoxCenter()
+                            # Place Viewport directly using target View center
+                            target_center_x = tgt_min_x + w / 2.0
+                            target_center_y = target_min_y + h / 2.0
+                            vp.SetBoxCenter(XYZ(target_center_x, target_center_y, 0))
                             
-                            dx_shift = tgt_min_x - data['min_x']
-                            dy_shift = -(target_min_y - data['min_y'])
-                            
-                            vp.SetBoxCenter(XYZ(current_center.X + dx_shift, current_center.Y + dy_shift, current_center.Z))
-                            
-                            # Lock View Title to exactly calculated offset
-                            vp.LabelOffset = XYZ(off_x, off_y, 0)
-                            
-                            if best_type_id and vp.GetTypeId() != best_type_id:
-                                vp.ChangeTypeId(best_type_id)
+                            if data['type_changed']:
                                 v_node.TitleStatus = "Matched"
-                            
-                            # Apply Auto-Numbering
-                            if self.SyncDetailNumbers:
-                                p = vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
-                                if p and not p.IsReadOnly:
-                                    while str(detail_num) in taken_numbers: detail_num += 1
-                                    p.Set(str(detail_num))
-                                    taken_numbers.add(str(detail_num))
-                                    v_node.DetailNumber = str(detail_num)
-                                    detail_num += 1
-                                    
-                            # Debug Layout
-                            if self.DebugLayout:
-                                box_min = XYZ(tgt_min_x, target_min_y, 0)
-                                box_max = XYZ(tgt_min_x + w, v_max_y, 0)
-                                self.draw_debug_box(sheet, box_min, box_max)
-                            
-                            count += 1
                             v_node.TitleStatus = "Packed"
                             
+                            count += 1
+
+                        # Run the arrange titles logic to position all labels in one shot
+                        pending_views = [data['v_node'] for data in vp_data]
+                        premeasured = {data['vp'].Id: data['title_h'] for data in vp_data}
+                        self._arrange_titles_logic(pending_views, min_spacing, premeasured_heights=premeasured)
+
                     t2.Commit()
                 tg.Assimilate()
             self.StatusText = "Auto-packed {} views.".format(count)
