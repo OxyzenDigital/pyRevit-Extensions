@@ -100,14 +100,50 @@ class UnitHelper:
     @staticmethod
     def get_unit_symbol():
         try:
-            tid = UnitHelper.get_project_length_unit().TypeId
-            if "meters" in tid: return "m"
-            if "centimeters" in tid: return "cm"
-            if "millimeters" in tid: return "mm"
-            if "feet" in tid: return "ft"
-            if "inches" in tid: return "in"
+            tid = UnitHelper.get_project_length_unit().TypeId.lower()
+            if "millimeter" in tid: return "mm"
+            if "centimeter" in tid: return "cm"
+            if "meter" in tid: return "m"
+            if "foot" in tid or "feet" in tid: return "ft"
+            if "inch" in tid: return "in"
         except: pass
         return "units"
+
+    @staticmethod
+    def is_metric():
+        try:
+            sym = UnitHelper.get_unit_symbol()
+            return sym in ['m', 'cm', 'mm']
+        except: return False
+
+    @staticmethod
+    def get_sheet_length_unit():
+        try:
+            from Autodesk.Revit.DB import UnitTypeId
+            if UnitHelper.is_metric():
+                return UnitTypeId.Millimeters
+            return UnitTypeId.Inches
+        except:
+            from Autodesk.Revit.DB import DisplayUnitType
+            if UnitHelper.is_metric():
+                return DisplayUnitType.DUT_MILLIMETERS
+            return DisplayUnitType.DUT_FRAC_INCHES
+
+    @staticmethod
+    def is_length_parameter(param):
+        try:
+            # Revit 2022+
+            if hasattr(param.Definition, "GetDataType"):
+                from Autodesk.Revit.DB import SpecTypeId
+                return param.Definition.GetDataType() == SpecTypeId.Length
+        except: pass
+        try:
+            # Revit 2021-
+            if hasattr(param.Definition, "ParameterType"):
+                from Autodesk.Revit.DB import ParameterType
+                return param.Definition.ParameterType == ParameterType.Length
+        except: pass
+        return False
 
     @staticmethod
     def to_internal(value_str):
@@ -141,18 +177,28 @@ class UnitHelper:
     @staticmethod
     def parse_unit_to_internal(value_str):
         value_str = str(value_str).strip()
-        
-        # Force evaluation as project unit if no explicit unit is present
-        test_str = value_str
-        sym = UnitHelper.get_unit_symbol()
-        if sym in ['in', 'ft'] and not any(c in test_str for c in ['"', "'", 'm', 'c', 'f']):
-            test_str += '"' if sym == 'in' else "'"
-            
         units = doc.GetUnits()
         parsed_val = clr.Reference[Double]()
-        if UnitFormatUtils.TryParse(units, SpecTypeId.Length, test_str, parsed_val):
-            return parsed_val.Value
+        
+        # Determine if there's any letters or quotes indicating a unit symbol.
+        # If not, we want to append the sheet unit symbol first to force parsing in sheet units.
+        lower_str = value_str.lower()
+        has_symbol = any(c in lower_str for c in 'abcdefghijklmnopqrstuvwxyz\'"')
+        
+        if has_symbol:
+            # Try native parsing first
+            if UnitFormatUtils.TryParse(units, SpecTypeId.Length, value_str, parsed_val):
+                return parsed_val.Value
+        else:
+            # Fallback: if no unit symbol is present, evaluate as sheet units (Inches for Imperial, Millimeters for Metric)
+            is_m = UnitHelper.is_metric()
+            test_str = value_str + ('mm' if is_m else '"')
             
+            # Try parsing again with the appended sheet unit symbol
+            if UnitFormatUtils.TryParse(units, SpecTypeId.Length, test_str, parsed_val):
+                return parsed_val.Value
+            
+        # Hard fallback: raw float parsing
         try:
             val = 0.0
             if "/" in value_str:
@@ -164,9 +210,12 @@ class UnitHelper:
             else:
                 clean_str = ''.join(c for c in value_str if c.isdigit() or c in '.-')
                 if clean_str: val = float(clean_str)
-            unit_id = UnitHelper.get_project_length_unit()
-            return UnitUtils.ConvertToInternalUnits(val, unit_id)
-        except: raise ValueError("Invalid unit format")
+            
+            # Convert from sheet unit to internal units (feet)
+            sheet_unit_id = UnitHelper.get_sheet_length_unit()
+            return UnitUtils.ConvertToInternalUnits(val, sheet_unit_id)
+        except:
+            raise ValueError("Invalid unit format")
 
     @staticmethod
     def to_formatted_string(value_in_internal_units):
@@ -180,10 +229,36 @@ class UnitHelper:
     def to_formatted_string_with_symbol(value_in_internal_units):
         try:
             val = float(value_in_internal_units)
-            units = doc.GetUnits()
-            # show unit symbol when formatting
-            return UnitFormatUtils.Format(units, SpecTypeId.Length, val, True)
-        except: return "0\""
+            is_m = UnitHelper.is_metric()
+            sheet_unit = UnitHelper.get_sheet_length_unit()
+            
+            # Convert to display value in sheet units (inches or mm)
+            display_val = UnitUtils.ConvertFromInternalUnits(val, sheet_unit)
+            
+            if is_m:
+                # Format as e.g. "6 mm" or "6.5 mm"
+                if abs(display_val - round(display_val)) < 0.01:
+                    return "{} mm".format(int(round(display_val)))
+                else:
+                    return "{:.1f} mm".format(display_val)
+            else:
+                # Format as fractional inches or decimal inches
+                if abs(display_val) < 0.001:
+                    return "0\""
+                for den in [2, 4, 8, 16, 32, 64]:
+                    num = round(display_val * den)
+                    if abs(display_val - float(num)/den) < 0.01:
+                        whole = int(num // den)
+                        frac = int(num % den)
+                        if whole > 0 and frac > 0:
+                            return "{} {}/{}\"".format(whole, frac, den)
+                        elif whole > 0:
+                            return "{}\"".format(whole)
+                        else:
+                            return "{}/{}\"".format(frac, den)
+                return "{:.2f}\"".format(display_val)
+        except:
+            return "0\""
 
     @staticmethod
     def to_display_value(value_in_internal_units):
@@ -418,10 +493,17 @@ class GraphicScaleViewModel(ViewModelBase):
         self._sheets = []
         self._families = []
         self._selected_family = None
-        self._offset_x = "0.25"
-        self._offset_y = "0.53"
+        # Initialize defaults dynamically using sheet units
+        is_m = UnitHelper.is_metric()
+        sheet_unit = UnitHelper.get_sheet_length_unit()
+        default_x = UnitUtils.ConvertToInternalUnits(6.0 if is_m else 0.25, sheet_unit)
+        default_y = UnitUtils.ConvertToInternalUnits(13.0 if is_m else 17.0/32.0, sheet_unit)
+        default_thresh = UnitUtils.ConvertToInternalUnits(175.0 if is_m else 7.0, sheet_unit)
+
+        self._offset_x = UnitHelper.to_formatted_string_with_symbol(default_x)
+        self._offset_y = UnitHelper.to_formatted_string_with_symbol(default_y)
         self._include_north_arrow = True
-        self._invert_threshold = "7\""
+        self._invert_threshold = UnitHelper.to_formatted_string_with_symbol(default_thresh)
         self._alignment = "Right"
         self._alignment_options = ["Left", "Center", "Right"]
         self._current_views = []
@@ -771,7 +853,7 @@ class GraphicScaleViewModel(ViewModelBase):
         valid_types = [
             ViewType.FloorPlan, ViewType.CeilingPlan, ViewType.EngineeringPlan, 
             ViewType.AreaPlan, ViewType.Section, ViewType.Elevation, 
-            ViewType.DraftingView, ViewType.Detail, ViewType.Legend
+            ViewType.DraftingView, ViewType.Detail
         ]
         
         vps = []
@@ -1237,6 +1319,8 @@ class GraphicScaleViewModel(ViewModelBase):
                         # 1. Get Viewport Label Location
                         try:
                             vp_outline = vp.GetLabelOutline()
+                            if vp_outline is None or abs(vp_outline.MinimumPoint.X) > 1000.0 or abs(vp_outline.MinimumPoint.Y) > 1000.0:
+                                raise ValueError("Invalid outline coordinates")
                             
                             # Apply alignment logic to base X coordinate
                             if v_node.LocalAlignment == "Left":
@@ -1288,10 +1372,19 @@ class GraphicScaleViewModel(ViewModelBase):
                                 # Use the 'Unit' parameter from the family for the leftward offset
                                 unit_param = inst.LookupParameter("Unit")
                                 if unit_param and unit_param.HasValue:
+                                    raw_val = 0.0
                                     if unit_param.StorageType == StorageType.Double:
-                                        unit_offset = unit_param.AsDouble()
+                                        raw_val = unit_param.AsDouble()
                                     elif unit_param.StorageType == StorageType.Integer:
-                                        unit_offset = float(unit_param.AsInteger())
+                                        raw_val = float(unit_param.AsInteger())
+                                    
+                                    # If the parameter is not a Length parameter, or if the value is suspiciously large (> 2.0 feet),
+                                    # we assume it is in sheet units (mm or inches) and convert it to internal units (feet).
+                                    if not UnitHelper.is_length_parameter(unit_param) or abs(raw_val) > 2.0:
+                                        sheet_unit = UnitHelper.get_sheet_length_unit()
+                                        unit_offset = UnitUtils.ConvertToInternalUnits(raw_val, sheet_unit)
+                                    else:
+                                        unit_offset = raw_val
                                     
                                 # Apply offsets (Subtract X to move left, Add Y to move up/down)
                                 gs_target_pt = XYZ(target_pt.X - unit_offset - user_offset_x, target_pt.Y + applied_offset_y, 0)
