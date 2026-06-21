@@ -1,6 +1,6 @@
 # -*- coding=utf-8 -*-
 """Manage Sheets - Exporter.
-Queries the active Revit document for sheets, views, sheet sets, and loaded
+Queries the active Revit document for sheets, views, sheet collections, and loaded
 title blocks, and exports the state into a JS variable assignment in the
 temp directory before launching the HTML simulator.
 """
@@ -124,7 +124,7 @@ def get_title_blocks(doc):
         })
     return title_blocks
 
-def get_sheets(doc, sheet_to_sets):
+def get_sheets(doc):
     """Returns list of sheet dicts. Also reads SHEETS - Discipline and SHEETS - Use
     so the UI can pre-populate both browser-organisation parameters."""
     sheets_data = []
@@ -134,6 +134,7 @@ def get_sheets(doc, sheet_to_sets):
     # Parameter name variants — try both common spellings
     DISC_PARAM_NAMES  = ["SHEETS - Discipline", "Sheet Discipline", "Discipline"]
     USE_PARAM_NAMES   = ["SHEETS - Use",        "Sheet Use",        "Use"]
+    COLLECTION_NAMES  = ["Sheet Collection", "SheetCollection", "Collection"]
 
     def _read_param(element, name_candidates):
         for name in name_candidates:
@@ -141,6 +142,8 @@ def get_sheets(doc, sheet_to_sets):
                 p = element.LookupParameter(name)
                 if p and p.HasValue:
                     val = p.AsString()
+                    if not val:
+                        val = p.AsValueString()
                     if val:
                         return val
             except:
@@ -158,10 +161,29 @@ def get_sheets(doc, sheet_to_sets):
         # Read Project Browser organisation parameters
         sheet_discipline = _read_param(sheet, DISC_PARAM_NAMES)
         sheet_use        = _read_param(sheet, USE_PARAM_NAMES)
+        
+        # Read Sheet Collection exactly by parameter (Revit 2025+ or Custom)
+        sheet_collection = ""
+        
+        try:
+            # 1. Native Revit 2025+ via ParameterTypeId
+            from Autodesk.Revit.DB import ParameterTypeId
+            c_param = sheet.get_Parameter(ParameterTypeId.SheetCollection)
+            if c_param and c_param.HasValue:
+                c_id = c_param.AsElementId()
+                if c_id and c_id.IntegerValue > -1:
+                    c_elem = doc.GetElement(c_id)
+                    if c_elem:
+                        sheet_collection = get_element_name(c_elem)
+        except:
+            pass
+            
+        # 2. Strict Project Parameter Lookup
+        if not sheet_collection:
+            sheet_collection = _read_param(sheet, ["Sheet Collection"])
 
         sheet_id = get_id_value(sheet.Id)
-        assigned_sets = sheet_to_sets.get(sheet_id, [])
-
+        
         # Get views placed on this sheet
         placed_views = []
         if hasattr(sheet, "GetAllPlacedViews"):
@@ -169,10 +191,13 @@ def get_sheets(doc, sheet_to_sets):
                 for v_id in sheet.GetAllPlacedViews():
                     view_elem = doc.GetElement(v_id)
                     if view_elem:
+                        detail_param = view_elem.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                        detail_num = detail_param.AsString() if detail_param else ""
                         placed_views.append({
                             "Id": get_id_value(v_id),
                             "Name": get_element_name(view_elem),
-                            "Type": str(view_elem.ViewType) if hasattr(view_elem, "ViewType") else ""
+                            "Type": str(view_elem.ViewType) if hasattr(view_elem, "ViewType") else "",
+                            "DetailNumber": detail_num or ""
                         })
             except:
                 pass
@@ -182,7 +207,7 @@ def get_sheets(doc, sheet_to_sets):
             "Name": get_element_name(sheet),
             "Id": sheet_id,
             "SchemaLink": schema_link,
-            "SheetSets": assigned_sets,
+            "SheetCollection": sheet_collection,
             "PlacedViews": placed_views,
             "SheetDiscipline": sheet_discipline,
             "SheetUse": sheet_use
@@ -248,30 +273,7 @@ def get_views(doc):
             })
     return views_data
 
-def get_sheet_to_sets_map(doc):
-    sheet_to_sets = {}
-    if not doc:
-        return sheet_to_sets
-        
-    collector = FilteredElementCollector(doc).OfClass(ViewSheetSet)
-    for sheet_set in collector:
-        set_name = get_element_name(sheet_set)
-        # Iterate member views of the sheet set
-        try:
-            for member in sheet_set.Views:
-                member_id = get_id_value(member.Id)
-                if member_id not in sheet_to_sets:
-                    sheet_to_sets[member_id] = []
-                sheet_to_sets[member_id].append(set_name)
-        except:
-            pass
-    return sheet_to_sets
 
-def get_sheet_sets_list(doc):
-    if not doc:
-        return []
-    collector = FilteredElementCollector(doc).OfClass(ViewSheetSet)
-    return [get_element_name(ss) for ss in collector]
 
 def parse_ncs_csv(filename):
     current_dir = os.path.dirname(__file__)
@@ -316,14 +318,10 @@ def run():
         print("Error: Revit Document context not found.")
         return
         
-    # 1. Map sheet set associations
-    sheet_to_sets = get_sheet_to_sets_map(doc)
-    
     # 2. Extract model elements
-    sheets = get_sheets(doc, sheet_to_sets)
+    sheets = get_sheets(doc)
     views = get_views(doc)
     levels = get_levels(doc)
-    sheet_sets = get_sheet_sets_list(doc)
     title_blocks = get_title_blocks(doc)
     
     # 3. Read NCS reference data from resources
@@ -337,13 +335,18 @@ def run():
         s["SheetUse"] for s in sheets if s.get("SheetUse")
     ))
 
+    # Collect unique Sheet Collections from live model
+    all_sheet_collections = sorted(set(
+        s["SheetCollection"] for s in sheets if s.get("SheetCollection")
+    ))
+
     # 5. Consolidate payload
     payload = {
         "projectInfo": get_project_info(doc),
         "levels": levels,
         "sheets": sheets,
         "views": views,
-        "sheetSets": sheet_sets,
+        "sheetCollections": all_sheet_collections,
         "titleBlocks": title_blocks,
         "sheetUseValues": all_sheet_use_values,
         "ncs": {

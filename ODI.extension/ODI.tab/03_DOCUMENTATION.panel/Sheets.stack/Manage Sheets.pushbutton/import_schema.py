@@ -27,7 +27,7 @@ if is_revit:
     from Autodesk.Revit.DB import (
         FilteredElementCollector,
         ViewSheet,
-        ViewSheetSet,
+        ViewSheet,
         Transaction,
         ElementId,
         FamilySymbol,
@@ -108,13 +108,13 @@ def get_aia_discipline(designator):
 # --- MVVM BINDING CLASSES ---
 
 class CreateItem(object):
-    def __init__(self, number, name, titleblock, titleblock_id, sheet_set,
+    def __init__(self, number, name, titleblock, titleblock_id, sheet_collection,
                  schema_link, designator_code, sheet_discipline="", sheet_use=""):
         self.number = number
         self.name = name
         self.titleblock = titleblock
         self.titleblock_id = titleblock_id
-        self.sheet_set = sheet_set
+        self.sheet_collection = sheet_collection
         self.schema_link = schema_link
         self.designator_code = designator_code
         self.sheet_discipline = sheet_discipline
@@ -127,7 +127,7 @@ class CreateItem(object):
     @property
     def TitleBlock(self): return self.titleblock
     @property
-    def SheetSet(self): return self.sheet_set
+    def SheetCollection(self): return self.sheet_collection
 
 class ConflictItem(object):
     def __init__(self, element, number, model_name, proposed_name, reason, proposed_sheet, schema_link):
@@ -460,41 +460,40 @@ def ensure_shared_parameter(doc, app):
         forms.alert("Error binding parameters:\n{}".format(e), title="Shared Parameter Error")
         return False
 
-def assign_sheet_to_set(doc, sheet, set_name):
-    """Assigns the sheet to a ViewSheetSet by name. Creates it if missing."""
-    if not doc or not set_name:
+def assign_sheet_to_collection(doc, sheet, collection_name):
+    """Assigns the sheet to a Sheet Collection by name."""
+    if not doc or not collection_name:
         return
         
     try:
-        # Find existing
-        collector = FilteredElementCollector(doc).OfClass(ViewSheetSet)
-        target_set = None
-        for ss in collector:
-            if get_element_name(ss) == set_name:
-                target_set = ss
-                break
+        # 1. Try native Revit 2025 SheetCollection via ParameterTypeId
+        try:
+            from Autodesk.Revit.DB import SheetCollection, ParameterTypeId
+            collector = FilteredElementCollector(doc).OfClass(SheetCollection)
+            target_collection = None
+            for c in collector:
+                if get_element_name(c) == collection_name:
+                    target_collection = c
+                    break
+            
+            if not target_collection:
+                target_collection = SheetCollection.Create(doc, collection_name)
                 
-        print_manager = doc.PrintManager
-        from Autodesk.Revit.DB import PrintRange, ViewSet
-        print_manager.PrintRange = PrintRange.Select
-        view_sheet_setting = print_manager.ViewSheetSetting
-        
-        if target_set:
-            view_sheet_setting.CurrentViewSheetSet = target_set
-            # Add to views collection
-            views = view_sheet_setting.CurrentViewSheetSet.Views
-            views.Insert(sheet)
-            view_sheet_setting.Save()
-        else:
-            # Create new
-            new_views = ViewSet()
-            new_views.Insert(sheet)
-            view_sheet_setting.CurrentViewSheetSet.Views = new_views
-            view_sheet_setting.SaveAs(set_name)
-    except System.Exception as e:
-        logger.warning("Could not add sheet to set '{}' (CLR): {}".format(set_name, e.Message))
+            c_param = sheet.get_Parameter(ParameterTypeId.SheetCollection)
+            if c_param and not c_param.IsReadOnly:
+                c_param.Set(target_collection.Id)
+                return
+        except:
+            pass # Pre-2025
+            
+        # 2. Strict Project Parameter
+        param = sheet.LookupParameter("Sheet Collection")
+        if param and not param.IsReadOnly:
+            param.Set(collection_name)
+            return
+
     except Exception as e:
-        logger.warning("Could not add sheet to set '{}': {}".format(set_name, e))
+        logger.warning("Could not assign sheet to collection '{}': {}".format(collection_name, e))
 
 # --- MAIN EXECUTION ---
 
@@ -547,7 +546,7 @@ def run():
         p_link = p_sheet.get("SchemaLink")
         p_tb = p_sheet.get("TitleBlock", "")
         p_tb_id = p_sheet.get("TitleBlockId")
-        p_set = p_sheet.get("SheetSet", "")
+        p_set = p_sheet.get("SheetCollection", "")
         p_action = p_sheet.get("Action", "Skip")
         
         # Look up live match
@@ -565,7 +564,7 @@ def run():
                     name=p_name,
                     titleblock=p_tb,
                     titleblock_id=p_tb_id,
-                    sheet_set=p_set,
+                    sheet_collection=p_set,
                     schema_link=p_link,
                     designator_code=p_sheet.get("DesignatorCode", ""),
                     sheet_discipline=p_sheet.get("SheetDiscipline", ""),
@@ -622,20 +621,26 @@ def run():
     matched_ids = set()
     for item in conflict_items:
         matched_ids.add(get_id_value(item.element.Id))
-    
-    # Query sheet sets
-    sheet_to_sets = {}
-    sets_collector = FilteredElementCollector(doc).OfClass(ViewSheetSet)
-    for sheet_set in sets_collector:
-        set_name = get_element_name(sheet_set)
+        
+    def _get_sheet_collection(sht):
+        # Native Revit 2025+
         try:
-            for member in sheet_set.Views:
-                mid = get_id_value(member.Id)
-                if mid not in sheet_to_sets:
-                    sheet_to_sets[mid] = []
-                sheet_to_sets[mid].append(set_name)
-        except:
-            pass
+            from Autodesk.Revit.DB import ParameterTypeId
+            c_param = sht.get_Parameter(ParameterTypeId.SheetCollection)
+            if c_param and c_param.HasValue:
+                c_id = c_param.AsElementId()
+                if c_id and c_id.IntegerValue > -1:
+                    c_elem = doc.GetElement(c_id)
+                    if c_elem: return get_element_name(c_elem)
+        except: pass
+        
+        # Strict parameter
+        p = sht.LookupParameter("Sheet Collection")
+        if p and p.HasValue:
+            v = p.AsString()
+            if not v: v = p.AsValueString()
+            if v: return v
+        return ""
 
     for sheet in live_sheets:
         sid = get_id_value(sheet.Id)
@@ -644,8 +649,8 @@ def run():
         if any(s.get("Number") == sheet.SheetNumber for s in schema_sheets):
             continue
             
-        assigned_sets = sheet_to_sets.get(sid, [])
-        if not assigned_sets:
+        collection_val = _get_sheet_collection(sheet)
+        if not collection_val:
             item = PurgeItem(
                 element=sheet,
                 number=sheet.SheetNumber,
@@ -745,8 +750,8 @@ def run():
                 param_use.Set(item.sheet_use)
 
             # Add to Sheet Set
-            if item.sheet_set:
-                assign_sheet_to_set(doc, new_sheet, item.sheet_set)
+            if item.sheet_collection:
+                assign_sheet_to_collection(doc, new_sheet, item.sheet_collection)
 
         # Process Conflicts
         for item in conflict_items:
@@ -783,9 +788,9 @@ def run():
                         param_use.Set(use_val)
 
                 # Add to set
-                set_name = item.proposed_sheet.get("SheetSet")
+                set_name = item.proposed_sheet.get("SheetCollection")
                 if set_name:
-                    assign_sheet_to_set(doc, item.element, set_name)
+                    assign_sheet_to_collection(doc, item.element, set_name)
                     
                 # Rename views placed on this sheet
                 rename_views_map = item.proposed_sheet.get("RenameViews", {})

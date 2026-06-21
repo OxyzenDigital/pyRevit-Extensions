@@ -63,7 +63,7 @@
                                 <GridViewColumn Header="Sheet Number" DisplayMemberBinding="{Binding Number}" Width="110"/>
                                 <GridViewColumn Header="Sheet Name" DisplayMemberBinding="{Binding Name}" Width="280"/>
                                 <GridViewColumn Header="Title Block Type" DisplayMemberBinding="{Binding TitleBlock}" Width="220"/>
-                                <GridViewColumn Header="Target Sheet Set" DisplayMemberBinding="{Binding SheetSet}" Width="150"/>
+                                <GridViewColumn Header="Target Sheet Collection" DisplayMemberBinding="{Binding SheetCollection}" Width="150"/>
                             </GridView>
                         </ListView.View>
                     </ListView>
@@ -111,7 +111,7 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     
-                    <TextBlock Grid.Row="0" Text="Sheets currently in Revit that are NOT in the schema AND are NOT assigned to any Revit Sheet Set. Check to delete:" FontSize="13" FontWeight="SemiBold" Foreground="#f8fafc" Margin="0,0,0,10"/>
+                    <TextBlock Grid.Row="0" Text="Sheets currently in Revit that are NOT in the schema AND are NOT assigned to any Revit Sheet Collection. Check to delete:" FontSize="13" FontWeight="SemiBold" Foreground="#f8fafc" Margin="0,0,0,10"/>
                     
                     <ListView Name="PurgeListView" Grid.Row="1" Background="#0f172a" Foreground="#f8fafc" BorderBrush="#334155">
                         <ListView.View>
