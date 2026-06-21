@@ -1,0 +1,164 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Manage Sheets - Schema Reviewer" Height="600" Width="850"
+        WindowStartupLocation="CenterScreen" Background="#0f172a" Foreground="#f8fafc"
+        FontFamily="Segoe UI, Tahoma">
+    <Window.Resources>
+        <!-- TabItem Style -->
+        <Style TargetType="TabItem">
+            <Setter Property="Background" Value="#1e293b"/>
+            <Setter Property="Foreground" Value="#94a3b8"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="15,8"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#06b6d4"/>
+                    <Setter Property="Foreground" Value="#0f172a"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
+
+        <!-- Column Header Style -->
+        <Style TargetType="GridViewColumnHeader">
+            <Setter Property="Background" Value="#1e293b"/>
+            <Setter Property="Foreground" Value="#94a3b8"/>
+            <Setter Property="BorderBrush" Value="#334155"/>
+            <Setter Property="Padding" Value="6,4"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+    </Window.Resources>
+    
+    <Grid Margin="20">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <!-- Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,20">
+            <TextBlock Text="Manage Sheets - Schema Reviewer" FontSize="22" FontWeight="Bold" Foreground="#06b6d4"/>
+            <TextBlock Text="Compare proposed schema intent against live Revit database. Validate conflicts and deletions." FontSize="13" Foreground="#94a3b8" Margin="0,5,0,0"/>
+        </StackPanel>
+        
+        <!-- Tabs -->
+        <TabControl Grid.Row="1" Background="#1e293b" BorderBrush="#334155" BorderThickness="1">
+            
+            <!-- Tab 1: Clear to Create -->
+            <TabItem Header="✅ Clear to Create">
+                <Grid Margin="15">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    
+                    <TextBlock Grid.Row="0" Text="These new sheets will be created in the active Revit model:" FontSize="13" FontWeight="SemiBold" Foreground="#f8fafc" Margin="0,0,0,10"/>
+                    
+                    <ListView Name="CreateListView" Grid.Row="1" Background="#0f172a" Foreground="#f8fafc" BorderBrush="#334155">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Sheet Number" DisplayMemberBinding="{Binding Number}" Width="110"/>
+                                <GridViewColumn Header="Sheet Name" DisplayMemberBinding="{Binding Name}" Width="280"/>
+                                <GridViewColumn Header="Title Block Type" DisplayMemberBinding="{Binding TitleBlock}" Width="220"/>
+                                <GridViewColumn Header="Target Sheet Set" DisplayMemberBinding="{Binding SheetSet}" Width="150"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </Grid>
+            </TabItem>
+            
+            <!-- Tab 2: Conflict Detected -->
+            <TabItem Header="⚠️ Conflict Detected">
+                <Grid Margin="15">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    
+                    <TextBlock Grid.Row="0" Text="Sheets already existing in the model but with parameter differences or missing metadata. Select action:" FontSize="13" FontWeight="SemiBold" Foreground="#f8fafc" Margin="0,0,0,10"/>
+                    
+                    <ListView Name="ConflictListView" Grid.Row="1" Background="#0f172a" Foreground="#f8fafc" BorderBrush="#334155">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Sheet Num" DisplayMemberBinding="{Binding Number}" Width="90"/>
+                                <GridViewColumn Header="Model Name" DisplayMemberBinding="{Binding ModelName}" Width="160"/>
+                                <GridViewColumn Header="Proposed Name" DisplayMemberBinding="{Binding ProposedName}" Width="160"/>
+                                <GridViewColumn Header="Conflict Reason" DisplayMemberBinding="{Binding Reason}" Width="200"/>
+                                <GridViewColumn Header="Action Override" Width="140">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <ComboBox SelectedValuePath="Content" SelectedValue="{Binding SelectedAction, Mode=TwoWay}" Width="120" Background="#334155" Foreground="#f8fafc" BorderBrush="#475569" Height="24" VerticalContentAlignment="Center">
+                                                <ComboBoxItem Content="Overwrite"/>
+                                                <ComboBoxItem Content="Skip"/>
+                                            </ComboBox>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </Grid>
+            </TabItem>
+            
+            <!-- Tab 3: Purge Warning -->
+            <TabItem Header="🚨 Purge Warning">
+                <Grid Margin="15">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    
+                    <TextBlock Grid.Row="0" Text="Sheets currently in Revit that are NOT in the schema AND are NOT assigned to any Revit Sheet Set. Check to delete:" FontSize="13" FontWeight="SemiBold" Foreground="#f8fafc" Margin="0,0,0,10"/>
+                    
+                    <ListView Name="PurgeListView" Grid.Row="1" Background="#0f172a" Foreground="#f8fafc" BorderBrush="#334155">
+                        <ListView.View>
+                            <GridView>
+                                <GridViewColumn Header="Purge?" Width="60">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <CheckBox IsChecked="{Binding ShouldPurge, Mode=TwoWay}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
+                                <GridViewColumn Header="Sheet Number" DisplayMemberBinding="{Binding Number}" Width="150"/>
+                                <GridViewColumn Header="Sheet Name" DisplayMemberBinding="{Binding Name}" Width="450"/>
+                            </GridView>
+                        </ListView.View>
+                    </ListView>
+                </Grid>
+            </TabItem>
+            
+        </TabControl>
+        
+        <!-- Action Buttons -->
+        <Grid Grid.Row="2" Margin="0,15,0,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            
+            <!-- Safe indicator -->
+            <TextBlock Grid.Column="0" Text="⚠️ Note: Executing changes will open a single Revit API Transaction." VerticalAlignment="Center" Foreground="#94a3b8" FontSize="11" FontStyle="Italic"/>
+            
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Name="CancelBtn" Content="Cancel" Width="100" Height="30" Margin="0,0,10,0" Background="#334155" Foreground="#f8fafc" BorderThickness="1" BorderBrush="#475569" FontWeight="SemiBold">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="4"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+                <Button Name="ExecuteBtn" Content="Execute Sync" Width="140" Height="30" Background="#06b6d4" Foreground="#0f172a" BorderThickness="0" FontWeight="SemiBold">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="4"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+            </StackPanel>
+        </Grid>
+    </Grid>
+</Window>

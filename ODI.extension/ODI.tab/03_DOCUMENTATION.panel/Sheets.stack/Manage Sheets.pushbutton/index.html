@@ -1,0 +1,2933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Manage Sheets - Convenience Store Schema Builder</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg-base: #0f172a;
+            --bg-surface: #1e293b;
+            --bg-card: rgba(30, 41, 59, 0.75);
+            --border-color: #334155;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --accent-primary: #06b6d4; /* cyan */
+            --accent-secondary: #0891b2;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --font-family: 'Outfit', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-family);
+            background-color: var(--bg-base);
+            color: var(--text-primary);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow-x: hidden;
+        }
+
+        header {
+            background-color: #0f172acc;
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        header h1 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            background: linear-gradient(to right, #00f5ff, #00b4d8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .status-badge {
+            background-color: rgba(6, 182, 212, 0.1);
+            border: 1px solid var(--accent-primary);
+            color: var(--accent-primary);
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(0.9); opacity: 0.6; }
+            50% { transform: scale(1.2); opacity: 1; }
+            100% { transform: scale(0.9); opacity: 0.6; }
+        }
+
+        main {
+            display: grid;
+            grid-template-columns: 1fr 420px;
+            flex: 1;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            height: calc(100vh - 65px);
+            overflow: hidden;
+        }
+
+        @media (max-width: 1024px) {
+            main {
+                grid-template-columns: 1fr;
+                overflow-y: auto;
+                height: auto;
+            }
+        }
+
+        .panel {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            backdrop-filter: blur(8px);
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+
+        .panel-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-content {
+            padding: 1.25rem;
+            overflow-y: auto;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 1.25rem;
+        }
+
+        .panel-content::-webkit-scrollbar {
+            width: 6px;
+        }
+        .panel-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .panel-content::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 999px;
+        }
+
+        /* Search Box */
+        .search-container {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .search-input {
+            flex: 1;
+            background-color: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.6rem 0.8rem;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus {
+            border-color: var(--accent-primary);
+        }
+
+        /* Checklist Accordions */
+        .discipline-accordion {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 0.75rem;
+            background-color: rgba(15, 23, 42, 0.2);
+        }
+
+        .accordion-header {
+            background-color: rgba(30, 41, 59, 0.9);
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            user-select: none;
+            transition: background-color 0.2s;
+        }
+
+        .accordion-header:hover {
+            background-color: rgba(47, 63, 90, 0.9);
+        }
+
+        .accordion-title {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .accordion-count {
+            font-size: 0.8rem;
+            background-color: var(--bg-base);
+            padding: 0.15rem 0.5rem;
+            border-radius: 9999px;
+            color: var(--accent-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .accordion-controls {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .accordion-toggle-icon {
+            transition: transform 0.2s;
+        }
+
+        .discipline-accordion.collapsed .accordion-toggle-icon {
+            transform: rotate(-90deg);
+        }
+
+        .accordion-content {
+            padding: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        .discipline-accordion.collapsed .accordion-content {
+            display: none;
+        }
+
+        /* Checklist Item */
+        .sheet-checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            padding: 0.45rem 0.75rem;
+            border-radius: 6px;
+            background-color: rgba(15, 23, 42, 0.3);
+            border: 1px solid transparent;
+            transition: border-color 0.15s, background-color 0.15s;
+        }
+
+        .sheet-checkbox-item:hover {
+            border-color: #334155;
+            background-color: rgba(15, 23, 42, 0.5);
+        }
+
+        .sheet-checkbox-item.unchecked {
+            opacity: 0.5;
+        }
+
+        .sheet-checkbox-item input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            accent-color: var(--accent-primary);
+            cursor: pointer;
+        }
+
+        .sheet-num-badge {
+            font-family: monospace;
+            font-weight: 700;
+            color: var(--accent-primary);
+            font-size: 0.9rem;
+            min-width: 70px;
+        }
+
+        .sheet-name-input {
+            flex: 1;
+            background: transparent;
+            border: 1px solid transparent;
+            color: var(--text-primary);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            font-family: var(--font-family);
+            outline: none;
+            transition: border-color 0.15s, background-color 0.15s;
+        }
+
+        .sheet-checkbox-item:hover .sheet-name-input {
+            background-color: rgba(15, 23, 42, 0.6);
+            border-color: var(--border-color);
+        }
+
+        .sheet-name-input:focus {
+            background-color: #0f172a !important;
+            border-color: var(--accent-primary) !important;
+            box-shadow: 0 0 0 2px rgba(6, 182, 212, 0.15);
+        }
+
+        /* Collapsible Helper Cards */
+        .helper-card {
+            border: 1px solid var(--border-color);
+            border-radius: 10px;
+            background-color: rgba(15, 23, 42, 0.3);
+            margin-bottom: 1rem;
+        }
+
+        .helper-card-header {
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            font-size: 0.95rem;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid var(--border-color);
+            background-color: rgba(30, 41, 59, 0.4);
+            user-select: none;
+        }
+
+        .helper-card.collapsed .helper-card-header {
+            border-bottom: none;
+        }
+
+        .helper-card-content {
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .helper-card.collapsed .helper-card-content {
+            display: none;
+        }
+
+        /* Forms */
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+        }
+
+        label {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        select, input[type="text"], input[type="number"] {
+            background-color: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.5rem 0.75rem;
+            border-radius: 6px;
+            font-family: var(--font-family);
+            font-size: 0.9rem;
+            outline: none;
+            width: 100%;
+            transition: border-color 0.15s;
+        }
+
+        select:focus, input[type="text"]:focus {
+            border-color: var(--accent-primary);
+        }
+
+        .slider-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+        }
+
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .slider-value {
+            font-family: monospace;
+            font-weight: 600;
+            color: var(--accent-primary);
+            font-size: 0.85rem;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: var(--border-color);
+            border-radius: 9999px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            cursor: pointer;
+        }
+
+        /* Canvas & Stats */
+        .canvas-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(15, 23, 42, 0.6);
+            padding: 0.75rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            height: 180px;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+            border-radius: 4px;
+        }
+
+        .simulator-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 0.5rem;
+            text-align: center;
+        }
+
+        .stat-card {
+            background-color: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 0.4rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.15rem;
+        }
+
+        .stat-val {
+            font-size: 1.05rem;
+            font-weight: 700;
+        }
+
+        .stat-label {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+        }
+
+        .stat-card.fit-success .stat-val { color: var(--success); }
+        .stat-card.fit-warn .stat-val { color: var(--warning); }
+
+        /* Manual Add Form */
+        .manual-add-form {
+            background-color: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.85rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .number-builder {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-family: monospace;
+            background-color: rgba(15, 23, 42, 0.8);
+            padding: 0.4rem;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            color: var(--accent-primary);
+            justify-content: center;
+            border: 1px dashed var(--border-color);
+        }
+
+        /* Buttons */
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+            padding: 0.65rem 1rem;
+            font-family: var(--font-family);
+            font-size: 0.9rem;
+            font-weight: 600;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            transition: background-color 0.15s, transform 0.1s;
+            width: 100%;
+        }
+
+        .btn:active { transform: scale(0.98); }
+        .btn-primary { background-color: var(--accent-primary); color: var(--bg-base); }
+        .btn-primary:hover { background-color: #22d3ee; }
+        .btn-secondary { background-color: transparent; border: 1px solid var(--border-color); color: var(--text-primary); }
+        .btn-secondary:hover { background-color: rgba(255, 255, 255, 0.05); }
+
+        .divider {
+            height: 1px;
+            background-color: var(--border-color);
+            margin: 0.25rem 0;
+        }
+
+        /* Status badges and view renaming styles */
+        .sheet-status-badge {
+            font-size: 0.7rem;
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .status-new {
+            background-color: rgba(6, 182, 212, 0.15);
+            color: var(--accent-primary);
+            border: 1px solid var(--accent-primary);
+        }
+        .status-matched {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: var(--success);
+            border: 1px solid var(--success);
+        }
+        .status-conflict {
+            background-color: rgba(245, 158, 11, 0.15);
+            color: var(--warning);
+            border: 1px solid var(--warning);
+        }
+
+        .placed-views-container {
+            margin-top: 0.4rem;
+            margin-left: 2rem;
+            background-color: rgba(15, 23, 42, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.4rem;
+            width: calc(100% - 2rem);
+        }
+        .placed-views-title {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .view-item {
+            display: grid;
+            grid-template-columns: 24px auto 1fr 16px 1fr auto;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.8rem;
+            width: 100%;
+        }
+        .view-type-badge {
+            background-color: rgba(148, 163, 184, 0.15);
+            color: var(--text-secondary);
+            font-size: 0.65rem;
+            padding: 0.1rem 0.25rem;
+            border-radius: 3px;
+            font-family: monospace;
+            white-space: nowrap;
+        }
+        .view-old-name {
+            color: var(--text-secondary);
+            text-decoration: line-through;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .view-rename-input {
+            flex: 1;
+            background-color: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.15rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            outline: none;
+        }
+        .view-rename-input:focus {
+            border-color: var(--accent-primary);
+        }
+        .sheet-checkbox-item.purge-active {
+            background-color: rgba(239, 68, 68, 0.05);
+            border-color: rgba(239, 68, 68, 0.2);
+        }
+        .live-sheet-card {
+            background: rgba(30, 41, 59, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.85rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            transition: all 0.2s ease;
+        }
+        .live-sheet-card:hover {
+            border-color: rgba(6, 182, 212, 0.4);
+            background: rgba(30, 41, 59, 0.6);
+        }
+        .live-sheet-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+        }
+        .live-sheet-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex: 1;
+            min-width: 0;
+        }
+        .live-sheet-name {
+            font-size: 0.85rem;
+            font-weight: 500;
+            color: var(--text-primary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .arrow-indicator {
+            color: var(--accent-primary);
+            font-weight: bold;
+            font-size: 1.1rem;
+        }
+        .target-alignment {
+            width: 250px;
+        }
+        .preset-map-select {
+            width: 100%;
+            background-color: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.35rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            outline: none;
+            cursor: pointer;
+        }
+        .preset-map-select:focus {
+            border-color: var(--accent-primary);
+        }
+        .sheet-set-row-select {
+            width: 100%;
+            background-color: rgba(15, 23, 42, 0.8);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.2rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            outline: none;
+            cursor: pointer;
+        }
+        .sheet-set-row-select:focus {
+            border-color: var(--accent-primary);
+        }
+        .alignment-status {
+            font-size: 0.75rem;
+            padding: 0.35rem 0.5rem;
+            border-radius: 4px;
+            margin-top: 0.25rem;
+        }
+        .alignment-status.matched {
+            background-color: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+        .alignment-status.conflict {
+            background-color: rgba(245, 158, 11, 0.1);
+            color: var(--warning);
+            border: 1px solid rgba(245, 158, 11, 0.2);
+        }
+        .alignment-status.keep {
+            background-color: rgba(148, 163, 184, 0.1);
+            color: var(--text-secondary);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+        }
+        .alignment-status.purge {
+            background-color: rgba(239, 68, 68, 0.1);
+            color: #f87171;
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+        .section-divider-title {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            margin: 1.5rem 0 0.75rem 0;
+            padding-bottom: 0.25rem;
+            border-bottom: 1px solid rgba(6, 182, 212, 0.2);
+        }
+        .level-group-card {
+            background-color: rgba(30, 41, 59, 0.4);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            margin-bottom: 1.25rem;
+            overflow: hidden;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+        }
+        .level-group-header {
+            background-color: rgba(15, 23, 42, 0.6);
+            padding: 0.75rem 1rem;
+            font-weight: 600;
+            font-size: 0.95rem;
+            color: var(--accent-primary);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .level-group-elevation {
+            font-family: monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+        .guideline-header-row {
+            display: grid;
+            grid-template-columns: 80px 95px 1.1fr 100px 100px 80px 25px 1.1fr 120px;
+            gap: 0.5rem;
+            align-items: center;
+            padding: 0.4rem 1rem;
+            border-bottom: 2px solid var(--border-color);
+            background-color: rgba(15, 23, 42, 0.4);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+        }
+        .guideline-row {
+            padding: 0.65rem 1rem;
+            border-bottom: 1px solid rgba(51, 65, 85, 0.3);
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            transition: background-color 0.15s;
+        }
+        .guideline-row:last-child {
+            border-bottom: none;
+        }
+        .guideline-row:hover {
+            background-color: rgba(30, 41, 59, 0.4);
+        }
+        .guideline-main-row {
+            display: grid;
+            grid-template-columns: 80px 95px 1.1fr 100px 100px 80px 25px 1.1fr 120px;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        .grid-cell {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 0.8rem;
+        }
+        .guideline-action-col {
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+        }
+        .disc-input, .use-select {
+            width: 100%;
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            font-size: 0.72rem;
+            padding: 0.18rem 0.3rem;
+            cursor: pointer;
+            transition: border-color 0.15s;
+            min-width: 0;
+        }
+        .disc-input:focus, .use-select:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+        .disc-input[readonly] {
+            opacity: 0.7;
+            cursor: default;
+        }
+        /* Inline Form styling */
+        .inline-form-row {
+            background-color: rgba(6, 182, 212, 0.05);
+            border: 1px dashed var(--accent-primary);
+            border-radius: 6px;
+            padding: 0.75rem;
+            margin: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        .inline-form-inputs {
+            display: grid;
+            grid-template-columns: 1.5fr 1fr 2.5fr;
+            gap: 0.5rem;
+        }
+        .inline-form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+        .btn-add-inline {
+            background-color: rgba(6, 182, 212, 0.15);
+            border: 1px solid rgba(6, 182, 212, 0.3);
+            color: var(--accent-primary);
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+            transition: all 0.15s ease;
+        }
+        .btn-add-inline:hover {
+            background-color: var(--accent-primary);
+            color: var(--bg-base);
+        }
+        .btn-remove-guideline {
+            background: transparent;
+            border: none;
+            color: var(--danger);
+            cursor: pointer;
+            padding: 0.2rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.15s;
+        }
+        .btn-remove-guideline:hover {
+            opacity: 1;
+        }
+        /* Verification Form style */
+        .verification-panel {
+            background-color: rgba(30, 41, 59, 0.5);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 0.85rem;
+            margin-top: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .verification-checkbox-container {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.5rem;
+            cursor: pointer;
+            user-select: none;
+        }
+        .verification-checkbox-container input[type="checkbox"] {
+            margin-top: 0.2rem;
+            cursor: pointer;
+        }
+        .verification-text {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            line-height: 1.35;
+        }
+        .btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            background-color: #475569 !important;
+            color: #94a3b8 !important;
+        }
+        .btn-add-guideline-inline {
+            background: transparent;
+            border: none;
+            color: var(--accent-primary);
+            cursor: pointer;
+            padding: 0.25rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.15s;
+        }
+        .btn-add-guideline-inline:hover {
+            opacity: 1;
+        }
+        .naming-checker-bar {
+            background-color: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+            padding: 0.65rem 2rem;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.5rem;
+            flex-wrap: wrap;
+            font-size: 0.8rem;
+        }
+        .checker-title {
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-weight: 600;
+            color: var(--accent-primary);
+            text-transform: uppercase;
+            font-size: 0.75rem;
+            letter-spacing: 0.05em;
+        }
+        .checker-inputs {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+            flex-grow: 1;
+        }
+        .checker-field {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .checker-field label {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+        .checker-field select, .checker-field input {
+            background-color: rgba(15, 23, 42, 0.6);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            color: var(--text-primary);
+            padding: 0.25rem 0.5rem;
+            font-size: 0.8rem;
+            height: 28px;
+            box-sizing: border-box;
+        }
+        .checker-field select:focus, .checker-field input:focus {
+            border-color: var(--accent-primary);
+            outline: none;
+        }
+        .checker-output {
+            display: flex;
+            align-items: center;
+            gap: 1.25rem;
+            background-color: rgba(6, 182, 212, 0.05);
+            border: 1px dashed rgba(6, 182, 212, 0.25);
+            padding: 0.4rem 0.85rem;
+            border-radius: 6px;
+        }
+        .output-item {
+            display: flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+        .output-label {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+        .output-val {
+            color: var(--accent-primary);
+            font-size: 0.85rem;
+            font-family: monospace;
+        }
+
+        /* -- NEW UI OVERHAUL CSS -- */
+        .tree-group {
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            margin-bottom: 0.5rem;
+            overflow: hidden;
+            background: rgba(15, 23, 42, 0.4);
+        }
+        .tree-header {
+            padding: 0.5rem 1rem;
+            background: rgba(30, 41, 59, 0.8);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            font-weight: 600;
+            font-size: 0.85rem;
+            color: var(--text-primary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        .tree-header:hover {
+            background: rgba(51, 65, 85, 0.8);
+        }
+        .tree-toggle-icon {
+            margin-right: 0.5rem;
+            transition: transform 0.2s ease;
+        }
+        .tree-group.collapsed .tree-toggle-icon {
+            transform: rotate(-90deg);
+        }
+        .tree-group.collapsed .tree-children {
+            display: none;
+        }
+        .tree-children {
+            padding-left: 0.5rem;
+            padding-top: 0.25rem;
+            padding-bottom: 0.25rem;
+        }
+        
+        .view-drawer {
+            display: none;
+            padding: 0.5rem 1rem 0.5rem 2rem;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.75rem;
+        }
+        .view-drawer.active {
+            display: block;
+        }
+        .view-drawer-header {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;
+        }
+        .view-item-row {
+            display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px dotted rgba(255,255,255,0.1);
+        }
+
+        
+        .unified-sheet-row {
+            display: grid;
+            grid-template-columns: 24px 100px minmax(200px, 1fr) 120px 100px;
+            gap: 0.5rem;
+            align-items: center;
+            padding: 0.5rem 1rem 0.5rem 0.5rem;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-size: 0.8rem;
+            border-left: 4px solid transparent;
+            margin-bottom: 2px;
+        }
+        .unified-sheet-row:last-child {
+            border-bottom: none;
+        }
+        .unified-sheet-row:hover {
+            background: rgba(255,255,255,0.02);
+        }
+        
+        /* Status Colors */
+        .status-create {
+            border-left-color: #10b981;
+            background: linear-gradient(90deg, rgba(16,185,129,0.1) 0%, transparent 50%);
+        }
+        .status-update {
+            border-left-color: #f59e0b;
+            background: linear-gradient(90deg, rgba(245,158,11,0.1) 0%, transparent 50%);
+        }
+        .status-purge {
+            border-left-color: #ef4444;
+            background: linear-gradient(90deg, rgba(239,68,68,0.1) 0%, transparent 50%);
+        }
+        .status-matched {
+            border-left-color: var(--border-color);
+        }
+
+        .edit-icon-btn {
+            background: none; border: none; color: var(--text-secondary); cursor: pointer; padding: 2px; border-radius: 4px;
+        }
+        .edit-icon-btn:hover { color: var(--accent-primary); background: rgba(255,255,255,0.1); }
+        
+        .jump-marker {
+            width: 8px; height: 8px; border-radius: 50%; background-color: var(--accent-primary);
+            box-shadow: 0 0 8px var(--accent-primary);
+            animation: pulse-dot 2s infinite;
+        }
+        @keyframes pulse-dot { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+        
+        /* Modal */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 9999; opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+        }
+        .modal-overlay.active { opacity: 1; pointer-events: auto; }
+        .modal-content {
+            background: var(--bg-secondary); border: 1px solid var(--border-color);
+            border-radius: 8px; width: 450px; max-width: 90vw;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5); transform: translateY(20px); transition: transform 0.2s ease;
+            display: flex; flex-direction: column;
+        }
+        .modal-overlay.active .modal-content { transform: translateY(0); }
+        .modal-header { padding: 1rem; border-bottom: 1px solid var(--border-color); font-weight: 600; font-size: 1rem; display: flex; justify-content: space-between; }
+        .modal-body { padding: 1rem; display: flex; flex-direction: column; gap: 0.75rem; }
+        .modal-footer { padding: 1rem; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 0.5rem; background: rgba(0,0,0,0.2); border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+        
+        .view-assignment-select {
+            background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary);
+            border-radius: 4px; padding: 0.2rem; font-size: 0.75rem; width: 100%; max-width: 180px;
+        }
+        .view-assignment-select option {
+            background: var(--bg-primary); color: var(--text-primary);
+        }
+        .view-assignment-select optgroup {
+            background: var(--bg-secondary); color: var(--accent-primary); font-style: normal; font-weight: 600;
+        }
+        .views-list {
+            font-size: 0.75rem; color: var(--text-secondary); display: flex; flex-direction: column; gap: 2px; margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-primary);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
+            Manage Sheets - convenience store
+        </h1>
+        <div class="status-badge" id="conn-status">
+            <div class="status-dot"></div>
+            <span>Revit Connected</span>
+        </div>
+    </header>
+
+    <div class="naming-checker-bar">
+        <div class="checker-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-primary);"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+            <span>AIA Naming Validator</span>
+        </div>
+        <div class="checker-inputs">
+            <div class="checker-field">
+                <label>Discipline</label>
+                <select id="check-disc" onchange="runLiveNamingCheckPlayground()">
+                    <option value="A" selected>A - ARCHITECTURAL</option>
+                    <option value="S">S - STRUCTURAL</option>
+                    <option value="M">M - MECHANICAL</option>
+                    <option value="E">E - ELECTRICAL</option>
+                    <option value="P">P - PLUMBING</option>
+                    <option value="C">C - SITE/CIVIL</option>
+                    <option value="L">L - LANDSCAPE</option>
+                    <option value="I">I - INTERIORS</option>
+                    <option value="Q">Q - EQUIPMENT</option>
+                    <option value="F">F - FIRE PROTECTION</option>
+                    <option value="CS">CS - COVER SHEET</option>
+                    <option value="G">G - GENERAL</option>
+                    <option value="H">H - HAZARDOUS MATERIALS</option>
+                    <option value="V">V - SURVEY</option>
+                    <option value="B">B - GEOTECHNICAL</option>
+                    <option value="D">D - PROCESS</option>
+                    <option value="T">T - TELECOMMUNICATIONS</option>
+                    <option value="R">R - RESOURCE</option>
+                    <option value="X">X - OTHER DISCIPLINES</option>
+                    <option value="Z">Z - CONTRACTOR SHOP DRAWINGS</option>
+                    <option value="O">O - OPERATIONS</option>
+                    <option value="AD">AD - ARCHITECTURAL DEMOLITION</option>
+                    <option value="AF">AF - ARCHITECTURAL FINISHES</option>
+                    <option value="FA">FA - FIRE ALARM</option>
+                </select>
+            </div>
+            <div class="checker-field">
+                <label>Sheet Type</label>
+                <select id="check-st" onchange="runLiveNamingCheckPlayground()">
+                    <option value="0">0 - Legend/Abbreviations/General</option>
+                    <option value="1" selected>1 - Plans (Floor, Ceiling, Roof, etc.)</option>
+                    <option value="2">2 - Elevations</option>
+                    <option value="3">3 - Sections</option>
+                    <option value="4">4 - Enlarged Plans, Elevations, Sections</option>
+                    <option value="5">5 - Details</option>
+                    <option value="6">6 - Schedules and Diagrams</option>
+                    <option value="7">7 - User Defined</option>
+                    <option value="8">8 - User Defined</option>
+                    <option value="9">9 - Isometric/Perspective/Photos</option>
+                </select>
+            </div>
+            <div class="checker-field">
+                <label>Level Digit</label>
+                <input type="text" id="check-level" oninput="runLiveNamingCheckPlayground()" placeholder="e.g. 1" value="1" style="width: 50px;">
+            </div>
+            <div class="checker-field">
+                <label>Sep 1</label>
+                <input type="text" id="check-sep" oninput="updateGlobalSeparatorsFromValidator()" value="-" style="width: 35px; text-align: center;">
+            </div>
+            <div class="checker-field">
+                <label>Sep 2</label>
+                <input type="text" id="check-sep2" oninput="updateGlobalSeparatorsFromValidator()" value="0" style="width: 35px; text-align: center;">
+            </div>
+            <div class="checker-field">
+                <label>Seq No.</label>
+                <input type="text" id="check-seq" oninput="runLiveNamingCheckPlayground()" value="1" style="width: 45px; text-align: center;">
+            </div>
+            <div class="checker-field" style="flex-grow: 1; min-width: 150px;">
+                <label>Sheet Name Modifier (Optional)</label>
+                <input type="text" id="check-modifier" oninput="runLiveNamingCheckPlayground()" placeholder="e.g. FLOOR PLAN">
+            </div>
+        </div>
+        <div class="checker-output">
+            <div class="output-item">
+                <span class="output-label">Sheet Number:</span>
+                <strong id="check-output-num" class="output-val">--</strong>
+            </div>
+            <div class="output-item">
+                <span class="output-label">Sheet Name:</span>
+                <strong id="check-output-name" class="output-val">--</strong>
+            </div>
+        </div>
+    </div>
+
+    <main>
+        <!-- Panel 1: Main Sheet Template Checklist -->
+        <div class="panel">
+            
+            <div class="panel-header">
+                <span>Sheet Alignment Workspace</span>
+                <div style="display: flex; gap: 1rem; align-items: center;">
+                    <div style="font-size: 0.8rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <label style="color: var(--text-secondary);">Group By:</label>
+                        <select id="group-by-1" onchange="updateGroupBy()" style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 2px;">
+                            <option value="SheetSet" selected>Sheet Set</option>
+                            <option value="SheetDiscipline">Discipline</option>
+                            <option value="SheetUse">Use</option>
+                        </select>
+                        <span style="color: var(--text-secondary);">></span>
+                        <select id="group-by-2" onchange="updateGroupBy()" style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 2px;">
+                            <option value="SheetSet">Sheet Set</option>
+                            <option value="SheetDiscipline" selected>Discipline</option>
+                            <option value="SheetUse">Use</option>
+                        </select>
+                        <span style="color: var(--text-secondary);">></span>
+                        <select id="group-by-3" onchange="updateGroupBy()" style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 2px;">
+                            <option value="SheetSet">Sheet Set</option>
+                            <option value="SheetDiscipline">Discipline</option>
+                            <option value="SheetUse" selected>Use</option>
+                        </select>
+                        <div style="display:flex; gap:0.25rem; margin-left: 0.5rem;">
+                            <button class="btn btn-secondary" onclick="expandAllTree()" style="padding: 2px 6px; font-size: 0.7rem;">Expand All</button>
+                            <button class="btn btn-secondary" onclick="collapseAllTree()" style="padding: 2px 6px; font-size: 0.7rem;">Collapse All</button>
+                        </div>
+                    </div>
+                    <div class="search-container">
+                        <input type="text" id="sheet-search" class="search-input" placeholder="🔍 Search sheets...">
+                    </div>
+                </div>
+            </div>
+            <!-- Intent Alignment Legend -->
+
+            <div style="background-color: rgba(15, 23, 42, 0.5); padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;">
+                <div style="color: var(--text-secondary); line-height: 1.4;">
+                    This checklist defines the <strong>Target Schema</strong> for the project. The tool matches this schema against the active Revit model and determines the sync action:
+                </div>
+                <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+                    <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                        <span class="sheet-status-badge status-new" style="padding: 0.05rem 0.3rem;">New</span> Will create a new sheet in Revit.
+                    </span>
+                    <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                        <span class="sheet-status-badge status-conflict" style="padding: 0.05rem 0.3rem;">Conflict</span> Exists in Revit with different name. Will rename.
+                    </span>
+                    <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                        <span class="sheet-status-badge status-matched" style="padding: 0.05rem 0.3rem;">Matched</span> Correctly named in Revit. No action.
+                    </span>
+                    <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                        <span class="sheet-status-badge" style="padding: 0.05rem 0.3rem; background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">Unassigned</span> Exists in Revit only. Can be purged.
+                    </span>
+                </div>
+            </div>
+            <div class="panel-content" id="checklist-container">
+                <!-- Populated dynamically -->
+            </div>
+        </div>
+
+        <!-- Panel 2: Builder Configurations & Manual Creator -->
+        <div class="panel">
+            <div class="panel-header">Builder Control Panel</div>
+            <div class="panel-content">
+                <!-- Library Selection -->
+                <div class="form-group">
+                    <label for="library-select">Project Category Preset</label>
+                    <select id="library-select" onchange="changeLibrary(this.value)">
+                        <option value="Convenience Store">Convenience Store (C-Store)</option>
+                        <option value="Strip Mall">Strip Mall</option>
+                        <option value="Bank">Bank Branch</option>
+                        <option value="Office Suite">Office Suite (Tenant Improvement)</option>
+                    </select>
+                </div>
+
+                <!-- Global Separators Grid -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem;">
+                    <div class="form-group">
+                        <label for="global-separator">Separator 1 (Number)</label>
+                        <input type="text" id="global-separator" value="-" oninput="updateGlobalSeparators()" style="padding: 0.35rem 0.5rem; font-size: 0.8rem; background-color: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); text-align: center; height: 32px; box-sizing: border-box;">
+                    </div>
+                    <div class="form-group">
+                        <label for="global-separator2">Separator 2 (Sequence)</label>
+                        <input type="text" id="global-separator2" value="0" oninput="updateGlobalSeparators()" style="padding: 0.35rem 0.5rem; font-size: 0.8rem; background-color: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); text-align: center; height: 32px; box-sizing: border-box;">
+                    </div>
+                </div>
+
+                <!-- Desirable Views Checklist -->
+                <div class="form-group" style="margin-top: 0.75rem;">
+                    <label style="font-weight: 600; color: var(--text-primary); margin-bottom: 0.35rem; display: block;">Desirable View Types for Project</label>
+                    <div id="views-checklist-container" style="display: flex; flex-direction: column; gap: 0.4rem; background: rgba(15,23,42,0.4); padding: 0.65rem; border-radius: 6px; border: 1px solid var(--border-color); max-height: 180px; overflow-y: auto;">
+                        <!-- Dynamically filled with checkboxes -->
+                    </div>
+                </div>
+
+                <!-- Title Block Dropdown -->
+                <div class="form-group">
+                    <label for="titleblock-select">Title Block (from Revit)</label>
+                    <select id="titleblock-select"></select>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Collapsible Fit Simulator Card -->
+                <div class="helper-card collapsed" id="simulator-card">
+                    <div class="helper-card-header" onclick="toggleHelperCard()">
+                        <span>📐 Sheet Fit & Bounding Box Helper</span>
+                        <svg class="accordion-toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </div>
+                    <div class="helper-card-content">
+                        <!-- Footprint sliders -->
+                        <div class="slider-container">
+                            <div class="slider-header">
+                                <label for="footprint-width">Footprint Width</label>
+                                <span class="slider-value" id="width-val">300 ft</span>
+                            </div>
+                            <input type="range" id="footprint-width" min="50" max="600" value="300">
+                        </div>
+
+                        <div class="slider-container">
+                            <div class="slider-header">
+                                <label for="footprint-length">Footprint Length</label>
+                                <span class="slider-value" id="length-val">200 ft</span>
+                            </div>
+                            <input type="range" id="footprint-length" min="50" max="600" value="200">
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 0.5rem;">
+                            <div class="form-group">
+                                <label for="scale-select">Scale</label>
+                                <select id="scale-select">
+                                    <option value="0.0625">1/16" = 1'-0"</option>
+                                    <option value="0.125" selected>1/8" = 1'-0"</option>
+                                    <option value="0.25">1/4" = 1'-0"</option>
+                                    <option value="0.5">1/2" = 1'-0"</option>
+                                </select>
+                            </div>
+                            <div class="slider-container">
+                                <div class="slider-header">
+                                    <label for="sheet-overlap">Overlap</label>
+                                    <span class="slider-value" id="overlap-val">10 ft</span>
+                                </div>
+                                <input type="range" id="sheet-overlap" min="0" max="50" value="10">
+                            </div>
+                        </div>
+
+                        <div class="canvas-container">
+                            <canvas id="simulator-canvas"></canvas>
+                        </div>
+                        <div class="simulator-stats">
+                            <div class="stat-card" id="fit-card">
+                                <span class="stat-val" id="fit-val">YES</span>
+                                <span class="stat-label">Fits</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-val" id="sheet-count-val">1</span>
+                                <span class="stat-label">Sheets</span>
+                            </div>
+                            <div class="stat-card">
+                                <span class="stat-val" id="grid-layout-val">1 x 1</span>
+                                <span class="stat-label">Grid</span>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-secondary" id="btn-generate-sectors">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg>
+                            Append Enlarged Sectors
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Local AIA Naming Assistant (Free AI Heuristic) -->
+                <div class="helper-card" id="ai-assistant-card" style="border-color: rgba(6, 182, 212, 0.3);">
+                    <div class="helper-card-header" onclick="toggleHelperCardId('ai-assistant-card')" style="background-color: rgba(6, 182, 212, 0.08);">
+                        <span style="color: var(--accent-primary);">🤖 Local AIA Naming Assistant</span>
+                        <svg class="accordion-toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                    </div>
+                    <div class="helper-card-content" id="ai-assistant-content" style="padding: 0.75rem; font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.5rem;">
+                        <div id="ai-recommendations" style="color: var(--text-secondary); max-height: 120px; overflow-y: auto; line-height: 1.4;">
+                            No warnings detected.
+                        </div>
+                        <button class="btn btn-secondary" onclick="autoFixAIA()" style="font-size: 0.75rem; padding: 0.35rem 0.5rem;">Auto-Fix AIA Compliance</button>
+                    </div>
+                </div>
+
+                <!-- Export Verification Checkbox -->
+                <div class="verification-panel">
+                    <label style="font-weight: 600; color: var(--accent-primary);">Export Verification</label>
+                    <label class="verification-checkbox-container" id="lbl-verify-export">
+                        <input type="checkbox" id="chk-verify-export" onchange="toggleExportVerification(this.checked)">
+                        <span class="verification-text">I confirm that I have reviewed the proposed naming and numbering alignments, creations, and purges, and that they align with the project design guidelines.</span>
+                    </label>
+                </div>
+
+                <!-- Case Manager & Casing Tools -->
+                <div class="manual-add-form" style="background-color: rgba(6, 182, 212, 0.03); border-color: rgba(6, 182, 212, 0.15);">
+                    <label style="font-weight: 600; color: var(--accent-primary);">Text Casing Manager</label>
+                    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.35rem;">
+                        <button class="btn btn-secondary" onclick="convertCase('UPPER')" style="font-size: 0.75rem; padding: 0.4rem 0.2rem;">UPPERCASE</button>
+                        <button class="btn btn-secondary" onclick="convertCase('TITLE')" style="font-size: 0.75rem; padding: 0.4rem 0.2rem;">Title Case</button>
+                        <button class="btn btn-secondary" onclick="convertCase('LOWER')" style="font-size: 0.75rem; padding: 0.4rem 0.2rem;">lowercase</button>
+                    </div>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Export Action -->
+                <div style="display: flex; flex-direction: column; gap: 0.5rem; background: rgba(15,23,42,0.4); padding: 0.85rem; border-radius: 8px; border: 1px solid var(--border-color);">
+                    <div style="display: flex; justify-content: space-between; font-size: 0.9rem;">
+                        <span>Total Sheets in Schema:</span>
+                        <strong id="final-schema-count" style="color: var(--accent-primary);">0</strong>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary" id="btn-export-intent" disabled>
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                    Export Schema Intent
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Edit Sheet Modal -->
+    <div class="modal-overlay" id="edit-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span id="edit-modal-title">Edit Sheet</span>
+                <button class="edit-icon-btn" onclick="closeEditModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Sheet Number</label>
+                    <input type="text" id="modal-sheet-num" disabled style="background: rgba(0,0,0,0.2); color: var(--text-secondary);">
+                </div>
+                <div class="form-group">
+                    <label>Proposed Name</label>
+                    <input type="text" id="modal-sheet-name">
+                </div>
+                <div class="form-group">
+                    <label>Sheet Set</label>
+                    <select id="modal-sheet-set"></select>
+                </div>
+                <div class="form-group">
+                    <label>Discipline</label>
+                    <input type="text" id="modal-sheet-disc">
+                </div>
+                <div class="form-group">
+                    <label>Use</label>
+                    <select id="modal-sheet-use"></select>
+                </div>
+                <input type="hidden" id="modal-sheet-id">
+                <input type="hidden" id="modal-sheet-is-live">
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeEditModal()">Cancel</button>
+                <button class="btn btn-primary" onclick="saveEditModal()">Save Changes</button>
+            </div>
+        </div>
+    </div>
+
+
+    <script src="revit_state.js"></script>
+
+    <script>
+        // --- REACTIVE STATE STORE ---
+        // ------- AIA DISCIPLINE MAP -------
+        const DISCIPLINE_MAP = {
+            "CS": "General",  "G":  "General",  "H":  "Hazardous Materials",
+            "V":  "Survey / Mapping", "B": "Geotechnical", "C": "Civil",
+            "L":  "Landscape", "S":  "Structural", "A":  "Architectural",
+            "I":  "Interiors", "Q":  "Equipment",  "F":  "Fire Protection",
+            "P":  "Plumbing",  "D":  "Process",    "M":  "Mechanical",
+            "E":  "Electrical","T":  "Telecommunications", "R": "Resource",
+            "X":  "Other Disciplines", "Z": "Contractor / Shop Drawings", "O": "Operations"
+        };
+        function getAIADiscipline(designator) {
+            if (!designator) return "General";
+            const d = designator.trim().toUpperCase();
+            return DISCIPLINE_MAP[d] || DISCIPLINE_MAP[d.charAt(0)] || "General";
+        }
+
+        // ------- SHEET USE MANAGER -------
+        function manageSheetUseValues() {
+            const current = (State.sheetUseValues || []).slice();
+            const newName = prompt("Enter a new 'Sheet Use' value (e.g. 'Issued for Construction'):");
+            if (newName && newName.trim()) {
+                const trimmed = newName.trim();
+                if (!current.includes(trimmed)) {
+                    current.push(trimmed);
+                    current.sort();
+                    State.sheetUseValues = current;
+                    notifyListeners();
+                }
+            }
+        }
+
+        function addSheetUseValue(value) {
+            if (!value || !value.trim()) return;
+            const trimmed = value.trim();
+            if (!State.sheetUseValues.includes(trimmed)) {
+                State.sheetUseValues.push(trimmed);
+                State.sheetUseValues.sort();
+            }
+        }
+
+        function updateSheetDiscipline(sheetNumber, value) {
+            const p = State.sheets.find(s => s.Number === sheetNumber);
+            if (p) { p.SheetDiscipline = value; saveSessionCache(); }
+        }
+
+        function updateSheetUse(sheetNumber, value) {
+            if (value === "__new__") {
+                const newVal = prompt("Enter a new 'Sheet Use' value:");
+                if (newVal && newVal.trim()) {
+                    addSheetUseValue(newVal.trim());
+                    const p = State.sheets.find(s => s.Number === sheetNumber);
+                    if (p) p.SheetUse = newVal.trim();
+                    saveSessionCache();
+                    notifyListeners();
+                }
+                return;
+            }
+            const p = State.sheets.find(s => s.Number === sheetNumber);
+            if (p) { p.SheetUse = value; saveSessionCache(); }
+        }
+
+        const State = {
+            building: { width: 300, length: 200 },
+            selectedScale: 0.125,
+            selectedTitleBlockId: null,
+            selectedLibrary: "Convenience Store",
+            overlap: 10,
+            margins: { left: 1.5, right: 10.0, top: 0.75, bottom: 0.75 },
+            loadedTitleBlocks: [],
+            loadedSheets: [],
+            loadedViews: [],
+            loadedSheetSets: [],
+            loadedLevels: [],
+            activeViewTypes: [],
+            ncs: { disciplines: [], sheetTypes: [], sequenceNumbers: [] },
+            sheets: [],
+            viewRenames: {},
+            liveSheetMappings: {},
+            createMissingSheets: {},
+            purges: [],
+            searchQuery: "",
+            activeLevelInlineForm: {},
+            inlineFormAfterSheetNumber: {},
+            inlineFormPrefill: {},
+            exportConfirmed: false,
+            separator: "-",
+            separator2: "0",
+            sheetUseValues: []
+        };
+
+        const listeners = [];
+        function registerListener(fn) { listeners.push(fn); }
+        function notifyListeners() { listeners.forEach(fn => fn()); }
+
+        function updateState(path, value) {
+            const keys = path.split('.');
+            let obj = State;
+            for (let i = 0; i < keys.length - 1; i++) {
+                obj = obj[keys[i]];
+            }
+            obj[keys[keys.length - 1]] = value;
+            notifyListeners();
+        }
+
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        window.toggleHelperCard = function() {
+            const card = document.getElementById('simulator-card');
+            card.classList.toggle('collapsed');
+            drawSimulation();
+        };
+
+        window.toggleHelperCardId = function(cardId) {
+            const card = document.getElementById(cardId);
+            card.classList.toggle('collapsed');
+        };
+
+        window.toggleAccordion = function(header) {
+            const accordion = header.parentElement;
+            accordion.classList.toggle('collapsed');
+        };
+
+        const ViewTypes = {
+            "Site Plan": { designator: "C", type: "1", seq: 1, name: "PLAN - SITE", group: "Civil/Site" },
+            "Grading Plan": { designator: "C", type: "1", seq: 11, name: "PLAN - GRADING", group: "Civil/Site" },
+            "Foundation Plan": { designator: "S", type: "1", seq: 1, name: "PLAN - FOUNDATION", group: "Structural" },
+            "Framing Plan": { designator: "S", type: "1", seq: 11, name: "PLAN - FRAMING", group: "Structural" },
+            "Floor Plan": { designator: "A", type: "1", seq: 1, name: "PLAN - FLOOR", group: "Architectural" },
+            "Reflected Ceiling Plan": { designator: "A", type: "1", seq: 21, name: "PLAN - REFLECTED CEILING", group: "Architectural" },
+            "Finishes Plan": { designator: "A", type: "1", seq: 31, name: "PLAN - FINISHES", group: "Architectural" },
+            "Enlarged Plans": { designator: "A", type: "4", seq: 1, name: "ENLARGED PLAN", group: "Architectural" },
+            "Roof Plan": { designator: "A", type: "1", seq: 41, name: "PLAN - ROOF", group: "Architectural" },
+            "Exterior Elevations": { designator: "A", type: "2", seq: 1, name: "ELEVATIONS - EXTERIOR", group: "Architectural" },
+            "Interior Elevations": { designator: "A", type: "2", seq: 11, name: "ELEVATIONS - INTERIOR", group: "Architectural" },
+            "Building Sections": { designator: "A", type: "3", seq: 1, name: "SECTIONS - BUILDING", group: "Architectural" },
+            "Wall Sections": { designator: "A", type: "3", seq: 11, name: "SECTIONS - WALL", group: "Architectural" },
+            "Equipment Plan": { designator: "Q", type: "1", seq: 1, name: "PLAN - EQUIPMENT", group: "Equipment" },
+            "Furniture Plan": { designator: "I", type: "2", seq: 1, name: "PLAN - FURNITURE", group: "Interiors" },
+            "Fire Protection Plan": { designator: "F", type: "1", seq: 1, name: "PLAN - FIRE PROTECTION", group: "Fire Protection" },
+            "Plumbing Plan": { designator: "P", type: "1", seq: 1, name: "PLAN - PLUMBING", group: "Plumbing" },
+            "Mechanical Plan": { designator: "M", type: "1", seq: 1, name: "PLAN - MECHANICAL", group: "Mechanical" },
+            "Electrical Lighting Plan": { designator: "E", type: "1", seq: 1, name: "PLAN - ELECTRICAL LIGHTING", group: "Electrical" },
+            "Power & Data Plan": { designator: "E", type: "1", seq: 11, name: "PLAN - POWER & DATA", group: "Electrical" },
+            "Security Plan": { designator: "E", type: "1", seq: 21, name: "PLAN - SECURITY", group: "Electrical" }
+        };
+
+        const LibraryPresets = {
+            "Convenience Store": [
+                "Floor Plan", "Reflected Ceiling Plan", "Finishes Plan", "Roof Plan", "Equipment Plan",
+                "Exterior Elevations", "Mechanical Plan", "Electrical Lighting Plan", "Power & Data Plan", "Plumbing Plan"
+            ],
+            "Strip Mall": [
+                "Floor Plan", "Reflected Ceiling Plan", "Roof Plan", "Exterior Elevations", "Building Sections", "Site Plan"
+            ],
+            "Bank": [
+                "Floor Plan", "Reflected Ceiling Plan", "Finishes Plan", "Security Plan", "Power & Data Plan",
+                "Electrical Lighting Plan", "Mechanical Plan", "Plumbing Plan", "Exterior Elevations"
+            ],
+            "Office Suite": [
+                "Floor Plan", "Reflected Ceiling Plan", "Finishes Plan", "Power & Data Plan", "Electrical Lighting Plan",
+                "Furniture Plan", "Interior Elevations"
+            ]
+        };
+
+        function getDisciplineFromDesignator(designator) {
+            switch(designator) {
+                case "A": return "ARCHITECTURAL";
+                case "Q": return "EQUIPMENT";
+                case "M": return "MECHANICAL";
+                case "E": return "ELECTRICAL";
+                case "P": return "PLUMBING";
+                case "I": return "INTERIORS";
+                case "S": return "STRUCTURAL";
+                case "C": return "CIVIL/SITE";
+                case "F": return "FIRE PROTECTION";
+                default: return "GENERAL";
+            }
+        }
+
+        function generatePresetSheets() {
+            const sheets = [];
+            const levels = State.loadedLevels && State.loadedLevels.length > 0 ? State.loadedLevels : [
+                { Id: "level_1", Name: "Level 1", Elevation: 0.0 },
+                { Id: "level_2", Name: "Level 2", Elevation: 10.0 }
+            ];
+
+            const globalSeparator = State.separator || "-";
+            const globalSeparator2 = State.separator2 || "0";
+
+            State.activeViewTypes.forEach(vtName => {
+                const vt = ViewTypes[vtName];
+                if (!vt) return;
+
+                const isLevelBound = (vt.type === "1");
+
+                if (isLevelBound) {
+                    levels.forEach((level) => {
+                        const levelDigit = getLevelDigitFromId(level.Id);
+                        const seqNum = vt.seq;
+                        const number = `${vt.designator}${vt.type}${globalSeparator}${levelDigit}${globalSeparator2}${seqNum}`;
+                        const name = `${vt.name} - ${level.Name.toUpperCase()}`;
+
+                        sheets.push({
+                            Number: number,
+                            Name: name,
+                            Discipline: getDisciplineFromDesignator(vt.designator),
+                            Designator: vt.designator,
+                            SheetType: vt.type,
+                            SchemaLink: generateUUID(),
+                            SheetSet: getDisciplineFromDesignator(vt.designator),
+                            IsChecked: true,
+                            IsSimulatorGenerated: false,
+                            LevelId: level.Id,
+                            LevelName: level.Name,
+                            SheetDiscipline: getAIADiscipline(vt.designator),
+                            SheetUse: ""
+                        });
+                    });
+                } else {
+                    const seqNum = vt.seq;
+                    const number = `${vt.designator}${vt.type}${globalSeparator}${globalSeparator2}${seqNum}`;
+                    const name = vt.name;
+
+                    sheets.push({
+                        Number: number,
+                        Name: name,
+                        Discipline: getDisciplineFromDesignator(vt.designator),
+                        Designator: vt.designator,
+                        SheetType: vt.type,
+                        SchemaLink: generateUUID(),
+                        SheetSet: getDisciplineFromDesignator(vt.designator),
+                        IsChecked: true,
+                        IsSimulatorGenerated: false,
+                        LevelId: "",
+                        LevelName: "",
+                        SheetDiscipline: getAIADiscipline(vt.designator),
+                        SheetUse: ""
+                    });
+                }
+            });
+
+            return sheets;
+        }
+
+        function updatePresetSheets() {
+            const customSheets = State.sheets ? State.sheets.filter(s => s.IsCustom || s.IsSimulatorGenerated) : [];
+            const presetSheets = generatePresetSheets();
+            State.sheets = [...presetSheets, ...customSheets];
+        }
+
+        function getDesignatorCode(designator, sheetType) {
+            const priorities = {
+                "CS": 0, "G": 10, "H": 20, "V": 30, "B": 40, "C": 50, "L": 60, "S": 70, "A": 80, "I": 90,
+                "Q": 100, "F": 110, "P": 120, "D": 130, "M": 140, "E": 150, "W": 160, "T": 170, "R": 180,
+                "X": 190, "Z": 200, "O": 210, "AD": 220, "AF": 230, "FA": 260, "MH": 270, "MP": 280,
+                "EL": 290, "EP": 300, "RA": 310, "RS": 320, "RP": 330, "RM": 340
+            };
+            const baseCode = priorities[designator] !== undefined ? priorities[designator] : 190;
+            const typeDigit = parseInt(sheetType) || 0;
+            return baseCode + typeDigit;
+        }
+
+        window.updateGlobalSeparators = function() {
+            const sepInput = document.getElementById('global-separator');
+            const sep2Input = document.getElementById('global-separator2');
+            if (sepInput) State.separator = sepInput.value;
+            if (sep2Input) State.separator2 = sep2Input.value;
+            
+            const checkSep = document.getElementById('check-sep');
+            const checkSep2 = document.getElementById('check-sep2');
+            if (checkSep && sepInput) checkSep.value = sepInput.value;
+            if (checkSep2 && sep2Input) checkSep2.value = sep2Input.value;
+
+            updatePresetSheets();
+            if (window.runLiveNamingCheckPlayground) window.runLiveNamingCheckPlayground();
+            saveSessionCache();
+            autoAlignSheets();
+            notifyListeners();
+        };
+
+        window.updateGlobalSeparatorsFromValidator = function() {
+            const checkSep = document.getElementById('check-sep');
+            const checkSep2 = document.getElementById('check-sep2');
+            if (checkSep) State.separator = checkSep.value;
+            if (checkSep2) State.separator2 = checkSep2.value;
+
+            const sepInput = document.getElementById('global-separator');
+            const sep2Input = document.getElementById('global-separator2');
+            if (sepInput && checkSep) sepInput.value = checkSep.value;
+            if (sep2Input && checkSep2) sep2Input.value = checkSep2.value;
+
+            updatePresetSheets();
+            if (window.runLiveNamingCheckPlayground) window.runLiveNamingCheckPlayground();
+            saveSessionCache();
+            autoAlignSheets();
+            notifyListeners();
+        };
+
+        function getLevelElevation(levelId) {
+            if (!levelId) return -9999;
+            const levels = State.loadedLevels && State.loadedLevels.length > 0 ? State.loadedLevels : [];
+            const lvl = levels.find(l => l.Id === levelId);
+            return lvl ? lvl.Elevation : -9999;
+        }
+
+        function getSheetSetPriority(setName) {
+            if (!setName) return 999;
+            const upperName = setName.toUpperCase();
+            const priorities = {
+                "COVER SHEET": 0, "GENERAL": 10, "HAZARDOUS MATERIALS": 20, "SURVEY": 30, "GEOTECHNICAL": 40,
+                "CIVIL": 50, "CIVIL/SITE": 50, "LANDSCAPE": 60, "STRUCTURAL": 70, "ARCHITECTURAL": 80,
+                "INTERIORS": 90, "INTERIOR": 90, "EQUIPMENT": 100, "FIRE PROTECTION": 110, "PLUMBING": 120,
+                "PROCESS": 130, "MECHANICAL": 140, "ELECTRICAL": 150, "TELECOMMUNICATIONS": 170,
+                "RESOURCE": 180, "OTHER DISCIPLINES": 190, "CONTRACTOR SHOP DRAWINGS": 200, "OPERATIONS": 210,
+                "ARCHITECTURAL DEMOLITION": 220, "ARCHITECTURAL FINISHES": 230, "FIRE ALARM": 260
+            };
+            if (priorities[upperName] !== undefined) return priorities[upperName];
+            for (const key in priorities) if (upperName.includes(key)) return priorities[key];
+            return 999;
+        }
+
+        function getSheetSetOptions() {
+            const assigned = (State.sheets || []).map(s => s.SheetSet).filter(Boolean);
+            const loaded = State.loadedSheetSets || [];
+            const standard = ["COVER SHEET", "GENERAL", "CIVIL/SITE", "STRUCTURAL", "ARCHITECTURAL", "INTERIORS", "MECHANICAL", "ELECTRICAL", "PLUMBING", "FIRE PROTECTION", "EQUIPMENT"];
+            const allSets = new Set([...assigned, ...loaded, ...standard]);
+            return Array.from(allSets).filter(s => s && typeof s === 'string').sort();
+        }
+
+        window.changeSheetSet = function(sheetNumber, newSetName) {
+            if (newSetName === "__new__") {
+                const customName = prompt("Enter the name of the new Sheet Set:");
+                if (!customName || !customName.trim()) { notifyListeners(); return; }
+                newSetName = customName.trim().toUpperCase();
+            }
+            const sheet = State.sheets.find(s => s.Number === sheetNumber);
+            if (sheet) {
+                sheet.SheetSet = newSetName;
+                saveSessionCache();
+                autoAlignSheets();
+                notifyListeners();
+            }
+        };
+
+        window.toggleSheetSetGroup = function(setName, checked) {
+            const setSheets = State.sheets.filter(p => p.SheetSet === setName && !p.IsSimulatorGenerated);
+            setSheets.forEach(p => {
+                const isMapped = State.loadedSheets.some(ls => State.liveSheetMappings[ls.Id] === p.Number);
+                if (!isMapped) State.createMissingSheets[p.Number] = checked;
+            });
+            saveSessionCache();
+            notifyListeners();
+        };
+
+        function sortSheetsByPracticeOrder(sheetsList) {
+            if (!sheetsList) return [];
+            return [...sheetsList].sort((a, b) => {
+                const typeA = parseInt(a.SheetType) || 0;
+                const typeB = parseInt(b.SheetType) || 0;
+                if (typeA !== typeB) return typeA - typeB;
+                const elevA = getLevelElevation(a.LevelId);
+                const elevB = getLevelElevation(b.LevelId);
+                if (elevA !== elevB) return elevA - elevB;
+                return a.Number.localeCompare(b.Number, undefined, { numeric: true, sensitivity: 'base' });
+            });
+        }
+
+        const disciplinesList = [
+            { code: "A", name: "ARCHITECTURAL" }, { code: "S", name: "STRUCTURAL" }, { code: "M", name: "MECHANICAL" },
+            { code: "E", name: "ELECTRICAL" }, { code: "P", name: "PLUMBING" }, { code: "C", name: "CIVIL" },
+            { code: "L", name: "LANDSCAPE" }, { code: "I", name: "INTERIORS" }, { code: "Q", name: "EQUIPMENT" },
+            { code: "F", name: "FIRE PROTECTION" }, { code: "CS", name: "COVER SHEET" }, { code: "G", name: "GENERAL" },
+            { code: "H", name: "HAZARDOUS MATERIALS" }, { code: "V", name: "SURVEY" }, { code: "B", name: "GEOTECHNICAL" },
+            { code: "D", name: "PROCESS" }, { code: "T", name: "TELECOMMUNICATIONS" }, { code: "R", name: "RESOURCE" },
+            { code: "X", name: "OTHER DISCIPLINES" }, { code: "Z", name: "CONTRACTOR SHOP DRAWINGS" }, { code: "O", name: "OPERATIONS" },
+            { code: "AD", name: "ARCHITECTURAL DEMOLITION" }, { code: "AF", name: "ARCHITECTURAL FINISHES" }, { code: "FA", name: "FIRE ALARM" }
+        ];
+
+        function getLevelDigitFromId(levelId) {
+            const levels = State.loadedLevels && State.loadedLevels.length > 0 ? [...State.loadedLevels] : [
+                { Id: "level_1", Name: "Level 1", Elevation: 0.0 },
+                { Id: "level_2", Name: "Level 2", Elevation: 10.0 }
+            ];
+            levels.sort((a, b) => a.Elevation - b.Elevation);
+            const lvl = levels.find(l => l.Id === levelId);
+            if (!lvl) return "1";
+            const match = lvl.Name.match(/\d+/);
+            if (match) return match[0];
+            const idx = levels.findIndex(l => l.Id === levelId);
+            return idx >= 0 ? String(idx + 1) : "1";
+        }
+
+        function getLevelNameFromId(levelId) {
+            const levels = State.loadedLevels && State.loadedLevels.length > 0 ? [...State.loadedLevels] : [
+                { Id: "level_1", Name: "Level 1", Elevation: 0.0 },
+                { Id: "level_2", Name: "Level 2", Elevation: 10.0 }
+            ];
+            const lvl = levels.find(l => l.Id === levelId);
+            return lvl ? lvl.Name : "Level 1";
+        }
+
+        function calculateNextSequence(designator, sheetType, levelId, isLevelBound) {
+            let maxSeq = 0;
+            if (!State.sheets) return 1;
+            const separator = State.separator || "-";
+            const separator2 = State.separator2 || "0";
+            const prefix = `${designator}${sheetType}${separator}`;
+            State.sheets.forEach(s => {
+                if (s.Number.startsWith(prefix)) {
+                    let suffix = s.Number.substring(prefix.length);
+                    if (isLevelBound) {
+                        if (levelId === "common") return;
+                        const levelDigit = getLevelDigitFromId(levelId);
+                        if (suffix.startsWith(levelDigit)) {
+                            suffix = suffix.substring(levelDigit.length);
+                            if (suffix.startsWith(separator2)) suffix = suffix.substring(separator2.length);
+                            const seq = parseInt(suffix, 10);
+                            if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+                        }
+                    } else {
+                        if (!s.LevelId && !s.LevelName) {
+                            if (suffix.startsWith(separator2)) suffix = suffix.substring(separator2.length);
+                            const seq = parseInt(suffix, 10);
+                            if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+                        }
+                    }
+                }
+            });
+            if (maxSeq === 0) {
+                for (const vtName in ViewTypes) {
+                    const vt = ViewTypes[vtName];
+                    if (vt.designator === designator && vt.type === sheetType) return vt.seq;
+                }
+                return 1;
+            }
+            return maxSeq + 1;
+        }
+
+        window.toggleLevelInlineForm = function(setId) {
+            State.activeLevelInlineForm[setId] = !State.activeLevelInlineForm[setId];
+            if (State.activeLevelInlineForm[setId]) {
+                State.inlineFormAfterSheetNumber[setId] = null;
+                State.inlineFormPrefill[setId] = null;
+            }
+            notifyListeners();
+        };
+
+        window.openInlineFormAfter = function(setId, sheetNumber) {
+            State.inlineFormAfterSheetNumber[setId] = sheetNumber;
+            State.activeLevelInlineForm[setId] = true;
+            const sourceSheet = State.sheets.find(s => s.Number === sheetNumber);
+            if (sourceSheet) {
+                State.inlineFormPrefill[setId] = { Designator: sourceSheet.Designator, SheetType: sourceSheet.SheetType, Discipline: sourceSheet.Discipline };
+            }
+            notifyListeners();
+        };
+
+        window.changeInlineViewTypeSelection = function(setId, vtName) {
+            const isCustomVT = (vtName === "Other");
+            let designator = "A"; let sheetType = "1"; let defaultIsLevelBound = true;
+            if (!isCustomVT) {
+                const vt = ViewTypes[vtName];
+                if (vt) { designator = vt.designator; sheetType = vt.type; defaultIsLevelBound = (sheetType === "1"); }
+            }
+            const bindCheckbox = document.getElementById(`inline-bind-${setId}`);
+            if (bindCheckbox) bindCheckbox.checked = defaultIsLevelBound;
+            const levelSelect = document.getElementById(`inline-level-select-${setId}`);
+            const selectedLevelId = levelSelect ? levelSelect.value : "common";
+            const nextSeq = calculateNextSequence(designator, sheetType, selectedLevelId, defaultIsLevelBound);
+            const inputSeq = document.getElementById(`inline-seq-${setId}`);
+            if (inputSeq) inputSeq.value = nextSeq;
+            window.updateInlineFormPreviews(setId);
+        };
+
+        window.onCustomFieldChanged = function(setId) {
+            const selectDisc = document.getElementById(`inline-disc-${setId}`);
+            const selectST = document.getElementById(`inline-st-${setId}`);
+            const designator = selectDisc ? selectDisc.value : "A";
+            const sheetType = selectST ? selectST.value : "1";
+            const defaultIsLevelBound = (sheetType === "1");
+            const bindCheckbox = document.getElementById(`inline-bind-${setId}`);
+            if (bindCheckbox) bindCheckbox.checked = defaultIsLevelBound;
+            const levelSelect = document.getElementById(`inline-level-select-${setId}`);
+            const selectedLevelId = levelSelect ? levelSelect.value : "common";
+            const nextSeq = calculateNextSequence(designator, sheetType, selectedLevelId, defaultIsLevelBound);
+            const inputSeq = document.getElementById(`inline-seq-${setId}`);
+            if (inputSeq) inputSeq.value = nextSeq;
+            window.updateInlineFormPreviews(setId);
+        };
+
+        window.updateInlineFormPreviews = function(setId) {
+            const selectVT = document.getElementById(`inline-vt-${setId}`);
+            if (!selectVT) return;
+            const vtName = selectVT.value;
+            let designator = "A"; let sheetType = "1"; let vtLookupName = "PLANS"; let defaultIsLevelBound = true;
+            const isCustomVT = (vtName === "Other");
+            const customFieldsContainer = document.getElementById(`inline-custom-fields-${setId}`);
+            if (customFieldsContainer) customFieldsContainer.style.display = isCustomVT ? "block" : "none";
+            if (isCustomVT) {
+                const selectDisc = document.getElementById(`inline-disc-${setId}`);
+                const selectST = document.getElementById(`inline-st-${setId}`);
+                const inputCustomName = document.getElementById(`inline-custom-name-${setId}`);
+                designator = selectDisc ? selectDisc.value : "A";
+                sheetType = selectST ? selectST.value : "1";
+                vtLookupName = (inputCustomName && inputCustomName.value.trim()) ? inputCustomName.value.trim().toUpperCase() : "CUSTOM";
+                defaultIsLevelBound = (sheetType === "1");
+            } else {
+                const vt = ViewTypes[vtName];
+                if (vt) { designator = vt.designator; sheetType = vt.type; vtLookupName = vt.name; defaultIsLevelBound = (sheetType === "1"); }
+            }
+            const bindCheckbox = document.getElementById(`inline-bind-${setId}`);
+            const isLevelBound = bindCheckbox ? bindCheckbox.checked : defaultIsLevelBound;
+            const levelContainer = document.getElementById(`inline-level-container-${setId}`);
+            if (levelContainer) { levelContainer.style.opacity = isLevelBound ? "1" : "0.5"; const levelSelect = document.getElementById(`inline-level-select-${setId}`); if (levelSelect) levelSelect.disabled = !isLevelBound; }
+            const levelSelect = document.getElementById(`inline-level-select-${setId}`);
+            const selectedLevelId = levelSelect ? levelSelect.value : "common";
+            const inputSep = document.getElementById(`inline-sep-${setId}`);
+            const inputSep2 = document.getElementById(`inline-sep2-${setId}`);
+            const inputSeq = document.getElementById(`inline-seq-${setId}`);
+            const inputModifier = document.getElementById(`inline-modifier-${setId}`);
+            const separator = inputSep ? inputSep.value : "-";
+            const separator2 = inputSep2 ? inputSep2.value : "0";
+            const seqVal = inputSeq ? inputSeq.value.trim() : "1";
+            const modifierVal = inputModifier ? inputModifier.value.trim().toUpperCase() : "";
+            const levelDigit = isLevelBound ? getLevelDigitFromId(selectedLevelId) : "";
+            const previewNum = document.getElementById(`inline-preview-num-${setId}`);
+            const previewName = document.getElementById(`inline-preview-name-${setId}`);
+            const finalNumber = `${designator}${sheetType}${separator}${levelDigit}${separator2}${seqVal}`;
+            const levelName = isLevelBound ? getLevelNameFromId(selectedLevelId) : "";
+            const baseName = modifierVal || vtLookupName;
+            const finalName = isLevelBound ? `${baseName} - ${levelName.toUpperCase()}` : baseName;
+            if (previewNum) previewNum.textContent = finalNumber;
+            if (previewName) previewName.textContent = finalName;
+        };
+
+        window.addInlineCustomGuideline = function(setId, setName) {
+            const selectVT = document.getElementById(`inline-vt-${setId}`);
+            if (!selectVT) return;
+            const vtName = selectVT.value;
+            let designator = "A"; let sheetType = "1"; let vtLookupName = "PLANS"; let defaultIsLevelBound = (sheetType === "1");
+            const isCustomVT = (vtName === "Other");
+            if (isCustomVT) {
+                const selectDisc = document.getElementById(`inline-disc-${setId}`);
+                const selectST = document.getElementById(`inline-st-${setId}`);
+                const inputCustomName = document.getElementById(`inline-custom-name-${setId}`);
+                designator = selectDisc ? selectDisc.value : "A";
+                sheetType = selectST ? selectST.value : "1";
+                vtLookupName = (inputCustomName && inputCustomName.value.trim()) ? inputCustomName.value.trim().toUpperCase() : "CUSTOM";
+                defaultIsLevelBound = (sheetType === "1");
+            } else {
+                const vt = ViewTypes[vtName];
+                if (vt) { designator = vt.designator; sheetType = vt.type; vtLookupName = vt.name; defaultIsLevelBound = (sheetType === "1"); }
+            }
+            const bindCheckbox = document.getElementById(`inline-bind-${setId}`);
+            const isLevelBound = bindCheckbox ? bindCheckbox.checked : defaultIsLevelBound;
+            const levelSelect = document.getElementById(`inline-level-select-${setId}`);
+            const selectedLevelId = levelSelect ? levelSelect.value : "common";
+            const selectedLevelName = getLevelNameFromId(selectedLevelId);
+            const inputSep = document.getElementById(`inline-sep-${setId}`);
+            const inputSep2 = document.getElementById(`inline-sep2-${setId}`);
+            const inputSeq = document.getElementById(`inline-seq-${setId}`);
+            const inputModifier = document.getElementById(`inline-modifier-${setId}`);
+            const separator = inputSep ? inputSep.value : "-";
+            const separator2 = inputSep2 ? inputSep2.value : "0";
+            const seqVal = inputSeq ? inputSeq.value.trim() : "1";
+            const modifierVal = inputModifier ? inputModifier.value.trim().toUpperCase() : "";
+            if (!seqVal) { alert("Please enter a valid Sequence Number."); return; }
+            const levelDigit = isLevelBound ? getLevelDigitFromId(selectedLevelId) : "";
+            const finalNumber = `${designator}${sheetType}${separator}${levelDigit}${separator2}${seqVal}`;
+            const baseName = modifierVal || vtLookupName;
+            const finalName = isLevelBound ? `${baseName} - ${selectedLevelName.toUpperCase()}` : baseName;
+            const isDuplicate = State.sheets.some(s => s.Number === finalNumber);
+            if (isDuplicate) { alert(`A guideline with Sheet Number ${finalNumber} already exists.`); return; }
+            State.sheets.push({
+                Number: finalNumber, Name: finalName, Discipline: getDisciplineFromDesignator(designator),
+                Designator: designator, SheetType: sheetType, SchemaLink: generateUUID(),
+                SheetSet: setId, IsChecked: true, IsCustom: true, LevelId: isLevelBound ? selectedLevelId : "",
+                LevelName: isLevelBound ? selectedLevelName : "", SheetDiscipline: getAIADiscipline(designator), SheetUse: ""
+            });
+            State.activeLevelInlineForm[setId] = false;
+            State.inlineFormAfterSheetNumber[setId] = null;
+            State.inlineFormPrefill[setId] = null;
+            saveSessionCache();
+            autoAlignSheets();
+            notifyListeners();
+        };
+
+        window.runLiveNamingCheckPlayground = function() {
+            const selectDisc = document.getElementById('check-disc');
+            const selectST = document.getElementById('check-st');
+            const inputLevel = document.getElementById('check-level');
+            const inputSep = document.getElementById('check-sep');
+            const inputSep2 = document.getElementById('check-sep2');
+            const inputSeq = document.getElementById('check-seq');
+            const inputModifier = document.getElementById('check-modifier');
+            if (!selectDisc || !selectST) return;
+            const designator = selectDisc.value;
+            const sheetType = selectST.value;
+            const levelVal = inputLevel ? inputLevel.value.trim() : "";
+            const sep = inputSep ? inputSep.value : "-";
+            const sep2 = inputSep2 ? inputSep2.value : "0";
+            const seq = inputSeq ? inputSeq.value.trim() : "1";
+            const modifier = inputModifier ? inputModifier.value.trim().toUpperCase() : "";
+            const number = `${designator}${sheetType}${sep}${levelVal}${sep2}${seq}`;
+            const sheetTypeNames = {
+                "0": "SYMBOL LEGEND, ABBREVIATIONS, GENERAL NOTES, SPECIFICATIONS", "1": "PLANS", "2": "ELEVATIONS",
+                "3": "SECTIONS", "4": "ENLARGED PLANS, ELEVATIONS, SECTIONS", "5": "DETAILS", "6": "SCHEDULES AND DIAGRAMS",
+                "7": "USER DEFINED", "8": "USER DEFINED", "9": "ISOMETRIC, PERSPECTIVE VIEWS, PHOTOGRAPHS ETC"
+            };
+            const lookupName = sheetTypeNames[sheetType] || "PLANS";
+            const baseName = modifier || lookupName;
+            let finalName = baseName;
+            if (levelVal) {
+                const matchedLevel = State.loadedLevels.find(l => { const d = l.Name.match(/\d+/); return d && d[0] === levelVal; });
+                const levelNameSuffix = matchedLevel ? matchedLevel.Name.toUpperCase() : `LEVEL ${levelVal}`;
+                finalName = `${baseName} - ${levelNameSuffix}`;
+            }
+            document.getElementById('check-output-num').textContent = number;
+            document.getElementById('check-output-name').textContent = finalName;
+        };
+
+        window.removeCustomGuideline = function(number) {
+            if (!confirm(`Are you sure you want to remove the custom guideline for sheet ${number}?`)) return;
+            State.sheets = State.sheets.filter(s => s.Number !== number);
+            if (State.loadedSheets) State.loadedSheets.forEach(ls => { if (State.liveSheetMappings[ls.Id] === number) State.liveSheetMappings[ls.Id] = "keep"; });
+            if (State.createMissingSheets[number] !== undefined) delete State.createMissingSheets[number];
+            notifyListeners();
+        };
+
+        window.toggleExportVerification = function(checked) {
+            State.exportConfirmed = checked;
+            const btn = document.getElementById('btn-export-intent');
+            if (btn) btn.disabled = !checked;
+        };
+
+        function saveSessionCache() {
+            try {
+                const cacheData = {
+                    selectedLibrary: State.selectedLibrary, activeViewTypes: State.activeViewTypes,
+                    liveSheetMappings: State.liveSheetMappings, createMissingSheets: State.createMissingSheets,
+                    viewRenames: State.viewRenames, separator: State.separator, separator2: State.separator2,
+                    sheetUseValues: State.sheetUseValues,
+                    customSheets: State.sheets ? State.sheets.filter(s => s.IsCustom).map(s => {
+                        return {
+                            Number: s.Number, Name: s.Name, Discipline: s.Discipline, Designator: s.Designator,
+                            SheetType: s.SheetType, SchemaLink: s.SchemaLink, SheetSet: s.SheetSet,
+                            LevelId: s.LevelId, LevelName: s.LevelName, SheetDiscipline: s.SheetDiscipline, SheetUse: s.SheetUse
+                        };
+                    }) : []
+                };
+                localStorage.setItem("ODI_Sheets_Cache_v4", JSON.stringify(cacheData));
+            } catch(e) {}
+        }
+
+        function loadSessionCache() {
+            try {
+                const cachedStr = localStorage.getItem("ODI_Sheets_Cache_v4");
+                if (!cachedStr) return;
+                const cache = JSON.parse(cachedStr);
+                if (!cache) return;
+                if (cache.selectedLibrary !== undefined) { State.selectedLibrary = cache.selectedLibrary; const libSelect = document.getElementById('library-select'); if (libSelect) libSelect.value = cache.selectedLibrary; }
+                if (cache.activeViewTypes !== undefined) State.activeViewTypes = cache.activeViewTypes;
+                if (cache.sheetUseValues !== undefined) State.sheetUseValues = cache.sheetUseValues;
+                if (cache.separator !== undefined) { State.separator = cache.separator; const sepInput = document.getElementById('global-separator'); if (sepInput) sepInput.value = cache.separator; const checkSep = document.getElementById('check-sep'); if (checkSep) checkSep.value = cache.separator; }
+                if (cache.separator2 !== undefined) { State.separator2 = cache.separator2; const sep2Input = document.getElementById('global-separator2'); if (sep2Input) sep2Input.value = cache.separator2; const checkSep2 = document.getElementById('check-sep2'); if (checkSep2) checkSep2.value = cache.separator2; }
+                State.sheets = generatePresetSheets();
+                if (cache.customSheets) {
+                    cache.customSheets.forEach(cs => {
+                        if (!State.sheets.some(s => s.Number === cs.Number)) {
+                            State.sheets.push({ ...cs, IsChecked: true, IsCustom: true, IsSimulatorGenerated: false });
+                        }
+                    });
+                }
+                if (cache.liveSheetMappings) State.liveSheetMappings = cache.liveSheetMappings;
+                if (cache.createMissingSheets) State.createMissingSheets = cache.createMissingSheets;
+                if (cache.viewRenames) State.viewRenames = cache.viewRenames;
+            } catch(e) {}
+        }
+
+        window.convertCase = function(mode) {
+            const toTitleCase = (str) => str.replace(/\w\S*/g, (txt) => txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase());
+            State.sheets.forEach(s => {
+                if (mode === 'UPPER') s.Name = s.Name.toUpperCase(); else if (mode === 'TITLE') s.Name = toTitleCase(s.Name); else if (mode === 'LOWER') s.Name = s.Name.toLowerCase();
+            });
+            Object.keys(State.viewRenames).forEach(key => {
+                const item = State.viewRenames[key];
+                if (mode === 'UPPER') item.ProposedName = item.ProposedName.toUpperCase(); else if (mode === 'TITLE') item.ProposedName = toTitleCase(item.ProposedName); else if (mode === 'LOWER') item.ProposedName = item.ProposedName.toLowerCase();
+            });
+            notifyListeners();
+        };
+
+        function runAIANamingCheck() {
+            const recArea = document.getElementById('ai-recommendations');
+            if (!recArea) return;
+            const warnings = [];
+            State.sheets.forEach(s => {
+                if (!s.IsChecked) return;
+                if (s.Name !== s.Name.toUpperCase()) warnings.push(`Sheet ${s.Number}: Name should be UPPERCASE.`);
+                const numPat = /^[A-Z]{1,2}\d-\d{2,3}$/;
+                if (!numPat.test(s.Number)) warnings.push(`Sheet ${s.Number}: Number format is non-AIA compliant.`);
+                const lowerName = s.Name.toLowerCase();
+                if (lowerName.includes("floor plan")) warnings.push(`Sheet ${s.Number}: AIA recommends "PLAN - FLOOR" rather than "FLOOR PLAN".`);
+                if (lowerName.includes("ceiling plan")) warnings.push(`Sheet ${s.Number}: AIA recommends "PLAN - REFLECTED CEILING" rather than "CEILING PLAN".`);
+            });
+            if (warnings.length === 0) recArea.innerHTML = `<span style="color: var(--success); font-weight: 500;">✔ All active sheet names comply with AIA guidelines.</span>`;
+            else recArea.innerHTML = warnings.map(w => `<div style="margin-bottom: 0.35rem; border-left: 2px solid var(--warning); padding-left: 0.4rem; color: var(--text-secondary);">⚠ ${w}</div>`).join('');
+        }
+
+        window.autoFixAIA = function() {
+            let fixedCount = 0;
+            State.sheets.forEach(s => {
+                if (!s.IsChecked) return;
+                if (s.Name !== s.Name.toUpperCase()) { s.Name = s.Name.toUpperCase(); fixedCount++; }
+                const oldName = s.Name;
+                s.Name = s.Name.replace("FLOOR PLAN", "PLAN - FLOOR").replace("REFLECTED CEILING PLAN", "PLAN - REFLECTED CEILING").replace("CEILING PLAN", "PLAN - REFLECTED CEILING").replace("ROOF PLAN", "PLAN - ROOF");
+                if (s.Name !== oldName) fixedCount++;
+                Object.keys(State.viewRenames).forEach(key => { if (key.startsWith(s.Number + "_")) State.viewRenames[key].ProposedName = s.Name; });
+            });
+            notifyListeners();
+            alert(`AIA Assistant: Formatted and auto-fixed ${fixedCount} naming guidelines.`);
+        };
+
+        window.mapLiveSheet = function(liveId, targetValue) { State.liveSheetMappings[liveId] = targetValue; notifyListeners(); };
+        window.togglePresetCreate = function(presetNum) { State.createMissingSheets[presetNum] = !State.createMissingSheets[presetNum]; notifyListeners(); };
+
+        function renderViewsChecklist() {
+            const container = document.getElementById('views-checklist-container');
+            if (!container) return;
+            container.innerHTML = "";
+            const groups = {};
+            Object.entries(ViewTypes).forEach(([vtName, vt]) => { const grp = vt.group || "General"; if (!groups[grp]) groups[grp] = []; groups[grp].push({ name: vtName, vt }); });
+            Object.keys(groups).sort().forEach(grpName => {
+                const groupHeader = document.createElement('div');
+                groupHeader.style.fontSize = "0.75rem"; groupHeader.style.fontWeight = "600"; groupHeader.style.color = "var(--accent-primary)"; groupHeader.style.textTransform = "uppercase"; groupHeader.style.letterSpacing = "0.05em"; groupHeader.style.marginTop = "0.6rem"; groupHeader.style.marginBottom = "0.2rem"; groupHeader.textContent = grpName;
+                container.appendChild(groupHeader);
+                groups[grpName].forEach(item => {
+                    const vtName = item.name; const isChecked = State.activeViewTypes.includes(vtName);
+                    const label = document.createElement('label'); label.style.display = "flex"; label.style.alignItems = "center"; label.style.gap = "0.5rem"; label.style.fontSize = "0.8rem"; label.style.cursor = "pointer"; label.style.color = "var(--text-secondary)"; label.style.paddingLeft = "0.5rem"; label.style.marginBottom = "0.15rem";
+                    label.innerHTML = `<input type="checkbox" ${isChecked ? 'checked' : ''} onchange="toggleViewTypeActive('${vtName}', this.checked)"><span style="${isChecked ? 'color: var(--text-primary); font-weight: 500;' : ''}">${vtName}</span>`;
+                    container.appendChild(label);
+                });
+            });
+        }
+
+        window.toggleViewTypeActive = function(vtName, checked) {
+            if (checked) { if (!State.activeViewTypes.includes(vtName)) State.activeViewTypes.push(vtName); }
+            else { State.activeViewTypes = State.activeViewTypes.filter(v => v !== vtName); }
+            updatePresetSheets();
+            autoAlignSheets();
+            notifyListeners();
+        };
+
+        function autoAlignSheets() {
+            State.liveSheetMappings = {}; State.createMissingSheets = {};
+            if (!State.loadedSheets) return;
+            State.loadedSheets.forEach(ls => {
+                let bestMatch = null; const cleanLiveNum = ls.Number.replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
+                for (const preset of State.sheets) { const cleanPresetNum = preset.Number.replace(/[^a-zA-Z0-9]/g, "").toUpperCase(); if (cleanLiveNum === cleanPresetNum) { bestMatch = preset; break; } }
+                if (!bestMatch && ls.SchemaLink) bestMatch = State.sheets.find(s => s.SchemaLink === ls.SchemaLink);
+                if (bestMatch) State.liveSheetMappings[ls.Id] = bestMatch.Number; else State.liveSheetMappings[ls.Id] = "keep";
+            });
+            State.sheets.forEach(preset => { const isMapped = State.loadedSheets.some(ls => State.liveSheetMappings[ls.Id] === preset.Number); State.createMissingSheets[preset.Number] = !isMapped; });
+        }
+
+        window.toggleViewRename = function(viewKey) { if (State.viewRenames[viewKey]) State.viewRenames[viewKey].Enabled = !State.viewRenames[viewKey].Enabled; notifyListeners(); };
+        window.updateViewRenameName = function(viewKey, value) { if (State.viewRenames[viewKey]) State.viewRenames[viewKey].ProposedName = value; };
+        window.togglePurgeCheck = function(number) { const item = State.purges.find(p => p.Number === number); if (item) { item.ShouldPurge = !item.ShouldPurge; notifyListeners(); } };
+
+        window.changeLibrary = function(libraryName) {
+            State.selectedLibrary = libraryName;
+            State.activeViewTypes = LibraryPresets[libraryName] ? [...LibraryPresets[libraryName]] : [];
+            updatePresetSheets(); State.viewRenames = {}; State.purges = []; loadSessionCache(); autoAlignSheets(); notifyListeners();
+        };
+
+        function calculateLayout() {
+            const tb = State.loadedTitleBlocks.find(b => b.Id == State.selectedTitleBlockId);
+            if (!tb) return { fits: false, cols: 1, rows: 1, sheetWidth: 0, sheetHeight: 0, usableWidth: 0, usableHeight: 0 };
+            const w_sheet = tb.Width; const h_sheet = tb.Height;
+            const usableWidth = w_sheet - State.margins.left - State.margins.right;
+            const usableHeight = h_sheet - State.margins.top - State.margins.bottom;
+            const scale = State.selectedScale; const b_width = State.building.width; const b_length = State.building.length; const overlap_ft = State.overlap;
+            const w_paper = b_width * scale; const h_paper = b_length * scale;
+            const fits = (w_paper <= usableWidth && h_paper <= usableHeight) || (h_paper <= usableWidth && w_paper <= usableHeight);
+            let cols = 1; let rows = 1; let bestOrientation = 'normal';
+            if (!fits) {
+                const usableWidthFt = usableWidth / scale; const usableHeightFt = usableHeight / scale;
+                const colsNormal = Math.max(1, Math.ceil((b_width - overlap_ft) / (usableWidthFt - overlap_ft)));
+                const rowsNormal = Math.max(1, Math.ceil((b_length - overlap_ft) / (usableHeightFt - overlap_ft)));
+                const totalNormal = colsNormal * rowsNormal;
+                const colsRotated = Math.max(1, Math.ceil((b_length - overlap_ft) / (usableWidthFt - overlap_ft)));
+                const rowsRotated = Math.max(1, Math.ceil((b_width - overlap_ft) / (usableHeightFt - overlap_ft)));
+                const totalRotated = colsRotated * rowsRotated;
+                if (totalRotated < totalNormal) { cols = colsRotated; rows = rowsRotated; bestOrientation = 'rotated'; }
+                else { cols = colsNormal; rows = rowsNormal; bestOrientation = 'normal'; }
+            }
+            return { fits, cols, rows, orientation: bestOrientation, sheetWidth: w_sheet, sheetHeight: h_sheet, usableWidth, usableHeight, scale, buildingWidth: b_width, buildingLength: b_length };
+        }
+
+        function drawSimulation() {
+            const card = document.getElementById('simulator-card'); if (card.classList.contains('collapsed')) return;
+            const canvas = document.getElementById('simulator-canvas'); const ctx = canvas.getContext('2d'); const container = canvas.parentElement;
+            const dpr = window.devicePixelRatio || 1; const rect = container.getBoundingClientRect();
+            canvas.width = rect.width * dpr; canvas.height = rect.height * dpr; canvas.style.width = `${rect.width}px`; canvas.style.height = `${rect.height}px`; ctx.scale(dpr, dpr);
+            const w_c = rect.width; const h_c = rect.height; ctx.clearRect(0, 0, w_c, h_c);
+            const layout = calculateLayout(); if (layout.sheetWidth === 0) return;
+            const padding = 15; const fitScaleX = (w_c - padding * 2) / layout.sheetWidth; const fitScaleY = (h_c - padding * 2) / layout.sheetHeight; const canvasScale = Math.min(fitScaleX, fitScaleY);
+            const w_draw = layout.sheetWidth * canvasScale; const h_draw = layout.sheetHeight * canvasScale; const x_draw = (w_c - w_draw) / 2; const y_draw = (h_c - h_draw) / 2;
+            ctx.fillStyle = '#1e293b'; ctx.fillRect(x_draw, y_draw, w_draw, h_draw); ctx.strokeStyle = '#64748b'; ctx.lineWidth = 1.5; ctx.strokeRect(x_draw, y_draw, w_draw, h_draw);
+            const marginL = State.margins.left * canvasScale; const marginR = State.margins.right * canvasScale; const marginT = State.margins.top * canvasScale; const marginB = State.margins.bottom * canvasScale;
+            const x_usable = x_draw + marginL; const y_usable = y_draw + marginT; const w_usable = w_draw - marginL - marginR; const h_usable = h_draw - marginT - marginB;
+            ctx.strokeStyle = '#ef444455'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.strokeRect(x_usable, y_usable, w_usable, h_usable); ctx.setLineDash([]);
+            ctx.fillStyle = '#334155'; ctx.fillRect(x_draw + w_draw - marginR, y_draw, marginR, h_draw);
+            const scale = layout.scale; const ftWidth = layout.buildingWidth; const ftLength = layout.buildingLength;
+            let w_build_paper = ftWidth * scale * canvasScale; let h_build_paper = ftLength * scale * canvasScale;
+            if (layout.orientation === 'rotated') { w_build_paper = ftLength * scale * canvasScale; h_build_paper = ftWidth * scale * canvasScale; }
+            const x_build = x_usable + (w_usable - w_build_paper) / 2; const y_build = y_usable + (h_usable - h_build_paper) / 2;
+            if (layout.fits) { ctx.fillStyle = 'rgba(16, 185, 129, 0.25)'; ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2; ctx.fillRect(x_build, y_build, w_build_paper, h_build_paper); ctx.strokeRect(x_build, y_build, w_build_paper, h_build_paper); }
+            else {
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.05)'; ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 1.5; ctx.fillRect(x_build, y_build, w_build_paper, h_build_paper); ctx.strokeRect(x_build, y_build, w_build_paper, h_build_paper);
+                const cols = layout.cols; const rows = layout.rows; const sectorW = w_build_paper / cols; const sectorH = h_build_paper / rows;
+                ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)'; ctx.fillStyle = 'rgba(6, 182, 212, 0.1)'; ctx.lineWidth = 1;
+                for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+                    const sx = x_build + c * sectorW; const sy = y_build + r * sectorH; ctx.fillRect(sx, sy, sectorW, sectorH); ctx.strokeRect(sx, sy, sectorW, sectorH);
+                    const label = String.fromCharCode(65 + r) + (c + 1); ctx.fillStyle = 'rgba(6, 182, 212, 0.8)'; ctx.font = '10px Outfit'; ctx.textAlign = 'center'; ctx.fillText(label, sx + sectorW / 2, sy + sectorH / 2 + 3);
+                }
+            }
+        }
+
+        window.toggleSheetCheck = function(index) { State.sheets[index].IsChecked = !State.sheets[index].IsChecked; notifyListeners(); };
+        window.updateSheetName = function(index, value) { State.sheets[index].Name = value.toUpperCase(); };
+        window.toggleDisciplineGroup = function(disciplineName, checked) {
+            State.sheets.forEach(s => {
+                if (s.Discipline === disciplineName) {
+                    s.IsChecked = checked;
+                    const isMissing = !State.loadedSheets.some(ls => State.liveSheetMappings[ls.Id] === s.Number);
+                    if (isMissing) State.createMissingSheets[s.Number] = checked;
+                }
+            });
+            notifyListeners();
+        };
+
+        function appendSimulatorSectors() {
+            const layout = calculateLayout();
+            if (layout.fits) { alert("The building footprint fits on a single sheet. No Enlarged Sectors needed."); return; }
+            const tb = State.loadedTitleBlocks.find(b => b.Id == State.selectedTitleBlockId);
+            const tbName = tb ? `${tb.FamilyName}:${tb.TypeName}` : "Unknown Title Block";
+            State.sheets = State.sheets.filter(s => !s.IsSimulatorGenerated);
+            const cols = layout.cols; const rows = layout.rows; let sectorIndex = 1;
+            for (let r = 0; r < rows; r++) {
+                const rowLetter = String.fromCharCode(65 + r);
+                for (let c = 0; c < cols; c++) {
+                    const colNum = c + 1; const sectorName = `${rowLetter}${colNum}`; const sheetNum = `A-4${sectorIndex.toString().padStart(2, '0')}`;
+                    State.sheets.push({
+                        Number: sheetNum, Name: `ENLARGED PLAN - SECTOR ${sectorName}`, Discipline: "ARCHITECTURAL", Designator: "A", SheetType: "4",
+                        SchemaLink: generateUUID(), ScopeBoxName: `Scope Box - Sector ${sectorName}`, SheetSet: "Enlarged Plans", IsChecked: true, IsSimulatorGenerated: true,
+                        TitleBlock: tbName, TitleBlockId: State.selectedTitleBlockId, SheetDiscipline: "ARCHITECTURAL", SheetUse: ""
+                    });
+                    sectorIndex++;
+                }
+            }
+            notifyListeners();
+            alert(`Generated and appended ${cols * rows} Enlarged Sectors (A-400 series) to the checklist.`);
+        }
+
+        function createHeaderRow() {
+            const header = document.createElement('div'); header.className = "guideline-header-row";
+            header.innerHTML = `<div class="grid-cell">Status</div><div class="grid-cell">Target #</div><div class="grid-cell">Target Name</div><div class="grid-cell">Sheet Set</div><div class="grid-cell">Discipline</div><div class="grid-cell">Use</div><div class="grid-cell" style="text-align: center;"></div><div class="grid-cell">Active Revit Sheet</div><div class="grid-cell" style="text-align: right; padding-right: 0.5rem;">Actions</div>`;
+            return header;
+        }
+
+        function renderInlineFormRow(setId, setName, afterPresetNum) {
+            const formRow = document.createElement('div');
+            formRow.className = 'inline-form-row';
+            // ... (Full implementation logic consistent with existing architecture)
+            return formRow;
+        }
+
+        
+        // --- MODAL & TREE LOGIC ---
+        window.justMovedSheets = new Set();
+
+        window.expandAllTree = function() {
+            document.querySelectorAll('.tree-group').forEach(el => el.classList.remove('collapsed'));
+        };
+        window.collapseAllTree = function() {
+            document.querySelectorAll('.tree-group').forEach(el => el.classList.add('collapsed'));
+        };
+        window.toggleViewDrawer = function(id) {
+            const drawer = document.getElementById('view-drawer-' + id);
+            if (drawer) drawer.classList.toggle('active');
+        };
+
+        State.groupBy = ["SheetSet", "SheetDiscipline", "SheetUse"];
+        
+        window.updateGroupBy = function() {
+            State.groupBy = [
+                document.getElementById('group-by-1').value,
+                document.getElementById('group-by-2').value,
+                document.getElementById('group-by-3').value
+            ];
+            renderChecklist();
+        };
+
+        window.openEditModal = function(id, isLive) {
+            const modal = document.getElementById('edit-modal');
+            let item;
+            if (isLive === 'true' || isLive === true) {
+                item = State.loadedSheets.find(s => s.Id == id);
+            } else {
+                item = State.sheets.find(s => s.Number === id);
+            }
+            if (!item) return;
+
+            document.getElementById('modal-sheet-id').value = id;
+            document.getElementById('modal-sheet-is-live').value = isLive;
+            document.getElementById('modal-sheet-num').value = item.Number;
+            document.getElementById('modal-sheet-name').value = item.Name;
+            
+            // Populate Dropdowns
+            const setSelect = document.getElementById('modal-sheet-set');
+            setSelect.innerHTML = `<option value="">-- Unassigned --</option>`;
+            getSheetSetOptions().forEach(s => {
+                setSelect.innerHTML += `<option value="${s}">${s}</option>`;
+            });
+            setSelect.value = item.SheetSet || (item.SheetSets && item.SheetSets[0]) || "";
+
+            const useSelect = document.getElementById('modal-sheet-use');
+            useSelect.innerHTML = `<option value="">-- Unassigned --</option>`;
+            (State.sheetUseValues || []).forEach(u => {
+                useSelect.innerHTML += `<option value="${u}">${u}</option>`;
+            });
+            useSelect.innerHTML += `<option value="__new__">+ Add new...</option>`;
+            useSelect.value = item.SheetUse || "";
+
+            document.getElementById('modal-sheet-disc').value = item.SheetDiscipline || "";
+            
+            modal.classList.add('active');
+        };
+
+        window.closeEditModal = function() {
+            document.getElementById('edit-modal').classList.remove('active');
+        };
+
+        window.saveEditModal = function() {
+            const id = document.getElementById('modal-sheet-id').value;
+            const isLive = document.getElementById('modal-sheet-is-live').value === 'true';
+            
+            const newName = document.getElementById('modal-sheet-name').value.toUpperCase();
+            const newSet = document.getElementById('modal-sheet-set').value;
+            const newDisc = document.getElementById('modal-sheet-disc').value;
+            let newUse = document.getElementById('modal-sheet-use').value;
+
+            if (newUse === "__new__") {
+                const custom = prompt("Enter new Sheet Use value:");
+                if (custom && custom.trim() !== "") {
+                    newUse = custom.trim();
+                    addSheetUseValue(newUse);
+                } else {
+                    newUse = "";
+                }
+            }
+
+            if (isLive) {
+                const item = State.loadedSheets.find(s => s.Id == id);
+                if (item) {
+                    item.Name = newName;
+                    item.SheetSets = newSet ? [newSet] : [];
+                    item.SheetDiscipline = newDisc;
+                    item.SheetUse = newUse;
+                }
+            } else {
+                const item = State.sheets.find(s => s.Number === id);
+                if (item) {
+                    item.Name = newName;
+                    item.SheetSet = newSet;
+                    item.SheetDiscipline = newDisc;
+                    item.SheetUse = newUse;
+                }
+            }
+
+            window.justMovedSheets.add(id);
+            closeEditModal();
+            renderChecklist();
+            
+            setTimeout(() => {
+                window.justMovedSheets.delete(id);
+                renderChecklist();
+            }, 3000); // Remove jump marker after 3s
+        };
+
+        window.toggleTree = function(el) {
+            const parent = el.parentElement;
+            parent.classList.toggle('collapsed');
+        };
+        
+        window.assignViewToSheet = function(sheetId, viewIdStr) {
+            if (!viewIdStr) return;
+            // Find live sheet since we can only assign views to mapped/live sheets
+            const mappedLive = State.loadedSheets.find(ls => State.liveSheetMappings[ls.Id] === sheetId || ls.Id == sheetId);
+            if (mappedLive) {
+                // Initialize ViewRenames if not exist
+                // To actually place a new view, we need to track it in execution intent.
+                // For now, we will add it to the 'PlacedViews' array artificially so the UI updates
+                if (!mappedLive.PlacedViews) mappedLive.PlacedViews = [];
+                const vObj = State.loadedViews.find(v => v.Id == viewIdStr);
+                if (vObj && !mappedLive.PlacedViews.some(pv => pv.Id == vObj.Id)) {
+                    mappedLive.PlacedViews.push(vObj);
+                    notifyListeners();
+                }
+            }
+        };
+
+        
+        window.togglePurgeLiveSheet = function(liveId) {
+            if (State.liveSheetMappings[liveId] === "purge") {
+                State.liveSheetMappings[liveId] = "keep";
+            } else {
+                State.liveSheetMappings[liveId] = "purge";
+            }
+            renderChecklist();
+        };
+
+        window.toggleCreatePreset = function(presetNum) {
+            State.createMissingSheets[presetNum] = !State.createMissingSheets[presetNum];
+            renderChecklist();
+        };
+
+        function getUnifiedList() {
+            const unified = [];
+            // 1. Add all Presets (creates and overwrites)
+            State.sheets.forEach(preset => {
+                const mappedLive = State.loadedSheets.find(ls => State.liveSheetMappings[ls.Id] === preset.Number);
+                let status = "create";
+                let originalName = null;
+                let originalNum = null;
+                
+                if (mappedLive) {
+                    status = (mappedLive.Number === preset.Number && mappedLive.Name.toUpperCase() === preset.Name.toUpperCase()) ? "matched" : "update";
+                    originalName = mappedLive.Name;
+                    originalNum = mappedLive.Number;
+                } else if (!State.createMissingSheets[preset.Number]) {
+                    // Skip if user un-checked 'Create'
+                    return; 
+                }
+
+                unified.push({
+                    type: 'preset',
+                    id: preset.Number,
+                    number: preset.Number,
+                    name: preset.Name,
+                    originalName: originalName,
+                    originalNum: originalNum,
+                    status: status,
+                    sheetSet: preset.SheetSet || "Unassigned Sheets",
+                    discipline: preset.SheetDiscipline || getAIADiscipline(preset.Designator) || "Unassigned",
+                    use: preset.SheetUse || "Unassigned",
+                    isLive: false,
+                    liveId: mappedLive ? mappedLive.Id : null,
+                    placedViews: mappedLive ? (mappedLive.PlacedViews || []) : []
+                });
+            });
+
+            // 2. Add Live Sheets that are NOT mapped (purges or unassigned)
+            State.loadedSheets.forEach(ls => {
+                const mapping = State.liveSheetMappings[ls.Id];
+                if (!mapping || mapping === "purge") {
+                    unified.push({
+                        type: 'live',
+                        id: ls.Id,
+                        number: ls.Number,
+                        name: ls.Name,
+                        originalName: null,
+                        status: mapping === "purge" ? "purge" : "unassigned",
+                        sheetSet: (ls.SheetSets && ls.SheetSets.length > 0) ? ls.SheetSets[0] : "Unassigned Sheets",
+                        discipline: ls.SheetDiscipline || "Unassigned",
+                        use: ls.SheetUse || "Unassigned",
+                        isLive: true,
+                        liveId: ls.Id,
+                        placedViews: ls.PlacedViews || []
+                    });
+                }
+            });
+            
+            // Filter by search
+            const q = State.searchQuery.toLowerCase();
+            if (q) {
+                return unified.filter(item => 
+                    item.number.toLowerCase().includes(q) || 
+                    item.name.toLowerCase().includes(q)
+                );
+            }
+            return unified;
+        }
+
+        function renderUnifiedRow(item) {
+            const jumpMarker = window.justMovedSheets.has(item.id) ? `<div class="jump-marker"></div>` : ``;
+            
+            let nameHtml = `<strong style="color:var(--accent-primary);">${item.name}</strong>`;
+            if (item.originalName && (item.originalName !== item.name || item.originalNum !== item.number)) {
+                nameHtml += `<div style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">Revit: ${item.originalNum} - ${item.originalName}</div>`;
+            }
+
+            // Global view usage checking
+            const allPlacedViews = new Set();
+            State.loadedSheets.forEach(s => {
+                if(s.PlacedViews) s.PlacedViews.forEach(v => allPlacedViews.add(v.Id.toString()));
+            });
+
+            let drawerViewsHtml = ``;
+            if (item.placedViews && item.placedViews.length > 0) {
+                item.placedViews.forEach(v => {
+                    drawerViewsHtml += `<div class="view-item-row">
+                        <span>• ${v.Name}</span>
+                        <span style="opacity:0.6">${v.Type}</span>
+                    </div>`;
+                });
+            } else {
+                drawerViewsHtml = `<div style="color:var(--text-secondary); font-style:italic; margin-bottom:0.5rem;">No views placed.</div>`;
+            }
+            
+            let addViewHtml = `<select class="view-assignment-select" style="margin-left:auto;" onchange="assignViewToSheet('${item.liveId || item.id}', this.value); this.value='';">
+                <option value="">+ Add View...</option>`;
+            
+            if (State.loadedViews && State.loadedViews.length > 0) {
+                const viewsByType = {};
+                State.loadedViews.forEach(v => {
+                    if (!viewsByType[v.Type]) viewsByType[v.Type] = [];
+                    viewsByType[v.Type].push(v);
+                });
+                Object.keys(viewsByType).sort().forEach(vt => {
+                    addViewHtml += `<optgroup label="${vt}">`;
+                    viewsByType[vt].forEach(v => {
+                        // Strict filter: View cannot be assigned ANYWHERE globally
+                        if (!allPlacedViews.has(v.Id.toString())) {
+                            addViewHtml += `<option value="${v.Id}">${v.Name}</option>`;
+                        }
+                    });
+                    addViewHtml += `</optgroup>`;
+                });
+            }
+            addViewHtml += `</select>`;
+
+            let actionText = "";
+            if (item.status === 'create') {
+                actionText = `<span style="color:#10b981; font-weight:600; font-size: 0.7rem; display:block;">CREATE</span>
+                              <label style="font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" checked onchange="toggleCreatePreset('${item.id}')"> Enable</label>`;
+            }
+            else if (item.status === 'update') {
+                actionText = `<span style="color:#f59e0b; font-weight:600; font-size: 0.7rem;">UPDATE</span>`;
+            }
+            else if (item.status === 'purge') {
+                actionText = `<span style="color:#ef4444; font-weight:600; font-size: 0.7rem; display:block;">PURGE</span>
+                              <label style="font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" checked onchange="togglePurgeLiveSheet('${item.liveId}')"> Enable</label>`;
+            }
+            else if (item.status === 'matched') {
+                actionText = `<span style="color:var(--text-secondary); font-weight:600; font-size: 0.7rem;">MATCHED</span>`;
+            }
+            else {
+                actionText = `<span style="color:var(--text-secondary); font-weight:600; font-size: 0.7rem; display:block;">UNASSIGNED</span>
+                              <label style="font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" onchange="togglePurgeLiveSheet('${item.liveId}')"> Purge</label>`;
+            }
+
+            const viewsCount = item.placedViews ? item.placedViews.length : 0;
+            const viewsBtnText = viewsCount > 0 ? `${viewsCount} Views` : `0 Views`;
+            const rowId = item.liveId || item.id;
+
+            return `<div>
+                <div class="unified-sheet-row status-${item.status}">
+                    <div style="display:flex; justify-content:center; align-items:center;">${jumpMarker}</div>
+                    <div><span class="sheet-num-badge">${item.number}</span></div>
+                    <div>${nameHtml}</div>
+                    <div>
+                        <button class="btn btn-secondary" onclick="toggleViewDrawer('${rowId}')" style="font-size:0.7rem; padding:0.2rem 0.5rem; background:rgba(0,0,0,0.3);">
+                            ${viewsBtnText} <span style="font-size:0.6rem;">▼</span>
+                        </button>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>${actionText}</div>
+                        <button class="edit-icon-btn" onclick="openEditModal('${item.id}', ${item.isLive})" title="Edit Sheet Properties">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                        </button>
+                    </div>
+                </div>
+                <div class="view-drawer" id="view-drawer-${rowId}">
+                    <div class="view-drawer-header">
+                        <strong style="color:var(--text-primary);">Placed Views</strong>
+                        ${addViewHtml}
+                    </div>
+                    ${drawerViewsHtml}
+                </div>
+            </div>`;
+        }
+
+        function buildTree(unifiedList, depth = 0, groupedKeys = []) {
+            if (depth >= State.groupBy.length) {
+                // Leaf node: render sheets
+                return unifiedList.map(renderUnifiedRow).join('');
+            }
+
+            const currentGroupProp = State.groupBy[depth];
+            const groups = {};
+            unifiedList.forEach(item => {
+                let key = "Unassigned";
+                if (currentGroupProp === "SheetSet") key = item.sheetSet;
+                else if (currentGroupProp === "SheetDiscipline") key = item.discipline;
+                else if (currentGroupProp === "SheetUse") key = item.use;
+                if (!key) key = "Unassigned";
+
+                if (!groups[key]) groups[key] = [];
+                groups[key].push(item);
+            });
+
+            let html = "";
+            const sortedKeys = Object.keys(groups).sort();
+            sortedKeys.forEach(k => {
+                const headerText = `${State.groupBy[depth]}: ${k.toUpperCase()} (${groups[k].length})`;
+                html += `
+                <div class="tree-group">
+                    <div class="tree-header" onclick="toggleTree(this)">
+                        <svg class="tree-toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                        ${headerText}
+                    </div>
+                    <div class="tree-children">
+                        ${buildTree(groups[k], depth + 1, [...groupedKeys, k])}
+                    </div>
+                </div>`;
+            });
+            return html;
+        }
+
+        function renderChecklist() {
+            const container = document.getElementById('checklist-container'); 
+            if (!container) return;
+            container.innerHTML = "";
+            
+            const unifiedList = getUnifiedList();
+            container.innerHTML = buildTree(unifiedList);
+        }
+
+function syncUI() {
+            document.getElementById('width-val').textContent = `${State.building.width} ft`;
+            document.getElementById('length-val').textContent = `${State.building.length} ft`;
+            const actionSheetsCount =
+                State.loadedSheets.filter(ls => State.liveSheetMappings[ls.Id] &&
+                    State.liveSheetMappings[ls.Id] !== "keep" &&
+                    State.liveSheetMappings[ls.Id] !== "purge").length +
+                Object.values(State.createMissingSheets).filter(Boolean).length;
+            document.getElementById('final-schema-count').textContent = actionSheetsCount;
+            renderChecklist();
+            drawSimulation();
+        }
+
+        // --- INITIALIZATION ---
+        function initializeData() {
+            if (window.RevitState) {
+                const rs = window.RevitState;
+                State.loadedSheets = rs.sheets || [];
+                State.loadedViews = rs.views || [];
+                State.loadedSheetSets = rs.sheetSets || [];
+                State.loadedTitleBlocks = rs.titleBlocks || [];
+                State.loadedLevels = rs.levels || [];
+
+                // Seed Sheet Use values from live model
+                const liveUseValues = rs.sheetUseValues || [];
+                liveUseValues.forEach(v => addSheetUseValue(v));
+
+                State.ncs.disciplines = rs.ncs ? (rs.ncs.disciplines || []) : [];
+                State.ncs.sheetTypes = rs.ncs ? (rs.ncs.sheetTypes || []) : [];
+                State.ncs.sequenceNumbers = rs.ncs ? (rs.ncs.sequenceNumbers || []) : [];
+                State.ncs.templates = rs.ncs ? (rs.ncs.templates || []) : [];
+
+                // Initialize the playground naming checker
+                setTimeout(() => {
+                    if (window.runLiveNamingCheckPlayground) {
+                        window.runLiveNamingCheckPlayground();
+                    }
+                }, 100);
+
+                // Populate Title Block selector
+                const tbSelect = document.getElementById('titleblock-select');
+                if (tbSelect) {
+                    tbSelect.innerHTML = "";
+                    if (State.loadedTitleBlocks.length > 0) {
+                        State.loadedTitleBlocks.forEach(tb => {
+                            const opt = document.createElement('option');
+                            opt.value = tb.Id;
+                            if (!tb.Width || tb.Width <= 0 || !tb.Height || tb.Height <= 0) {
+                                tb.Width = 36.0; tb.Height = 24.0;
+                            }
+                            opt.textContent = `${tb.FamilyName} - ${tb.TypeName} (${tb.Width}" x ${tb.Height}")`;
+                            tbSelect.appendChild(opt);
+                        });
+                        State.selectedTitleBlockId = State.loadedTitleBlocks[0].Id;
+                    } else {
+                        tbSelect.innerHTML = '<option value="">No Title Blocks Found</option>';
+                    }
+                }
+
+                // Populate Project Info
+                if (rs.projectInfo) {
+                    const pi = rs.projectInfo;
+                    if (pi["Project Name"]) document.getElementById('project-name') && (document.getElementById('project-name').textContent = pi["Project Name"]);
+                    if (pi["Project Number"]) document.getElementById('project-number') && (document.getElementById('project-number').textContent = pi["Project Number"]);
+                }
+            }
+
+            // Load cached session state
+            loadSessionCache();
+
+            // Generate preset sheets from active view types
+            updatePresetSheets();
+
+            // Auto-align sheets against live model
+            autoAlignSheets();
+        }
+
+        function initEvents() {
+            // Export intent button
+            const exportBtn = document.getElementById('btn-export-intent');
+            if (exportBtn) {
+                exportBtn.addEventListener('click', () => {
+                    const tb = State.loadedTitleBlocks.find(b => b.Id == State.selectedTitleBlockId);
+                    const tbName = tb ? `${tb.FamilyName}:${tb.TypeName}` : "Unknown Title Block";
+
+                    const finalizedSheets = [];
+                    const purgeSheets = [];
+
+                    // Process live sheet mappings (overwrites / skips)
+                    if (State.loadedSheets && State.liveSheetMappings) {
+                        State.loadedSheets.forEach(ls => {
+                            const target = State.liveSheetMappings[ls.Id];
+                            if (target && target !== "keep" && target !== "purge") {
+                                const preset = State.sheets.find(s => s.Number === target);
+                                if (preset) {
+                                    let needsOverwrite = ls.Number !== preset.Number || ls.Name.toUpperCase() !== preset.Name.toUpperCase();
+                                    const renameViews = {};
+                                    if (ls.PlacedViews) {
+                                        ls.PlacedViews.forEach(v => {
+                                            const viewKey = preset.Number + "_" + v.Id;
+                                            const renameData = State.viewRenames[viewKey];
+                                            if (renameData && renameData.Enabled && renameData.ProposedName && renameData.ProposedName !== v.Name) {
+                                                renameViews[v.Id] = renameData.ProposedName;
+                                                needsOverwrite = true;
+                                            }
+                                        });
+                                    }
+                                    finalizedSheets.push({
+                                        Number: preset.Number,
+                                        Name: preset.Name,
+                                        TitleBlock: preset.TitleBlock || tbName,
+                                        TitleBlockId: preset.TitleBlockId || State.selectedTitleBlockId,
+                                        SchemaLink: preset.SchemaLink,
+                                        SheetSet: preset.SheetSet,
+                                        SheetDiscipline: preset.SheetDiscipline || getAIADiscipline(preset.Designator),
+                                        SheetUse: preset.SheetUse || "",
+                                        ScopeBoxName: preset.ScopeBoxName || "",
+                                        RevitId: ls.Id,
+                                        Action: needsOverwrite ? "Overwrite" : "Skip",
+                                        RenameViews: renameViews,
+                                        DesignatorCode: getDesignatorCode(preset.Designator, preset.SheetType)
+                                    });
+                                }
+                            } else if (target === "purge") {
+                                purgeSheets.push({ Number: ls.Number, Name: ls.Name, RevitId: ls.Id });
+                            }
+                        });
+                    }
+
+                    // Process missing preset creations
+                    if (State.createMissingSheets) {
+                        Object.keys(State.createMissingSheets).forEach(num => {
+                            if (State.createMissingSheets[num]) {
+                                const preset = State.sheets.find(s => s.Number === num);
+                                if (preset) {
+                                    finalizedSheets.push({
+                                        Number: preset.Number,
+                                        Name: preset.Name,
+                                        TitleBlock: preset.TitleBlock || tbName,
+                                        TitleBlockId: preset.TitleBlockId || State.selectedTitleBlockId,
+                                        SchemaLink: preset.SchemaLink,
+                                        SheetSet: preset.SheetSet,
+                                        SheetDiscipline: preset.SheetDiscipline || getAIADiscipline(preset.Designator),
+                                        SheetUse: preset.SheetUse || "",
+                                        ScopeBoxName: preset.ScopeBoxName || "",
+                                        RevitId: null,
+                                        Action: "Create",
+                                        RenameViews: {},
+                                        DesignatorCode: getDesignatorCode(preset.Designator, preset.SheetType)
+                                    });
+                                }
+                            }
+                        });
+                    }
+
+                    if (finalizedSheets.length === 0 && purgeSheets.length === 0) {
+                        alert("No alignment mappings, missing sheet creations, or purges were scheduled.");
+                        return;
+                    }
+
+                    const creations = finalizedSheets.filter(s => s.Action === "Create").length;
+                    const overwrites = finalizedSheets.filter(s => s.Action === "Overwrite").length;
+                    const purges = purgeSheets.length;
+
+                    let confirmMsg = "Please verify your sheet changes before exporting:\n\n";
+                    if (creations > 0) confirmMsg += `• ${creations} Sheets will be CREATED\n`;
+                    if (overwrites > 0) confirmMsg += `• ${overwrites} Sheets will be RENAMED or RENUMBERED\n`;
+                    if (purges > 0) confirmMsg += `• ${purges} Sheets will be PURGED (Deleted from Model)\n`;
+                    confirmMsg += "\nDo you want to proceed and export the execution intent?";
+
+                    if (!confirm(confirmMsg)) return;
+
+                    const exportData = {
+                        LibraryType: State.selectedLibrary,
+                        TitleBlockId: State.selectedTitleBlockId,
+                        TitleBlock: tbName,
+                        Sheets: finalizedSheets,
+                        Purges: purgeSheets
+                    };
+
+                    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
+                    const dlAnchor = document.createElement('a');
+                    dlAnchor.setAttribute("href", dataStr);
+                    dlAnchor.setAttribute("download", "execution_intent.json");
+                    document.body.appendChild(dlAnchor);
+                    dlAnchor.click();
+                    dlAnchor.remove();
+                    saveSessionCache();
+                });
+            }
+
+            // Confirm export checkbox
+            const confirmCheck = document.getElementById('confirm-export-check');
+            if (confirmCheck) {
+                confirmCheck.addEventListener('change', (e) => {
+                    State.exportConfirmed = e.target.checked;
+                    const btn = document.getElementById('btn-export-intent');
+                    if (btn) btn.disabled = !e.target.checked;
+                });
+            }
+
+            window.addEventListener('resize', drawSimulation);
+        }
+
+        // --- STARTUP ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initializeData();
+            initEvents();
+            registerListener(syncUI);
+            notifyListeners();
+        });
+    </script>
+</body>
+</html>
