@@ -13,6 +13,8 @@
         :root {
             --bg-base: #0f172a;
             --bg-surface: #1e293b;
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
             --bg-card: rgba(30, 41, 59, 0.75);
             --border-color: #334155;
             --text-primary: #f8fafc;
@@ -39,6 +41,16 @@
             display: flex;
             flex-direction: column;
             overflow-x: hidden;
+        }
+
+        select option {
+            background-color: var(--bg-primary);
+            color: var(--text-primary);
+        }
+        select optgroup {
+            background-color: var(--bg-secondary);
+            color: var(--accent-primary);
+            font-weight: 600;
         }
 
         header {
@@ -94,12 +106,24 @@
 
         main {
             display: grid;
-            grid-template-columns: 1fr 420px;
+            grid-template-columns: 1fr 8px 350px;
             flex: 1;
-            gap: 1.5rem;
+            gap: 0.5rem;
             padding: 1.5rem;
             height: calc(100vh - 65px);
             overflow: hidden;
+        }
+        
+        .resizer {
+            background-color: var(--border-color);
+            cursor: col-resize;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+            width: 8px;
+            height: 100%;
+        }
+        .resizer:hover, .resizer.active {
+            background-color: var(--accent-primary);
         }
 
         @media (max-width: 1024px) {
@@ -108,17 +132,19 @@
                 overflow-y: auto;
                 height: auto;
             }
+            .resizer { display: none; }
         }
 
         .panel {
-            background-color: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 12px;
+            background-color: rgba(15, 23, 42, 0.7);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 16px;
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            backdrop-filter: blur(8px);
-            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
         }
 
         .panel-header {
@@ -975,25 +1001,33 @@
 
         /* -- NEW UI OVERHAUL CSS -- */
         .tree-group {
-            border: 1px solid var(--border-color);
-            border-radius: 6px;
-            margin-bottom: 0.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            margin-bottom: 0.75rem;
             overflow: hidden;
             background: rgba(15, 23, 42, 0.4);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        .tree-group:hover {
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
+            transform: translateY(-1px);
         }
         .tree-header {
-            padding: 0.5rem 1rem;
-            background: rgba(30, 41, 59, 0.8);
+            padding: 0.75rem 1rem;
+            background: linear-gradient(90deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.8) 100%);
             cursor: pointer;
             display: flex;
             align-items: center;
             font-weight: 600;
-            font-size: 0.85rem;
-            color: var(--text-primary);
-            border-bottom: 1px solid var(--border-color);
+            font-size: 0.9rem;
+            letter-spacing: 0.02em;
+            color: var(--accent-primary);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            transition: background 0.3s ease;
         }
         .tree-header:hover {
-            background: rgba(51, 65, 85, 0.8);
+            background: linear-gradient(90deg, rgba(51, 65, 85, 0.9) 0%, rgba(30, 41, 59, 0.8) 100%);
         }
         .tree-toggle-icon {
             margin-right: 0.5rem;
@@ -1022,7 +1056,7 @@
             display: block;
         }
         .view-drawer-header {
-            display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;
+            display: flex; flex-direction: column; align-items: stretch; margin-bottom: 0.5rem;
         }
         .view-item-row {
             display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px dotted rgba(255,255,255,0.1);
@@ -1031,20 +1065,16 @@
         
         .unified-sheet-row {
             display: grid;
-            grid-template-columns: 24px 100px minmax(200px, 1fr) 120px 100px;
+            grid-template-columns: 20px 75px minmax(150px, 1fr) auto 150px;
             gap: 0.5rem;
             align-items: center;
-            padding: 0.5rem 1rem 0.5rem 0.5rem;
-            border-bottom: 1px solid rgba(255,255,255,0.05);
+            padding: 0.6rem 1rem 0.6rem 0.5rem;
+            background-color: rgba(30, 41, 59, 0.6);
+            border: 1px solid rgba(255,255,255,0.05);
+            border-radius: 6px;
             font-size: 0.8rem;
             border-left: 4px solid transparent;
-            margin-bottom: 2px;
-        }
-        .unified-sheet-row:last-child {
-            border-bottom: none;
-        }
-        .unified-sheet-row:hover {
-            background: rgba(255,255,255,0.02);
+            margin-bottom: 0.4rem;
         }
         
         /* Status Colors */
@@ -1097,7 +1127,7 @@
         
         .view-assignment-select {
             background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary);
-            border-radius: 4px; padding: 0.2rem; font-size: 0.75rem; width: 100%; max-width: 180px;
+            border-radius: 4px; padding: 0.4rem; font-size: 0.75rem; width: 100%; margin-top: 0.5rem;
         }
         .view-assignment-select option {
             background: var(--bg-primary); color: var(--text-primary);
@@ -1209,35 +1239,19 @@
         <!-- Panel 1: Main Sheet Template Checklist -->
         <div class="panel">
             
-            <div class="panel-header">
-                <span>Sheet Alignment Workspace</span>
-                <div style="display: flex; gap: 1rem; align-items: center;">
-                    <div style="font-size: 0.8rem; display: flex; align-items: center; gap: 0.5rem;">
-                        <label style="color: var(--text-secondary);">Group By:</label>
-                        <select id="group-by-1" onchange="updateGroupBy()" style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 2px;">
-                            <option value="SheetSet" selected>Sheet Set</option>
-                            <option value="SheetDiscipline">Discipline</option>
-                            <option value="SheetUse">Use</option>
-                        </select>
-                        <span style="color: var(--text-secondary);">></span>
-                        <select id="group-by-2" onchange="updateGroupBy()" style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 2px;">
-                            <option value="SheetSet">Sheet Set</option>
-                            <option value="SheetDiscipline" selected>Discipline</option>
-                            <option value="SheetUse">Use</option>
-                        </select>
-                        <span style="color: var(--text-secondary);">></span>
-                        <select id="group-by-3" onchange="updateGroupBy()" style="background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 2px;">
-                            <option value="SheetSet">Sheet Set</option>
-                            <option value="SheetDiscipline">Discipline</option>
-                            <option value="SheetUse" selected>Use</option>
-                        </select>
-                        <div style="display:flex; gap:0.25rem; margin-left: 0.5rem;">
-                            <button class="btn btn-secondary" onclick="expandAllTree()" style="padding: 2px 6px; font-size: 0.7rem;">Expand All</button>
-                            <button class="btn btn-secondary" onclick="collapseAllTree()" style="padding: 2px 6px; font-size: 0.7rem;">Collapse All</button>
-                        </div>
+            <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 0.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span>Sheet Alignment Workspace</span>
+                    <div class="search-container" style="margin-bottom: 0; flex: 0 1 250px;">
+                        <input type="text" id="sheet-search" class="search-input" placeholder="🔍 Search sheets..." oninput="State.searchQuery = this.value; renderChecklist();" style="padding: 0.3rem 0.5rem;">
                     </div>
-                    <div class="search-container">
-                        <input type="text" id="sheet-search" class="search-input" placeholder="🔍 Search sheets...">
+                    <div style="display:flex; gap:0.25rem;">
+                        <button class="btn btn-secondary" onclick="expandAllTree()" style="padding: 2px 6px;" title="Expand All">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        </button>
+                        <button class="btn btn-secondary" onclick="collapseAllTree()" style="padding: 2px 6px;" title="Collapse All">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                        </button>
                     </div>
                 </div>
             </div>
@@ -1267,6 +1281,8 @@
             </div>
         </div>
 
+                <div class="resizer" id="pane-resizer"></div>
+        
         <!-- Panel 2: Builder Configurations & Manual Creator -->
         <div class="panel">
             <div class="panel-header">Builder Control Panel</div>
@@ -1311,7 +1327,7 @@
                 <div class="divider"></div>
 
                 <!-- Collapsible Fit Simulator Card -->
-                <div class="helper-card collapsed" id="simulator-card">
+                <div class="helper-card" id="simulator-card">
                     <div class="helper-card-header" onclick="toggleHelperCard()">
                         <span>📐 Sheet Fit & Bounding Box Helper</span>
                         <svg class="accordion-toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
@@ -1319,56 +1335,68 @@
                     <div class="helper-card-content">
                         <!-- Footprint sliders -->
                         <div class="slider-container">
-                            <div class="slider-header">
+                            <div class="slider-header" style="align-items: center;">
                                 <label for="footprint-width">Footprint Width</label>
-                                <span class="slider-value" id="width-val">300 ft</span>
+                                <div style="display: flex; align-items: center;">
+                                    <input type="number" id="width-val" value="150" min="20" max="1000" style="width: 55px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 0.1rem 0.3rem; text-align: right; font-size: 0.8rem; margin-right: 0.25rem;">
+                                    <span style="color: var(--text-secondary); font-size: 0.75rem;">ft</span>
+                                </div>
                             </div>
-                            <input type="range" id="footprint-width" min="50" max="600" value="300">
+                            <input type="range" id="footprint-width" min="20" max="1000" value="150">
                         </div>
 
                         <div class="slider-container">
-                            <div class="slider-header">
+                            <div class="slider-header" style="align-items: center;">
                                 <label for="footprint-length">Footprint Length</label>
-                                <span class="slider-value" id="length-val">200 ft</span>
+                                <div style="display: flex; align-items: center;">
+                                    <input type="number" id="length-val" value="100" min="20" max="1000" style="width: 55px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 0.1rem 0.3rem; text-align: right; font-size: 0.8rem; margin-right: 0.25rem;">
+                                    <span style="color: var(--text-secondary); font-size: 0.75rem;">ft</span>
+                                </div>
                             </div>
-                            <input type="range" id="footprint-length" min="50" max="600" value="200">
+                            <input type="range" id="footprint-length" min="20" max="1000" value="100">
                         </div>
 
-                        <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 0.5rem;">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
                             <div class="form-group">
-                                <label for="scale-select">Scale</label>
-                                <select id="scale-select">
+                                <label for="scale-select-overall">Overall Plan Scale</label>
+                                <select id="scale-select-overall">
                                     <option value="0.0625">1/16" = 1'-0"</option>
                                     <option value="0.125" selected>1/8" = 1'-0"</option>
                                     <option value="0.25">1/4" = 1'-0"</option>
-                                    <option value="0.5">1/2" = 1'-0"</option>
                                 </select>
                             </div>
-                            <div class="slider-container">
-                                <div class="slider-header">
-                                    <label for="sheet-overlap">Overlap</label>
-                                    <span class="slider-value" id="overlap-val">10 ft</span>
+                            <div class="slider-container" style="margin-bottom: 0;">
+                                <div class="slider-header" style="align-items: center;">
+                                    <label for="sheet-overlap">Segment Overlap</label>
+                                    <div style="display: flex; align-items: center;">
+                                        <input type="number" id="overlap-val" value="10" min="0" max="100" style="width: 55px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 0.1rem 0.3rem; text-align: right; font-size: 0.8rem; margin-right: 0.25rem;">
+                                        <span style="color: var(--text-secondary); font-size: 0.75rem;">ft</span>
+                                    </div>
                                 </div>
-                                <input type="range" id="sheet-overlap" min="0" max="50" value="10">
+                                <input type="range" id="sheet-overlap" min="0" max="100" value="10">
                             </div>
                         </div>
 
-                        <div class="canvas-container">
-                            <canvas id="simulator-canvas"></canvas>
+                        <!-- Subtle Cascading Calculations -->
+                        <div style="margin-top: 0.5rem; padding: 0.75rem; border: 1px solid rgba(255,255,255,0.05); border-radius: 6px; background: rgba(0,0,0,0.2);">
+                            <div style="font-size: 0.7rem; color: var(--text-secondary); text-transform: uppercase; font-weight: 600; margin-bottom: 0.4rem; letter-spacing: 0.05em;">Cascading Grid Evaluation</div>
+                            <div style="font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.3rem;">
+                                <div id="calc-l1" style="color: var(--text-primary); display: flex; justify-content: space-between;"><span>Overall Scale:</span> <span>1 Sheet</span></div>
+                                <div id="calc-l2" style="color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Primary Segments (2x):</span> <span>2x2 Grid (4)</span></div>
+                                <div id="calc-l3" style="color: var(--text-secondary); display: flex; justify-content: space-between;"><span>Secondary Segments (4x):</span> <span>4x4 Grid (16)</span></div>
+                            </div>
+                            
+                            <div class="form-group" style="margin-top: 0.75rem;">
+                                <label for="scale-target-tier" style="color: var(--accent-primary); font-size: 0.75rem;">Target Segments to Append</label>
+                                <select id="scale-target-tier" style="background-color: rgba(15, 23, 42, 0.9); border-color: var(--accent-primary);">
+                                    <option value="1">Primary Segments (e.g. 1/8")</option>
+                                    <option value="2">Secondary Segments (e.g. 1/4")</option>
+                                </select>
+                            </div>
                         </div>
-                        <div class="simulator-stats">
-                            <div class="stat-card" id="fit-card">
-                                <span class="stat-val" id="fit-val">YES</span>
-                                <span class="stat-label">Fits</span>
-                            </div>
-                            <div class="stat-card">
-                                <span class="stat-val" id="sheet-count-val">1</span>
-                                <span class="stat-label">Sheets</span>
-                            </div>
-                            <div class="stat-card">
-                                <span class="stat-val" id="grid-layout-val">1 x 1</span>
-                                <span class="stat-label">Grid</span>
-                            </div>
+
+                        <div class="canvas-container" style="margin-top: 0.75rem;">
+                            <canvas id="simulator-canvas"></canvas>
                         </div>
 
                         <button class="btn btn-secondary" id="btn-generate-sectors">
@@ -1447,7 +1475,7 @@
                     <input type="text" id="modal-sheet-name">
                 </div>
                 <div class="form-group">
-                    <label>Sheet Set</label>
+                    <label>Sheet Collection</label>
                     <select id="modal-sheet-set"></select>
                 </div>
                 <div class="form-group">
@@ -1535,8 +1563,9 @@
         }
 
         const State = {
-            building: { width: 300, length: 200 },
-            selectedScale: 0.125,
+            building: { width: 150, length: 100 },
+            selectedScaleOverall: 0.125,
+            selectedScaleEnlarged: 0.25,
             selectedTitleBlockId: null,
             selectedLibrary: "Convenience Store",
             overlap: 10,
@@ -1544,7 +1573,7 @@
             loadedTitleBlocks: [],
             loadedSheets: [],
             loadedViews: [],
-            loadedSheetSets: [],
+            loadedSheetCollections: [],
             loadedLevels: [],
             activeViewTypes: [],
             ncs: { disciplines: [], sheetTypes: [], sequenceNumbers: [] },
@@ -1560,7 +1589,8 @@
             exportConfirmed: false,
             separator: "-",
             separator2: "0",
-            sheetUseValues: []
+            sheetUseValues: [],
+            activeGridTargetId: null
         };
 
         const listeners = [];
@@ -1687,7 +1717,7 @@
                             Designator: vt.designator,
                             SheetType: vt.type,
                             SchemaLink: generateUUID(),
-                            SheetSet: getDisciplineFromDesignator(vt.designator),
+                            SheetCollection: "",
                             IsChecked: true,
                             IsSimulatorGenerated: false,
                             LevelId: level.Id,
@@ -1708,7 +1738,7 @@
                         Designator: vt.designator,
                         SheetType: vt.type,
                         SchemaLink: generateUUID(),
-                        SheetSet: getDisciplineFromDesignator(vt.designator),
+                        SheetCollection: getDisciplineFromDesignator(vt.designator),
                         IsChecked: true,
                         IsSimulatorGenerated: false,
                         LevelId: "",
@@ -1783,7 +1813,7 @@
             return lvl ? lvl.Elevation : -9999;
         }
 
-        function getSheetSetPriority(setName) {
+        function getSheetCollectionPriority(setName) {
             if (!setName) return 999;
             const upperName = setName.toUpperCase();
             const priorities = {
@@ -1799,31 +1829,31 @@
             return 999;
         }
 
-        function getSheetSetOptions() {
-            const assigned = (State.sheets || []).map(s => s.SheetSet).filter(Boolean);
-            const loaded = State.loadedSheetSets || [];
+        function getSheetCollectionOptions() {
+            const assigned = (State.sheets || []).map(s => s.SheetCollection).filter(Boolean);
+            const loaded = State.loadedSheetCollections || [];
             const standard = ["COVER SHEET", "GENERAL", "CIVIL/SITE", "STRUCTURAL", "ARCHITECTURAL", "INTERIORS", "MECHANICAL", "ELECTRICAL", "PLUMBING", "FIRE PROTECTION", "EQUIPMENT"];
             const allSets = new Set([...assigned, ...loaded, ...standard]);
             return Array.from(allSets).filter(s => s && typeof s === 'string').sort();
         }
 
-        window.changeSheetSet = function(sheetNumber, newSetName) {
+        window.changeSheetCollection = function(sheetNumber, newSetName) {
             if (newSetName === "__new__") {
-                const customName = prompt("Enter the name of the new Sheet Set:");
+                const customName = prompt("Enter the name of the new Sheet Collection:");
                 if (!customName || !customName.trim()) { notifyListeners(); return; }
                 newSetName = customName.trim().toUpperCase();
             }
             const sheet = State.sheets.find(s => s.Number === sheetNumber);
             if (sheet) {
-                sheet.SheetSet = newSetName;
+                sheet.SheetCollection = newSetName;
                 saveSessionCache();
                 autoAlignSheets();
                 notifyListeners();
             }
         };
 
-        window.toggleSheetSetGroup = function(setName, checked) {
-            const setSheets = State.sheets.filter(p => p.SheetSet === setName && !p.IsSimulatorGenerated);
+        window.toggleSheetCollectionGroup = function(setName, checked) {
+            const setSheets = State.sheets.filter(p => p.SheetCollection === setName && !p.IsSimulatorGenerated);
             setSheets.forEach(p => {
                 const isMapped = State.loadedSheets.some(ls => State.liveSheetMappings[ls.Id] === p.Number);
                 if (!isMapped) State.createMissingSheets[p.Number] = checked;
@@ -2054,7 +2084,7 @@
             State.sheets.push({
                 Number: finalNumber, Name: finalName, Discipline: getDisciplineFromDesignator(designator),
                 Designator: designator, SheetType: sheetType, SchemaLink: generateUUID(),
-                SheetSet: setId, IsChecked: true, IsCustom: true, LevelId: isLevelBound ? selectedLevelId : "",
+                SheetCollection: setId, IsChecked: true, IsCustom: true, LevelId: isLevelBound ? selectedLevelId : "",
                 LevelName: isLevelBound ? selectedLevelName : "", SheetDiscipline: getAIADiscipline(designator), SheetUse: ""
             });
             State.activeLevelInlineForm[setId] = false;
@@ -2123,7 +2153,7 @@
                     customSheets: State.sheets ? State.sheets.filter(s => s.IsCustom).map(s => {
                         return {
                             Number: s.Number, Name: s.Name, Discipline: s.Discipline, Designator: s.Designator,
-                            SheetType: s.SheetType, SchemaLink: s.SchemaLink, SheetSet: s.SheetSet,
+                            SheetType: s.SheetType, SchemaLink: s.SchemaLink, SheetCollection: s.SheetCollection,
                             LevelId: s.LevelId, LevelName: s.LevelName, SheetDiscipline: s.SheetDiscipline, SheetUse: s.SheetUse
                         };
                     }) : []
@@ -2252,18 +2282,22 @@
             updatePresetSheets(); State.viewRenames = {}; State.purges = []; loadSessionCache(); autoAlignSheets(); notifyListeners();
         };
 
-        function calculateLayout() {
+        function calculateLayout(multiplier = 1) {
             const tb = State.loadedTitleBlocks.find(b => b.Id == State.selectedTitleBlockId);
             if (!tb) return { fits: false, cols: 1, rows: 1, sheetWidth: 0, sheetHeight: 0, usableWidth: 0, usableHeight: 0 };
             const w_sheet = tb.Width; const h_sheet = tb.Height;
             const usableWidth = w_sheet - State.margins.left - State.margins.right;
             const usableHeight = h_sheet - State.margins.top - State.margins.bottom;
-            const scale = State.selectedScale; const b_width = State.building.width; const b_length = State.building.length; const overlap_ft = State.overlap;
-            const w_paper = b_width * scale; const h_paper = b_length * scale;
+            
+            const baseScale = State.selectedScaleOverall;
+            const targetScale = baseScale * multiplier;
+            
+            const b_width = State.building.width; const b_length = State.building.length; const overlap_ft = State.overlap;
+            const w_paper = b_width * targetScale; const h_paper = b_length * targetScale;
             const fits = (w_paper <= usableWidth && h_paper <= usableHeight) || (h_paper <= usableWidth && w_paper <= usableHeight);
             let cols = 1; let rows = 1; let bestOrientation = 'normal';
             if (!fits) {
-                const usableWidthFt = usableWidth / scale; const usableHeightFt = usableHeight / scale;
+                const usableWidthFt = usableWidth / targetScale; const usableHeightFt = usableHeight / targetScale;
                 const colsNormal = Math.max(1, Math.ceil((b_width - overlap_ft) / (usableWidthFt - overlap_ft)));
                 const rowsNormal = Math.max(1, Math.ceil((b_length - overlap_ft) / (usableHeightFt - overlap_ft)));
                 const totalNormal = colsNormal * rowsNormal;
@@ -2273,7 +2307,7 @@
                 if (totalRotated < totalNormal) { cols = colsRotated; rows = rowsRotated; bestOrientation = 'rotated'; }
                 else { cols = colsNormal; rows = rowsNormal; bestOrientation = 'normal'; }
             }
-            return { fits, cols, rows, orientation: bestOrientation, sheetWidth: w_sheet, sheetHeight: h_sheet, usableWidth, usableHeight, scale, buildingWidth: b_width, buildingLength: b_length };
+            return { fits, cols, rows, orientation: bestOrientation, sheetWidth: w_sheet, sheetHeight: h_sheet, usableWidth, usableHeight, scale: targetScale, buildingWidth: b_width, buildingLength: b_length };
         }
 
         function drawSimulation() {
@@ -2282,26 +2316,47 @@
             const dpr = window.devicePixelRatio || 1; const rect = container.getBoundingClientRect();
             canvas.width = rect.width * dpr; canvas.height = rect.height * dpr; canvas.style.width = `${rect.width}px`; canvas.style.height = `${rect.height}px`; ctx.scale(dpr, dpr);
             const w_c = rect.width; const h_c = rect.height; ctx.clearRect(0, 0, w_c, h_c);
-            const layout = calculateLayout(); if (layout.sheetWidth === 0) return;
-            const padding = 15; const fitScaleX = (w_c - padding * 2) / layout.sheetWidth; const fitScaleY = (h_c - padding * 2) / layout.sheetHeight; const canvasScale = Math.min(fitScaleX, fitScaleY);
-            const w_draw = layout.sheetWidth * canvasScale; const h_draw = layout.sheetHeight * canvasScale; const x_draw = (w_c - w_draw) / 2; const y_draw = (h_c - h_draw) / 2;
+            
+            // Cascading Calcs
+            const l1 = calculateLayout(1); // Overall
+            const l2 = calculateLayout(2); // Primary
+            const l3 = calculateLayout(4); // Secondary
+            if (l1.sheetWidth === 0) return;
+
+            // DOM Updates for subtle calculations
+            document.getElementById('calc-l1').innerHTML = `<span>Overall Scale:</span> <span style="color: ${l1.fits ? '#10b981' : '#ef4444'}">${l1.fits ? 'Fits 1 Sheet' : 'Exceeds Sheet Size!'}</span>`;
+            document.getElementById('calc-l2').innerHTML = `<span>Primary Segments (2x):</span> <span>${l2.cols}x${l2.rows} Grid (${l2.cols*l2.rows})</span>`;
+            document.getElementById('calc-l3').innerHTML = `<span>Secondary Segments (4x):</span> <span>${l3.cols}x${l3.rows} Grid (${l3.cols*l3.rows})</span>`;
+            
+            const targetTier = parseInt(document.getElementById('scale-target-tier').value);
+            const targetLayout = targetTier === 1 ? l2 : l3;
+
+            // Draw target layout to show the grid on Canvas
+            const padding = 15; const fitScaleX = (w_c - padding * 2) / targetLayout.sheetWidth; const fitScaleY = (h_c - padding * 2) / targetLayout.sheetHeight; const canvasScale = Math.min(fitScaleX, fitScaleY);
+            const w_draw = targetLayout.sheetWidth * canvasScale; const h_draw = targetLayout.sheetHeight * canvasScale; const x_draw = (w_c - w_draw) / 2; const y_draw = (h_c - h_draw) / 2;
             ctx.fillStyle = '#1e293b'; ctx.fillRect(x_draw, y_draw, w_draw, h_draw); ctx.strokeStyle = '#64748b'; ctx.lineWidth = 1.5; ctx.strokeRect(x_draw, y_draw, w_draw, h_draw);
             const marginL = State.margins.left * canvasScale; const marginR = State.margins.right * canvasScale; const marginT = State.margins.top * canvasScale; const marginB = State.margins.bottom * canvasScale;
             const x_usable = x_draw + marginL; const y_usable = y_draw + marginT; const w_usable = w_draw - marginL - marginR; const h_usable = h_draw - marginT - marginB;
             ctx.strokeStyle = '#ef444455'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.strokeRect(x_usable, y_usable, w_usable, h_usable); ctx.setLineDash([]);
             ctx.fillStyle = '#334155'; ctx.fillRect(x_draw + w_draw - marginR, y_draw, marginR, h_draw);
-            const scale = layout.scale; const ftWidth = layout.buildingWidth; const ftLength = layout.buildingLength;
+            
+            const scale = targetLayout.scale; const ftWidth = targetLayout.buildingWidth; const ftLength = targetLayout.buildingLength;
             let w_build_paper = ftWidth * scale * canvasScale; let h_build_paper = ftLength * scale * canvasScale;
-            if (layout.orientation === 'rotated') { w_build_paper = ftLength * scale * canvasScale; h_build_paper = ftWidth * scale * canvasScale; }
+            if (targetLayout.orientation === 'rotated') { w_build_paper = ftLength * scale * canvasScale; h_build_paper = ftWidth * scale * canvasScale; }
             const x_build = x_usable + (w_usable - w_build_paper) / 2; const y_build = y_usable + (h_usable - h_build_paper) / 2;
-            if (layout.fits) { ctx.fillStyle = 'rgba(16, 185, 129, 0.25)'; ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2; ctx.fillRect(x_build, y_build, w_build_paper, h_build_paper); ctx.strokeRect(x_build, y_build, w_build_paper, h_build_paper); }
-            else {
+            
+            if (targetLayout.fits) { 
+                ctx.fillStyle = 'rgba(16, 185, 129, 0.25)'; ctx.strokeStyle = '#10b981'; ctx.lineWidth = 2; ctx.fillRect(x_build, y_build, w_build_paper, h_build_paper); ctx.strokeRect(x_build, y_build, w_build_paper, h_build_paper); 
+            } else {
                 ctx.fillStyle = 'rgba(239, 68, 68, 0.05)'; ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 1.5; ctx.fillRect(x_build, y_build, w_build_paper, h_build_paper); ctx.strokeRect(x_build, y_build, w_build_paper, h_build_paper);
-                const cols = layout.cols; const rows = layout.rows; const sectorW = w_build_paper / cols; const sectorH = h_build_paper / rows;
+                const cols = targetLayout.cols; const rows = targetLayout.rows; const sectorW = w_build_paper / cols; const sectorH = h_build_paper / rows;
                 ctx.strokeStyle = 'rgba(6, 182, 212, 0.4)'; ctx.fillStyle = 'rgba(6, 182, 212, 0.1)'; ctx.lineWidth = 1;
+                const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
                 for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
                     const sx = x_build + c * sectorW; const sy = y_build + r * sectorH; ctx.fillRect(sx, sy, sectorW, sectorH); ctx.strokeRect(sx, sy, sectorW, sectorH);
-                    const label = String.fromCharCode(65 + r) + (c + 1); ctx.fillStyle = 'rgba(6, 182, 212, 0.8)'; ctx.font = '10px Outfit'; ctx.textAlign = 'center'; ctx.fillText(label, sx + sectorW / 2, sy + sectorH / 2 + 3);
+                    const idx = r * cols + c;
+                    const label = idx < letters.length ? "SEGMENT " + letters[idx] : "SEG " + (idx+1); 
+                    ctx.fillStyle = 'rgba(6, 182, 212, 0.8)'; ctx.font = '10px Outfit'; ctx.textAlign = 'center'; ctx.fillText(label, sx + sectorW / 2, sy + sectorH / 2 + 3);
                 }
             }
         }
@@ -2320,31 +2375,31 @@
         };
 
         function appendSimulatorSectors() {
-            const layout = calculateLayout();
-            if (layout.fits) { alert("The building footprint fits on a single sheet. No Enlarged Sectors needed."); return; }
+            const layout = calculateLayout(false); // Use Enlarged scale layout
+            if (layout.fits) { alert("The building footprint fits on a single sheet at the enlarged scale. No Enlarged Sectors needed."); return; }
             const tb = State.loadedTitleBlocks.find(b => b.Id == State.selectedTitleBlockId);
             const tbName = tb ? `${tb.FamilyName}:${tb.TypeName}` : "Unknown Title Block";
             State.sheets = State.sheets.filter(s => !s.IsSimulatorGenerated);
-            const cols = layout.cols; const rows = layout.rows; let sectorIndex = 1;
-            for (let r = 0; r < rows; r++) {
-                const rowLetter = String.fromCharCode(65 + r);
-                for (let c = 0; c < cols; c++) {
-                    const colNum = c + 1; const sectorName = `${rowLetter}${colNum}`; const sheetNum = `A-4${sectorIndex.toString().padStart(2, '0')}`;
-                    State.sheets.push({
-                        Number: sheetNum, Name: `ENLARGED PLAN - SECTOR ${sectorName}`, Discipline: "ARCHITECTURAL", Designator: "A", SheetType: "4",
-                        SchemaLink: generateUUID(), ScopeBoxName: `Scope Box - Sector ${sectorName}`, SheetSet: "Enlarged Plans", IsChecked: true, IsSimulatorGenerated: true,
-                        TitleBlock: tbName, TitleBlockId: State.selectedTitleBlockId, SheetDiscipline: "ARCHITECTURAL", SheetUse: ""
-                    });
-                    sectorIndex++;
-                }
+            const cols = layout.cols; const rows = layout.rows;
+            const totalSegments = cols * rows;
+            const letters = "ABCDEFGHIJKLMNOP";
+            for (let i = 0; i < totalSegments; i++) {
+                const segName = letters[i];
+                const seq = String(i + 1).padStart(2, '0');
+                const sheetNum = `A4-101-${seq}`;
+                State.sheets.push({
+                    Number: sheetNum, Name: `FLOOR PLAN - LEVEL 1 - SEGMENT ${segName}`, Discipline: "ARCHITECTURAL", Designator: "A", SheetType: "4",
+                    SchemaLink: generateUUID(), ScopeBoxName: `Scope Box - Segment ${segName}`, SheetCollection: "Enlarged Plans", IsChecked: true, IsSimulatorGenerated: true,
+                    TitleBlock: tbName, TitleBlockId: State.selectedTitleBlockId, SheetDiscipline: "ARCHITECTURAL", SheetUse: ""
+                });
             }
             notifyListeners();
-            alert(`Generated and appended ${cols * rows} Enlarged Sectors (A-400 series) to the checklist.`);
+            alert(`Generated and appended ${totalSegments} Enlarged Segments (A4-101 series) to the checklist.`);
         }
 
         function createHeaderRow() {
             const header = document.createElement('div'); header.className = "guideline-header-row";
-            header.innerHTML = `<div class="grid-cell">Status</div><div class="grid-cell">Target #</div><div class="grid-cell">Target Name</div><div class="grid-cell">Sheet Set</div><div class="grid-cell">Discipline</div><div class="grid-cell">Use</div><div class="grid-cell" style="text-align: center;"></div><div class="grid-cell">Active Revit Sheet</div><div class="grid-cell" style="text-align: right; padding-right: 0.5rem;">Actions</div>`;
+            header.innerHTML = `<div class="grid-cell">Status</div><div class="grid-cell">Target #</div><div class="grid-cell">Target Name</div><div class="grid-cell">Sheet Collection</div><div class="grid-cell">Discipline</div><div class="grid-cell">Use</div><div class="grid-cell" style="text-align: center;"></div><div class="grid-cell">Active Revit Sheet</div><div class="grid-cell" style="text-align: right; padding-right: 0.5rem;">Actions</div>`;
             return header;
         }
 
@@ -2365,20 +2420,35 @@
         window.collapseAllTree = function() {
             document.querySelectorAll('.tree-group').forEach(el => el.classList.add('collapsed'));
         };
+
+        window.requestSegments = function(id) {
+            let itemObj = State.loadedSheets.find(s => s.Id == id) || State.sheets.find(s => s.Number === id);
+            if (!itemObj) return;
+            
+            State.activeGridTargetId = id;
+            
+            // Open the interactive Helper simulator
+            const card = document.getElementById('simulator-card');
+            if (card) {
+                card.classList.remove('collapsed');
+                card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                
+                // Visual flash to draw attention
+                card.style.transition = "box-shadow 0.3s ease";
+                card.style.boxShadow = "0 0 0 3px var(--accent-primary)";
+                setTimeout(() => card.style.boxShadow = "0 4px 6px -1px rgba(0, 0, 0, 0.1)", 1500);
+            }
+            
+            // Update button text to be context aware
+            const btn = document.getElementById('btn-generate-sectors');
+            if (btn) btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg> Generate Grid for ${itemObj.Name}`;
+            
+            drawSimulation();
+        };
+
         window.toggleViewDrawer = function(id) {
             const drawer = document.getElementById('view-drawer-' + id);
             if (drawer) drawer.classList.toggle('active');
-        };
-
-        State.groupBy = ["SheetSet", "SheetDiscipline", "SheetUse"];
-        
-        window.updateGroupBy = function() {
-            State.groupBy = [
-                document.getElementById('group-by-1').value,
-                document.getElementById('group-by-2').value,
-                document.getElementById('group-by-3').value
-            ];
-            renderChecklist();
         };
 
         window.openEditModal = function(id, isLive) {
@@ -2399,10 +2469,10 @@
             // Populate Dropdowns
             const setSelect = document.getElementById('modal-sheet-set');
             setSelect.innerHTML = `<option value="">-- Unassigned --</option>`;
-            getSheetSetOptions().forEach(s => {
+            getSheetCollectionOptions().forEach(s => {
                 setSelect.innerHTML += `<option value="${s}">${s}</option>`;
             });
-            setSelect.value = item.SheetSet || (item.SheetSets && item.SheetSets[0]) || "";
+            setSelect.value = item.SheetCollection || "";
 
             const useSelect = document.getElementById('modal-sheet-use');
             useSelect.innerHTML = `<option value="">-- Unassigned --</option>`;
@@ -2444,7 +2514,7 @@
                 const item = State.loadedSheets.find(s => s.Id == id);
                 if (item) {
                     item.Name = newName;
-                    item.SheetSets = newSet ? [newSet] : [];
+                    item.SheetCollection = newSet || "";
                     item.SheetDiscipline = newDisc;
                     item.SheetUse = newUse;
                 }
@@ -2452,7 +2522,7 @@
                 const item = State.sheets.find(s => s.Number === id);
                 if (item) {
                     item.Name = newName;
-                    item.SheetSet = newSet;
+                    item.SheetCollection = newSet;
                     item.SheetDiscipline = newDisc;
                     item.SheetUse = newUse;
                 }
@@ -2490,6 +2560,22 @@
             }
         };
 
+        window.scheduleRemoveView = function(sheetId, viewIdStr) {
+            if (!State.viewRemovals) State.viewRemovals = {};
+            if (!State.viewRemovals[sheetId]) State.viewRemovals[sheetId] = [];
+            if (!State.viewRemovals[sheetId].includes(viewIdStr)) {
+                State.viewRemovals[sheetId].push(viewIdStr);
+            }
+            renderChecklist();
+        };
+
+        window.cancelRemoveView = function(sheetId, viewIdStr) {
+            if (State.viewRemovals && State.viewRemovals[sheetId]) {
+                State.viewRemovals[sheetId] = State.viewRemovals[sheetId].filter(id => id !== viewIdStr);
+            }
+            renderChecklist();
+        };
+
         
         window.togglePurgeLiveSheet = function(liveId) {
             if (State.liveSheetMappings[liveId] === "purge") {
@@ -2502,6 +2588,109 @@
 
         window.toggleCreatePreset = function(presetNum) {
             State.createMissingSheets[presetNum] = !State.createMissingSheets[presetNum];
+            renderChecklist();
+        };
+
+
+        // --- PHASE 2/3/4: HEURISTICS & PROPOSALS ---
+        window.activeProposals = {}; // map of id -> proposal
+
+        function evaluateHeuristics(item) {
+            try {
+                if (!item || !item.number) return;
+                if (window.activeProposals[item.id] !== undefined) return;
+                
+                const upName = (item.name || "").toUpperCase();
+                const strNum = String(item.number);
+                let expectedType = null;
+                let typeReason = "";
+                let generatesSegments = false;
+
+                // Simple NCS Keywords
+                if (upName.includes("ELEVATION")) { expectedType = "2"; typeReason = "Elevations use Type 2."; }
+                else if (upName.includes("SECTION")) { expectedType = "3"; typeReason = "Sections use Type 3."; }
+                else if (upName.includes("CEILING PLAN")) { expectedType = "1"; typeReason = "Ceiling Plans use Type 1."; generatesSegments = true; }
+                else if (upName.includes("STRUCTURAL PLAN")) { expectedType = "1"; typeReason = "Structural Plans use Type 1."; generatesSegments = true; }
+                else if (upName.includes("PLAN")) { expectedType = "1"; typeReason = "Plans use Type 1."; generatesSegments = true; }
+                else if (upName.includes("DETAIL")) { expectedType = "5"; typeReason = "Details use Type 5."; }
+                else if (upName.includes("SCHEDULE")) { expectedType = "6"; typeReason = "Schedules use Type 6."; }
+
+                // 1. Check Sheet Type Number match
+                if (expectedType) {
+                    // NCS Number format: AA N - N N N
+                    // The Type is usually the first digit after the letters. e.g. A1-101 (1 is Type).
+                    const match = strNum.match(/^[A-Z]+(\d)/i);
+                    if (match && match[1] !== expectedType) {
+                        const newNum = strNum.replace(/^([A-Z]+)\d/, `$1${expectedType}`);
+                        window.activeProposals[item.id] = {
+                            type: 'rename',
+                            newNumber: newNum,
+                            newName: item.name,
+                            message: `💡 ${typeReason} Update to ${newNum}?`
+                        };
+                        return; // one proposal at a time
+                    }
+                }
+
+                // 2. Check Grid Segments
+                // Removed automatic segment proposal per user request. Users will trigger this manually via the "Grid" button.
+            } catch (err) {
+                console.warn("Heuristic Evaluation Error:", err);
+            }
+        }
+
+        window.acceptProposal = function(id, isLive) {
+            const proposal = window.activeProposals[id];
+            if (!proposal) return;
+
+            let itemObj = null;
+            if (isLive === 'true' || isLive === true) {
+                itemObj = State.loadedSheets.find(s => s.Id == id);
+            } else {
+                itemObj = State.sheets.find(s => s.Number === id);
+            }
+
+            if (proposal.type === 'rename') {
+                if (itemObj) {
+                    if (isLive) itemObj.Name = proposal.newName; // Cannot rename live ID number directly here easily, but UI shows it
+                    else { itemObj.Number = proposal.newNumber; itemObj.Name = proposal.newName; }
+                    window.justMovedSheets.add(proposal.newNumber);
+                    setTimeout(() => { window.justMovedSheets.delete(proposal.newNumber); renderChecklist(); }, 3000);
+                }
+            } else if (proposal.type === 'segment') {
+                if (!isLive && itemObj) {
+                    // Generate child sheets
+                    proposal.segments.forEach((segName, idx) => {
+                        // Extract base sequence
+                        const baseParts = itemObj.Number.split('-');
+                        let seqStr = baseParts.pop();
+                        
+                        // Convert Type to 4 (Enlarged)
+                        let prefix = baseParts.join('-');
+                        prefix = prefix.replace(/^([A-Z]+)\d/, `$14`);
+
+                        const newSeqStr = String(idx + 1).padStart(2, '0');
+                        const newNumber = `${prefix}-${seqStr}-${newSeqStr}`;
+                        const newName = `${itemObj.Name} - ${segName}`;
+
+                        State.sheets.push({
+                            Number: newNumber, Name: newName, Discipline: itemObj.Discipline,
+                            Designator: itemObj.Designator, SheetType: "4", SchemaLink: generateUUID(),
+                            SheetCollection: itemObj.SheetCollection, IsChecked: true, IsCustom: true, LevelId: itemObj.LevelId,
+                            LevelName: itemObj.LevelName, SheetDiscipline: itemObj.SheetDiscipline, SheetUse: itemObj.SheetUse
+                        });
+                        window.justMovedSheets.add(newNumber);
+                    });
+                }
+            }
+            
+            // Mark as dismissed/resolved
+            window.activeProposals[id] = 'resolved';
+            renderChecklist();
+        };
+
+        window.rejectProposal = function(id) {
+            window.activeProposals[id] = 'resolved';
             renderChecklist();
         };
 
@@ -2531,9 +2720,9 @@
                     originalName: originalName,
                     originalNum: originalNum,
                     status: status,
-                    sheetSet: preset.SheetSet || "Unassigned Sheets",
-                    discipline: preset.SheetDiscipline || getAIADiscipline(preset.Designator) || "Unassigned",
-                    use: preset.SheetUse || "Unassigned",
+                    sheetCollection: preset.SheetCollection || (mappedLive ? mappedLive.SheetCollection : null) || "Unassigned Sheets",
+                    discipline: preset.SheetDiscipline || (mappedLive ? mappedLive.SheetDiscipline : null) || getAIADiscipline(preset.Designator) || "Unassigned",
+                    use: preset.SheetUse || (mappedLive ? mappedLive.SheetUse : null) || "Unassigned",
                     isLive: false,
                     liveId: mappedLive ? mappedLive.Id : null,
                     placedViews: mappedLive ? (mappedLive.PlacedViews || []) : []
@@ -2543,7 +2732,7 @@
             // 2. Add Live Sheets that are NOT mapped (purges or unassigned)
             State.loadedSheets.forEach(ls => {
                 const mapping = State.liveSheetMappings[ls.Id];
-                if (!mapping || mapping === "purge") {
+                if (!mapping || mapping === "purge" || mapping === "keep") {
                     unified.push({
                         type: 'live',
                         id: ls.Id,
@@ -2551,7 +2740,7 @@
                         name: ls.Name,
                         originalName: null,
                         status: mapping === "purge" ? "purge" : "unassigned",
-                        sheetSet: (ls.SheetSets && ls.SheetSets.length > 0) ? ls.SheetSets[0] : "Unassigned Sheets",
+                        sheetCollection: ls.SheetCollection || "Unassigned Sheets",
                         discipline: ls.SheetDiscipline || "Unassigned",
                         use: ls.SheetUse || "Unassigned",
                         isLive: true,
@@ -2573,9 +2762,21 @@
         }
 
         function renderUnifiedRow(item) {
+            evaluateHeuristics(item);
             const jumpMarker = window.justMovedSheets.has(item.id) ? `<div class="jump-marker"></div>` : ``;
             
-            let nameHtml = `<strong style="color:var(--accent-primary);">${item.name}</strong>`;
+            let nameHtml = `<div style="display:flex; align-items:center; gap:0.5rem;"><strong style="color:var(--accent-primary);">${item.name}</strong>`;
+            
+            const proposal = window.activeProposals[item.id];
+            if (proposal && proposal !== 'resolved') {
+                nameHtml += `<div style="display:inline-flex; align-items:center; gap:0.4rem; background:rgba(6, 182, 212, 0.15); padding:2px 6px; border-radius:4px; border:1px solid rgba(6, 182, 212, 0.3); font-size:0.7rem;">
+                    <span style="color:var(--accent-primary);">${proposal.message}</span>
+                    <button class="edit-icon-btn" style="color:#10b981; font-weight:600; padding:0 2px;" onclick="acceptProposal('${item.id}', ${item.isLive})">✓ Accept</button>
+                    <button class="edit-icon-btn" style="color:#ef4444; font-weight:600; padding:0 2px;" onclick="rejectProposal('${item.id}')">✕ Reject</button>
+                </div>`;
+            }
+            nameHtml += `</div>`;
+
             if (item.originalName && (item.originalName !== item.name || item.originalNum !== item.number)) {
                 nameHtml += `<div style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">Revit: ${item.originalNum} - ${item.originalName}</div>`;
             }
@@ -2583,23 +2784,45 @@
             // Global view usage checking
             const allPlacedViews = new Set();
             State.loadedSheets.forEach(s => {
-                if(s.PlacedViews) s.PlacedViews.forEach(v => allPlacedViews.add(v.Id.toString()));
+                if(s.PlacedViews) s.PlacedViews.forEach(v => {
+                    const isRemoved = State.viewRemovals && State.viewRemovals[s.Id] && State.viewRemovals[s.Id].includes(v.Id.toString());
+                    if (!isRemoved) {
+                        allPlacedViews.add(v.Id.toString());
+                    }
+                });
             });
 
             let drawerViewsHtml = ``;
             if (item.placedViews && item.placedViews.length > 0) {
                 item.placedViews.forEach(v => {
-                    drawerViewsHtml += `<div class="view-item-row">
-                        <span>• ${v.Name}</span>
-                        <span style="opacity:0.6">${v.Type}</span>
+                    const detailNum = v.DetailNumber ? `<span style="display:inline-block; min-width:18px; text-align:center; background:rgba(255,255,255,0.1); border-radius:3px; padding:1px 4px; font-size:0.65rem; color:var(--text-secondary); margin-right:4px;">${v.DetailNumber}</span>` : ``;
+                    const vIdStr = v.Id.toString();
+                    const liveIdStr = (item.liveId || item.id).toString();
+                    const isScheduledRemoval = State.viewRemovals && State.viewRemovals[liveIdStr] && State.viewRemovals[liveIdStr].includes(vIdStr);
+                    
+                    const removeBtn = isScheduledRemoval ? 
+                        `<button class="btn btn-secondary" onclick="cancelRemoveView('${liveIdStr}', '${vIdStr}')" style="padding:0.1rem 0.4rem; font-size:0.6rem; color:#f59e0b; border-color:#f59e0b;">Restore</button>` : 
+                        `<button class="btn btn-secondary" onclick="scheduleRemoveView('${liveIdStr}', '${vIdStr}')" style="padding:0.1rem 0.4rem; font-size:0.6rem; color:#ef4444; border-color:transparent;">Remove</button>`;
+                    
+                    const styling = isScheduledRemoval ? `opacity: 0.4; text-decoration: line-through;` : ``;
+
+                    drawerViewsHtml += `<div style="display:flex; justify-content:space-between; align-items:center; padding: 0.1rem 1rem 0.1rem 2.5rem; border-bottom: 1px dashed rgba(255,255,255,0.02); background: rgba(0,0,0,0.1);">
+                        <div style="display:flex; align-items:center; ${styling}">
+                            <div style="width: 14px; margin-right: 0.5rem;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;"><polyline points="9 18 15 12 9 6"></polyline></svg></div>
+                            ${detailNum}
+                            <span style="color:var(--text-secondary); font-size:0.7rem;">${v.Name || v.name || 'Unnamed View'}</span>
+                            <span style="opacity:0.3; margin-left: 0.5rem; font-size:0.6rem;">${v.Type}</span>
+                        </div>
+                        <div>${removeBtn}</div>
                     </div>`;
                 });
             } else {
-                drawerViewsHtml = `<div style="color:var(--text-secondary); font-style:italic; margin-bottom:0.5rem;">No views placed.</div>`;
+                drawerViewsHtml = `<div style="color:var(--text-secondary); font-style:italic; padding-left: 2.5rem; margin-bottom:0.3rem; margin-top:0.3rem; font-size:0.7rem; opacity: 0.6;">No views placed.</div>`;
             }
             
-            let addViewHtml = `<select class="view-assignment-select" style="margin-left:auto;" onchange="assignViewToSheet('${item.liveId || item.id}', this.value); this.value='';">
-                <option value="">+ Add View...</option>`;
+            let addViewHtml = `<div style="padding-left: 2rem; padding-right: 1rem; margin-bottom: 0.3rem; margin-top:0.2rem;">
+                <select class="view-assignment-select" style="width: 100%; max-width: 250px; background-color: transparent; border: 1px dashed rgba(255,255,255,0.1); color: var(--text-secondary); padding: 0.2rem 0.4rem; border-radius: 4px; font-size: 0.7rem; cursor: pointer; opacity: 0.7; transition: all 0.2s;" onchange="assignViewToSheet('${item.liveId || item.id}', this.value); this.value='';" onfocus="this.style.opacity='1'; this.style.borderColor='var(--accent-primary)'; this.style.color='var(--text-primary)';" onblur="this.style.opacity='0.7'; this.style.borderColor='rgba(255,255,255,0.1)'; this.style.color='var(--text-secondary)';">
+                <option value="">+ Add View to this Sheet...</option>`;
             
             if (State.loadedViews && State.loadedViews.length > 0) {
                 const viewsByType = {};
@@ -2610,82 +2833,76 @@
                 Object.keys(viewsByType).sort().forEach(vt => {
                     addViewHtml += `<optgroup label="${vt}">`;
                     viewsByType[vt].forEach(v => {
-                        // Strict filter: View cannot be assigned ANYWHERE globally
-                        if (!allPlacedViews.has(v.Id.toString())) {
-                            addViewHtml += `<option value="${v.Id}">${v.Name}</option>`;
+                        // Strict filter: View cannot be assigned ANYWHERE globally, UNLESS it's a Legend or Schedule
+                        const isLegendOrSchedule = vt.toLowerCase().includes('legend') || vt.toLowerCase().includes('schedule');
+                        if (isLegendOrSchedule || !allPlacedViews.has(v.Id.toString())) {
+                            addViewHtml += `<option value="${v.Id}">${v.Name || v.name || 'Unnamed View'}</option>`;
                         }
                     });
                     addViewHtml += `</optgroup>`;
                 });
             }
-            addViewHtml += `</select>`;
+            addViewHtml += `</select></div>`;
 
             let actionText = "";
             if (item.status === 'create') {
-                actionText = `<span style="color:#10b981; font-weight:600; font-size: 0.7rem; display:block;">CREATE</span>
-                              <label style="font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" checked onchange="toggleCreatePreset('${item.id}')"> Enable</label>`;
+                actionText = `<span style="color:#10b981; font-weight:600; font-size: 0.7rem;">CREATE</span>
+                              <label style="display:flex; align-items:center; gap:0.2rem; font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" checked onchange="toggleCreatePreset('${item.id}')"> Enable</label>`;
             }
             else if (item.status === 'update') {
                 actionText = `<span style="color:#f59e0b; font-weight:600; font-size: 0.7rem;">UPDATE</span>`;
             }
             else if (item.status === 'purge') {
-                actionText = `<span style="color:#ef4444; font-weight:600; font-size: 0.7rem; display:block;">PURGE</span>
-                              <label style="font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" checked onchange="togglePurgeLiveSheet('${item.liveId}')"> Enable</label>`;
+                actionText = `<span style="color:#ef4444; font-weight:600; font-size: 0.7rem;">PURGE</span>
+                              <label style="display:flex; align-items:center; gap:0.2rem; font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" checked onchange="togglePurgeLiveSheet('${item.liveId}')"> Enable</label>`;
             }
             else if (item.status === 'matched') {
                 actionText = `<span style="color:var(--text-secondary); font-weight:600; font-size: 0.7rem;">MATCHED</span>`;
             }
             else {
-                actionText = `<span style="color:var(--text-secondary); font-weight:600; font-size: 0.7rem; display:block;">UNASSIGNED</span>
-                              <label style="font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" onchange="togglePurgeLiveSheet('${item.liveId}')"> Purge</label>`;
+                actionText = `<span style="color:var(--text-secondary); font-weight:600; font-size: 0.7rem;">UNASSIGNED</span>
+                              <label style="display:flex; align-items:center; gap:0.2rem; font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" onchange="togglePurgeLiveSheet('${item.liveId}')"> Purge</label>`;
             }
 
             const viewsCount = item.placedViews ? item.placedViews.length : 0;
             const viewsBtnText = viewsCount > 0 ? `${viewsCount} Views` : `0 Views`;
             const rowId = item.liveId || item.id;
 
+            let segmentBtn = "";
+            const upName = (item.name || "").toUpperCase();
+            if (upName.includes("PLAN") && !item.number.match(/-(\d{2})$/)) {
+                segmentBtn = `<button class="btn btn-secondary" onclick="requestSegments('${item.id}')" style="font-size:0.65rem; padding:0.1rem 0.3rem; background:transparent; border-color:var(--border-color);" title="Calculate Segments">Grid</button>`;
+            }
+
             return `<div>
                 <div class="unified-sheet-row status-${item.status}">
                     <div style="display:flex; justify-content:center; align-items:center;">${jumpMarker}</div>
                     <div><span class="sheet-num-badge">${item.number}</span></div>
                     <div>${nameHtml}</div>
-                    <div>
-                        <button class="btn btn-secondary" onclick="toggleViewDrawer('${rowId}')" style="font-size:0.7rem; padding:0.2rem 0.5rem; background:rgba(0,0,0,0.3);">
-                            ${viewsBtnText} <span style="font-size:0.6rem;">▼</span>
-                        </button>
+                    <div style="display:flex; align-items:center; gap:0.5rem; white-space:nowrap;">
+                        <span onclick="toggleViewDrawer('${rowId}')" style="font-size:0.75rem; color:var(--accent-primary); cursor:pointer; transition:all 0.2s; opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">
+                            ${viewsBtnText} <span style="font-size:0.55rem; margin-left:2px;">▼</span>
+                        </span>
+                        ${segmentBtn}
                     </div>
                     <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <div>${actionText}</div>
-                        <button class="edit-icon-btn" onclick="openEditModal('${item.id}', ${item.isLive})" title="Edit Sheet Properties">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                        <div style="display:flex; flex-direction:row; gap:0.4rem; align-items:center; white-space:nowrap;">${actionText}</div>
+                        <button class="edit-icon-btn" onclick="openEditModal('${item.id}', ${item.isLive})" title="Edit Sheet Properties" style="opacity:0.6; padding:0.2rem;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                         </button>
                     </div>
                 </div>
-                <div class="view-drawer" id="view-drawer-${rowId}">
-                    <div class="view-drawer-header">
-                        <strong style="color:var(--text-primary);">Placed Views</strong>
-                        ${addViewHtml}
-                    </div>
+                <div class="view-drawer active" id="view-drawer-${rowId}" style="margin-left: 24px; margin-bottom: 0.5rem; padding-top: 0.1rem;">
                     ${drawerViewsHtml}
+                    ${addViewHtml}
                 </div>
             </div>`;
         }
 
-        function buildTree(unifiedList, depth = 0, groupedKeys = []) {
-            if (depth >= State.groupBy.length) {
-                // Leaf node: render sheets
-                return unifiedList.map(renderUnifiedRow).join('');
-            }
-
-            const currentGroupProp = State.groupBy[depth];
+        function buildTree(unifiedList) {
             const groups = {};
             unifiedList.forEach(item => {
-                let key = "Unassigned";
-                if (currentGroupProp === "SheetSet") key = item.sheetSet;
-                else if (currentGroupProp === "SheetDiscipline") key = item.discipline;
-                else if (currentGroupProp === "SheetUse") key = item.use;
-                if (!key) key = "Unassigned";
-
+                let key = item.sheetCollection || "Unassigned Sheets";
                 if (!groups[key]) groups[key] = [];
                 groups[key].push(item);
             });
@@ -2693,7 +2910,7 @@
             let html = "";
             const sortedKeys = Object.keys(groups).sort();
             sortedKeys.forEach(k => {
-                const headerText = `${State.groupBy[depth]}: ${k.toUpperCase()} (${groups[k].length})`;
+                const headerText = `SHEET COLLECTION: ${k.toUpperCase()} (${groups[k].length})`;
                 html += `
                 <div class="tree-group">
                     <div class="tree-header" onclick="toggleTree(this)">
@@ -2701,7 +2918,7 @@
                         ${headerText}
                     </div>
                     <div class="tree-children">
-                        ${buildTree(groups[k], depth + 1, [...groupedKeys, k])}
+                        ${groups[k].map(renderUnifiedRow).join('')}
                     </div>
                 </div>`;
             });
@@ -2736,7 +2953,7 @@ function syncUI() {
                 const rs = window.RevitState;
                 State.loadedSheets = rs.sheets || [];
                 State.loadedViews = rs.views || [];
-                State.loadedSheetSets = rs.sheetSets || [];
+                State.loadedSheetCollections = rs.sheetCollections || [];
                 State.loadedTitleBlocks = rs.titleBlocks || [];
                 State.loadedLevels = rs.levels || [];
 
@@ -2795,6 +3012,95 @@ function syncUI() {
         }
 
         function initEvents() {
+            // Restore simulator input events
+            const tbSelect = document.getElementById('titleblock-select');
+            if (tbSelect) tbSelect.addEventListener('change', (e) => { State.selectedTitleBlockId = e.target.value; drawSimulation(); });
+
+            const scaleSelectOverall = document.getElementById('scale-select-overall');
+            if (scaleSelectOverall) scaleSelectOverall.addEventListener('change', (e) => { updateState('selectedScaleOverall', parseFloat(e.target.value)); drawSimulation(); });
+
+            const targetTierSelect = document.getElementById('scale-target-tier');
+            if (targetTierSelect) targetTierSelect.addEventListener('change', (e) => { drawSimulation(); });
+
+            const simInputs = [
+                {sliderId: 'footprint-width', numberId: 'width-val', prop: 'building.width'},
+                {sliderId: 'footprint-length', numberId: 'length-val', prop: 'building.length'},
+                {sliderId: 'sheet-overlap', numberId: 'overlap-val', prop: 'overlap'}
+            ];
+            
+            simInputs.forEach(i => {
+                const sliderEl = document.getElementById(i.sliderId);
+                const numberEl = document.getElementById(i.numberId);
+                
+                if (sliderEl && numberEl) {
+                    // Update number when slider moves
+                    sliderEl.addEventListener('input', (e) => {
+                        const val = parseInt(e.target.value);
+                        numberEl.value = val;
+                        updateState(i.prop, val);
+                        drawSimulation();
+                    });
+                    
+                    // Update slider when number is typed
+                    numberEl.addEventListener('input', (e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        sliderEl.value = val;
+                        updateState(i.prop, val);
+                        drawSimulation();
+                    });
+                }
+            });
+
+            // Interactive Grid Generation Button
+            const btnGenerateSectors = document.getElementById('btn-generate-sectors');
+            if (btnGenerateSectors) {
+                btnGenerateSectors.addEventListener('click', () => {
+                    if (!State.activeGridTargetId) {
+                        alert("Please select a sheet from the Target Schema checklist by clicking its 'Grid' button first.");
+                        return;
+                    }
+                    
+                    const id = State.activeGridTargetId;
+                    let itemObj = State.loadedSheets.find(s => s.Id == id) || State.sheets.find(s => s.Number === id);
+                    if (!itemObj) return;
+                    
+                    const targetTier = parseInt(document.getElementById('scale-target-tier').value);
+                    const multiplier = targetTier === 1 ? 2 : 4;
+                    const layout = calculateLayout(multiplier);
+                    const totalSegments = layout.cols * layout.rows;
+                    
+                    if (totalSegments > 1 && totalSegments <= 26) {
+                        const segMatch = itemObj.Number.match(/-(\d{2})$/);
+                        if (!segMatch) {
+                            const segments = [];
+                            const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+                            for(let i=0; i<totalSegments; i++) {
+                                const label = i < letters.length ? `SEGMENT ${letters[i]}` : `SEG ${i+1}`;
+                                segments.push(label);
+                            }
+                            window.activeProposals[id] = {
+                                type: 'segment',
+                                segments: segments,
+                                message: `💡 Selected: ${layout.cols}x${layout.rows} grid (${totalSegments} segments) for Tier ${targetTier} calculation.`
+                            };
+                            renderChecklist();
+                            
+                            // Reset state
+                            State.activeGridTargetId = null;
+                            btnGenerateSectors.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><line x1="9" y1="3" x2="9" y2="21"></line><line x1="15" y1="3" x2="15" y2="21"></line><line x1="3" y1="9" x2="21" y2="9"></line><line x1="3" y1="15" x2="21" y2="15"></line></svg> Append Enlarged Sectors`;
+                            
+                            // Scroll back to the row
+                            setTimeout(() => {
+                                const row = document.getElementById(`live-row-${id}`) || document.getElementById(`row-${id}`);
+                                if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                            }, 100);
+                        }
+                    } else {
+                        alert(`Cannot generate grid: Layout requires ${totalSegments} sheets. Maximum is 16 (4x4), minimum is 2.`);
+                    }
+                });
+            }
+
             // Export intent button
             const exportBtn = document.getElementById('btn-export-intent');
             if (exportBtn) {
@@ -2830,7 +3136,7 @@ function syncUI() {
                                         TitleBlock: preset.TitleBlock || tbName,
                                         TitleBlockId: preset.TitleBlockId || State.selectedTitleBlockId,
                                         SchemaLink: preset.SchemaLink,
-                                        SheetSet: preset.SheetSet,
+                                        SheetCollection: preset.SheetCollection,
                                         SheetDiscipline: preset.SheetDiscipline || getAIADiscipline(preset.Designator),
                                         SheetUse: preset.SheetUse || "",
                                         ScopeBoxName: preset.ScopeBoxName || "",
@@ -2858,7 +3164,7 @@ function syncUI() {
                                         TitleBlock: preset.TitleBlock || tbName,
                                         TitleBlockId: preset.TitleBlockId || State.selectedTitleBlockId,
                                         SchemaLink: preset.SchemaLink,
-                                        SheetSet: preset.SheetSet,
+                                        SheetCollection: preset.SheetCollection,
                                         SheetDiscipline: preset.SheetDiscipline || getAIADiscipline(preset.Designator),
                                         SheetUse: preset.SheetUse || "",
                                         ScopeBoxName: preset.ScopeBoxName || "",
@@ -2928,6 +3234,39 @@ function syncUI() {
             registerListener(syncUI);
             notifyListeners();
         });
+
+        // Pane Resizer Logic
+        const resizer = document.getElementById('pane-resizer');
+        const mainLayout = document.querySelector('main');
+        let isResizing = false;
+
+        if (resizer) {
+            resizer.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                resizer.classList.add('active');
+                document.body.style.cursor = 'col-resize';
+                e.preventDefault();
+            });
+
+            document.addEventListener('mousemove', (e) => {
+                if (!isResizing) return;
+                // Calculate right width based on mouse position
+                // Provide minimum limits
+                const rightWidth = window.innerWidth - e.clientX - 24; 
+                if (rightWidth > 250 && rightWidth < window.innerWidth - 300) {
+                    mainLayout.style.gridTemplateColumns = `1fr 8px ${rightWidth}px`;
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isResizing) {
+                    isResizing = false;
+                    resizer.classList.remove('active');
+                    document.body.style.cursor = 'default';
+                }
+            });
+        }
+
     </script>
 </body>
 </html>
