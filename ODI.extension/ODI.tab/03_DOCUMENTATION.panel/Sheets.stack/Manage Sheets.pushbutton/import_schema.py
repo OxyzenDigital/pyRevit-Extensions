@@ -811,6 +811,18 @@ def run():
                         logger.warning("Could not rename view ID {}: {}".format(v_id_str, ve))
                         failed_renames_count += 1
 
+        # Process Collection Renames
+        collection_renames = intent.get("CollectionRenames", {})
+        renamed_collection_sheets_count = 0
+        if collection_renames:
+            for sheet in live_sheets:
+                old_collection = _get_sheet_collection(sheet)
+                if old_collection and old_collection in collection_renames:
+                    new_collection = collection_renames[old_collection]
+                    assign_sheet_to_collection(doc, sheet, new_collection)
+                    logger.info("Renamed sheet collection for '{}' from '{}' to '{}'".format(sheet.SheetNumber, old_collection, new_collection))
+                    renamed_collection_sheets_count += 1
+
         # Process Purges
         purged_count = 0
         for item in purge_items:
@@ -834,11 +846,12 @@ def run():
         t.Commit()
         
         # Display Sync Completed popup
-        msg = "Sync Completed!\n- Created: {} sheets\n- Updated: {} sheets\n- Renamed: {} views\n- Purged: {} sheets".format(
+        msg = "Sync Completed!\n- Created: {} sheets\n- Updated: {} sheets\n- Renamed: {} views\n- Purged: {} sheets\n- Re-assigned Collections: {} sheets".format(
             len(create_items),
             len([x for x in conflict_items if x.SelectedAction == "Overwrite"]),
             views_renamed_count,
-            purged_count
+            purged_count,
+            renamed_collection_sheets_count
         )
         if failed_renames_count > 0:
             msg += "\n\n⚠️ Note: {} views could not be renamed due to duplicate names or naming rules in Revit (see logs).".format(failed_renames_count)
