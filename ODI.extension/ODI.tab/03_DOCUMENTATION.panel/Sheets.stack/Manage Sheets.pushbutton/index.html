@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manage Sheets - Convenience Store Schema Builder</title>
+    <title>Manage Sheets</title>
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -156,6 +156,12 @@
             display: flex;
             align-items: center;
             justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
         }
 
         .panel-content {
@@ -1048,9 +1054,12 @@
         .view-drawer {
             display: none;
             padding: 0.5rem 1rem 0.5rem 2rem;
-            background: rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.05);
             border-bottom: 1px solid rgba(255,255,255,0.05);
             font-size: 0.75rem;
+            resize: vertical;
+            overflow-y: auto;
+            max-height: 300px;
         }
         .view-drawer.active {
             display: block;
@@ -1142,10 +1151,9 @@
 </head>
 <body>
     <header>
-        <h1>
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color: var(--accent-primary);"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="9" y1="15" x2="15" y2="15"></line></svg>
-            Manage Sheets - convenience store
-        </h1>
+        <div class="header">
+            Manage Sheets
+        </div>
         <div class="status-badge" id="conn-status">
             <div class="status-dot"></div>
             <span>Revit Connected</span>
@@ -1243,7 +1251,13 @@
                 <div style="display: flex; justify-content: space-between; align-items: center;">
                     <span>Sheet Alignment Workspace</span>
                     <div class="search-container" style="margin-bottom: 0; flex: 0 1 250px;">
-                        <input type="text" id="sheet-search" class="search-input" placeholder="🔍 Search sheets..." oninput="State.searchQuery = this.value; renderChecklist();" style="padding: 0.3rem 0.5rem;">
+                        <div style="display:flex; gap: 0.5rem; width: 100%;">
+                            <input type="text" id="search-sheets" placeholder="Search sheets..." value="" oninput="State.searchQuery=this.value; renderChecklist();" style="flex-grow:1; background-color: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.4rem; color: var(--text-primary);">
+                            <button class="btn btn-secondary" onclick="State.showAIASuggestions = !State.showAIASuggestions; renderChecklist();" style="white-space:nowrap; padding: 0.4rem 0.8rem;" title="Toggle AIA Name Suggestions">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px; vertical-align:middle;"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                                AIA Fix
+                            </button>
+                        </div>
                     </div>
                     <div style="display:flex; gap:0.25rem;">
                         <button class="btn btn-secondary" onclick="expandAllTree()" style="padding: 2px 6px;" title="Expand All">
@@ -1254,11 +1268,10 @@
                         </button>
                     </div>
                 </div>
-            </div>
-            <!-- Intent Alignment Legend -->
-
-            <div style="background-color: rgba(15, 23, 42, 0.5); padding: 0.75rem 1rem; border-bottom: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;">
-                <div style="color: var(--text-secondary); line-height: 1.4;">
+                
+                <!-- Intent Alignment Legend -->
+                <div style="background-color: rgba(15, 23, 42, 0.5); margin: 0.5rem -1rem -1rem -1rem; padding: 0.75rem 1rem; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;">
+                    <div style="color: var(--text-secondary); line-height: 1.4;">
                     This checklist defines the <strong>Target Schema</strong> for the project. The tool matches this schema against the active Revit model and determines the sync action:
                 </div>
                 <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
@@ -1275,6 +1288,7 @@
                         <span class="sheet-status-badge" style="padding: 0.05rem 0.3rem; background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">Unassigned</span> Exists in Revit only. Can be purged.
                     </span>
                 </div>
+                </div>
             </div>
             <div class="panel-content" id="checklist-container">
                 <!-- Populated dynamically -->
@@ -1285,19 +1299,8 @@
         
         <!-- Panel 2: Builder Configurations & Manual Creator -->
         <div class="panel">
-            <div class="panel-header">Builder Control Panel</div>
+            <div class="panel-header">AIA Standardization & Tools</div>
             <div class="panel-content">
-                <!-- Library Selection -->
-                <div class="form-group">
-                    <label for="library-select">Project Category Preset</label>
-                    <select id="library-select" onchange="changeLibrary(this.value)">
-                        <option value="Convenience Store">Convenience Store (C-Store)</option>
-                        <option value="Strip Mall">Strip Mall</option>
-                        <option value="Bank">Bank Branch</option>
-                        <option value="Office Suite">Office Suite (Tenant Improvement)</option>
-                    </select>
-                </div>
-
                 <!-- Global Separators Grid -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem;">
                     <div class="form-group">
@@ -1338,22 +1341,22 @@
                             <div class="slider-header" style="align-items: center;">
                                 <label for="footprint-width">Footprint Width</label>
                                 <div style="display: flex; align-items: center;">
-                                    <input type="number" id="width-val" value="150" min="20" max="1000" style="width: 55px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 0.1rem 0.3rem; text-align: right; font-size: 0.8rem; margin-right: 0.25rem;">
+                                    <input type="number" id="width-val" value="90" min="20" max="1000" style="width: 55px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 0.1rem 0.3rem; text-align: right; font-size: 0.8rem; margin-right: 0.25rem;">
                                     <span style="color: var(--text-secondary); font-size: 0.75rem;">ft</span>
                                 </div>
                             </div>
-                            <input type="range" id="footprint-width" min="20" max="1000" value="150">
+                            <input type="range" id="footprint-width" min="20" max="1000" value="90">
                         </div>
 
                         <div class="slider-container">
                             <div class="slider-header" style="align-items: center;">
                                 <label for="footprint-length">Footprint Length</label>
                                 <div style="display: flex; align-items: center;">
-                                    <input type="number" id="length-val" value="100" min="20" max="1000" style="width: 55px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 0.1rem 0.3rem; text-align: right; font-size: 0.8rem; margin-right: 0.25rem;">
+                                    <input type="number" id="length-val" value="80" min="20" max="1000" style="width: 55px; background: rgba(0,0,0,0.3); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 4px; padding: 0.1rem 0.3rem; text-align: right; font-size: 0.8rem; margin-right: 0.25rem;">
                                     <span style="color: var(--text-secondary); font-size: 0.75rem;">ft</span>
                                 </div>
                             </div>
-                            <input type="range" id="footprint-length" min="20" max="1000" value="100">
+                            <input type="range" id="footprint-length" min="20" max="1000" value="80">
                         </div>
 
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-bottom: 0.5rem;">
@@ -1406,19 +1409,7 @@
                     </div>
                 </div>
 
-                <!-- Local AIA Naming Assistant (Free AI Heuristic) -->
-                <div class="helper-card" id="ai-assistant-card" style="border-color: rgba(6, 182, 212, 0.3);">
-                    <div class="helper-card-header" onclick="toggleHelperCardId('ai-assistant-card')" style="background-color: rgba(6, 182, 212, 0.08);">
-                        <span style="color: var(--accent-primary);">🤖 Local AIA Naming Assistant</span>
-                        <svg class="accordion-toggle-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                    </div>
-                    <div class="helper-card-content" id="ai-assistant-content" style="padding: 0.75rem; font-size: 0.8rem; display: flex; flex-direction: column; gap: 0.5rem;">
-                        <div id="ai-recommendations" style="color: var(--text-secondary); max-height: 120px; overflow-y: auto; line-height: 1.4;">
-                            No warnings detected.
-                        </div>
-                        <button class="btn btn-secondary" onclick="autoFixAIA()" style="font-size: 0.75rem; padding: 0.35rem 0.5rem;">Auto-Fix AIA Compliance</button>
-                    </div>
-                </div>
+
 
                 <!-- Export Verification Checkbox -->
                 <div class="verification-panel">
@@ -1563,11 +1554,10 @@
         }
 
         const State = {
-            building: { width: 150, length: 100 },
+            building: { width: 90, length: 80 },
             selectedScaleOverall: 0.125,
             selectedScaleEnlarged: 0.25,
             selectedTitleBlockId: null,
-            selectedLibrary: "Convenience Store",
             overlap: 10,
             margins: { left: 1.5, right: 10.0, top: 0.75, bottom: 0.75 },
             loadedTitleBlocks: [],
@@ -1654,22 +1644,50 @@
             "Security Plan": { designator: "E", type: "1", seq: 21, name: "PLAN - SECURITY", group: "Electrical" }
         };
 
-        const LibraryPresets = {
-            "Convenience Store": [
-                "Floor Plan", "Reflected Ceiling Plan", "Finishes Plan", "Roof Plan", "Equipment Plan",
-                "Exterior Elevations", "Mechanical Plan", "Electrical Lighting Plan", "Power & Data Plan", "Plumbing Plan"
-            ],
-            "Strip Mall": [
-                "Floor Plan", "Reflected Ceiling Plan", "Roof Plan", "Exterior Elevations", "Building Sections", "Site Plan"
-            ],
-            "Bank": [
-                "Floor Plan", "Reflected Ceiling Plan", "Finishes Plan", "Security Plan", "Power & Data Plan",
-                "Electrical Lighting Plan", "Mechanical Plan", "Plumbing Plan", "Exterior Elevations"
-            ],
-            "Office Suite": [
-                "Floor Plan", "Reflected Ceiling Plan", "Finishes Plan", "Power & Data Plan", "Electrical Lighting Plan",
-                "Furniture Plan", "Interior Elevations"
-            ]
+        function suggestAIAName(name) {
+            let n = (name || "").toUpperCase();
+            if (n.includes("1ST") || n.includes("FIRST") || n.includes("L1") || n.includes("LEVEL 1")) {
+                if (n.includes("PLAN")) return "FLOOR PLAN - LEVEL 1";
+            }
+            if (n.includes("2ND") || n.includes("SECOND") || n.includes("L2") || n.includes("LEVEL 2")) {
+                if (n.includes("PLAN")) return "FLOOR PLAN - LEVEL 2";
+            }
+            if (n.includes("ELEV")) {
+                if (n.includes("INT")) return "INTERIOR ELEVATIONS";
+                return "EXTERIOR ELEVATIONS";
+            }
+            if (n.includes("ROOF")) return "ROOF PLAN";
+            if (n.includes("CEIL") || n.includes("RCP")) return "REFLECTED CEILING PLAN";
+            if (n.includes("SITE") || n.includes("CIVIL")) return "SITE PLAN";
+            if (n.includes("SECTION")) return "BUILDING SECTIONS";
+            if (n.includes("DETAIL")) return "DETAILS";
+            return n;
+        }
+
+        function generateDiffHtml(oldStr, newStr) {
+            if (oldStr === newStr) return oldStr;
+            const oldWords = oldStr.split(/\s+/);
+            const newWords = newStr.split(/\s+/);
+            let html = "";
+            oldWords.forEach(w => {
+                if (!newWords.includes(w)) html += `<span style="color:#ef4444; text-decoration:line-through; margin-right:4px;">${w}</span>`;
+            });
+            newWords.forEach(w => {
+                if (oldWords.includes(w)) html += `<span style="color:var(--text-secondary); margin-right:4px;">${w}</span>`;
+                else html += `<span style="color:#10b981; margin-right:4px;">${w}</span>`;
+            });
+            return html.trim();
+        }
+
+        window.updateSheetName = function(id, newName) {
+            let item = State.loadedSheets.find(s => s.Id == id || s.Number == id);
+            if (!item && State.sheets) item = State.sheets.find(s => s.id == id || s.Number == id);
+            if (item) {
+                item.Name = newName;
+                item.name = newName;
+                window.justMovedSheets.add(id);
+                setTimeout(() => { window.justMovedSheets.delete(id); renderChecklist(); }, 2000);
+            }
         };
 
         function getDisciplineFromDesignator(designator) {
@@ -1687,75 +1705,9 @@
             }
         }
 
-        function generatePresetSheets() {
-            const sheets = [];
-            const levels = State.loadedLevels && State.loadedLevels.length > 0 ? State.loadedLevels : [
-                { Id: "level_1", Name: "Level 1", Elevation: 0.0 },
-                { Id: "level_2", Name: "Level 2", Elevation: 10.0 }
-            ];
-
-            const globalSeparator = State.separator || "-";
-            const globalSeparator2 = State.separator2 || "0";
-
-            State.activeViewTypes.forEach(vtName => {
-                const vt = ViewTypes[vtName];
-                if (!vt) return;
-
-                const isLevelBound = (vt.type === "1");
-
-                if (isLevelBound) {
-                    levels.forEach((level) => {
-                        const levelDigit = getLevelDigitFromId(level.Id);
-                        const seqNum = vt.seq;
-                        const number = `${vt.designator}${vt.type}${globalSeparator}${levelDigit}${globalSeparator2}${seqNum}`;
-                        const name = `${vt.name} - ${level.Name.toUpperCase()}`;
-
-                        sheets.push({
-                            Number: number,
-                            Name: name,
-                            Discipline: getDisciplineFromDesignator(vt.designator),
-                            Designator: vt.designator,
-                            SheetType: vt.type,
-                            SchemaLink: generateUUID(),
-                            SheetCollection: "",
-                            IsChecked: true,
-                            IsSimulatorGenerated: false,
-                            LevelId: level.Id,
-                            LevelName: level.Name,
-                            SheetDiscipline: getAIADiscipline(vt.designator),
-                            SheetUse: ""
-                        });
-                    });
-                } else {
-                    const seqNum = vt.seq;
-                    const number = `${vt.designator}${vt.type}${globalSeparator}${globalSeparator2}${seqNum}`;
-                    const name = vt.name;
-
-                    sheets.push({
-                        Number: number,
-                        Name: name,
-                        Discipline: getDisciplineFromDesignator(vt.designator),
-                        Designator: vt.designator,
-                        SheetType: vt.type,
-                        SchemaLink: generateUUID(),
-                        SheetCollection: getDisciplineFromDesignator(vt.designator),
-                        IsChecked: true,
-                        IsSimulatorGenerated: false,
-                        LevelId: "",
-                        LevelName: "",
-                        SheetDiscipline: getAIADiscipline(vt.designator),
-                        SheetUse: ""
-                    });
-                }
-            });
-
-            return sheets;
-        }
-
         function updatePresetSheets() {
             const customSheets = State.sheets ? State.sheets.filter(s => s.IsCustom || s.IsSimulatorGenerated) : [];
-            const presetSheets = generatePresetSheets();
-            State.sheets = [...presetSheets, ...customSheets];
+            State.sheets = [...customSheets];
         }
 
         function getDesignatorCode(designator, sheetType) {
@@ -2079,8 +2031,8 @@
             const finalNumber = `${designator}${sheetType}${separator}${levelDigit}${separator2}${seqVal}`;
             const baseName = modifierVal || vtLookupName;
             const finalName = isLevelBound ? `${baseName} - ${selectedLevelName.toUpperCase()}` : baseName;
-            const isDuplicate = State.sheets.some(s => s.Number === finalNumber);
-            if (isDuplicate) { alert(`A guideline with Sheet Number ${finalNumber} already exists.`); return; }
+            const isDuplicate = State.sheets.some(s => s.Number === finalNumber && s.SheetCollection === setId);
+            if (isDuplicate) { alert(`A sheet with Number ${finalNumber} already exists in this collection.`); return; }
             State.sheets.push({
                 Number: finalNumber, Name: finalName, Discipline: getDisciplineFromDesignator(designator),
                 Designator: designator, SheetType: sheetType, SchemaLink: generateUUID(),
@@ -2156,7 +2108,8 @@
                             SheetType: s.SheetType, SchemaLink: s.SchemaLink, SheetCollection: s.SheetCollection,
                             LevelId: s.LevelId, LevelName: s.LevelName, SheetDiscipline: s.SheetDiscipline, SheetUse: s.SheetUse
                         };
-                    }) : []
+                    }) : [],
+                    expandedDrawers: State.expandedDrawers ? Array.from(State.expandedDrawers) : []
                 };
                 localStorage.setItem("ODI_Sheets_Cache_v4", JSON.stringify(cacheData));
             } catch(e) {}
@@ -2184,6 +2137,7 @@
                 if (cache.liveSheetMappings) State.liveSheetMappings = cache.liveSheetMappings;
                 if (cache.createMissingSheets) State.createMissingSheets = cache.createMissingSheets;
                 if (cache.viewRenames) State.viewRenames = cache.viewRenames;
+                if (cache.expandedDrawers) State.expandedDrawers = new Set(cache.expandedDrawers);
             } catch(e) {}
         }
 
@@ -2197,37 +2151,6 @@
                 if (mode === 'UPPER') item.ProposedName = item.ProposedName.toUpperCase(); else if (mode === 'TITLE') item.ProposedName = toTitleCase(item.ProposedName); else if (mode === 'LOWER') item.ProposedName = item.ProposedName.toLowerCase();
             });
             notifyListeners();
-        };
-
-        function runAIANamingCheck() {
-            const recArea = document.getElementById('ai-recommendations');
-            if (!recArea) return;
-            const warnings = [];
-            State.sheets.forEach(s => {
-                if (!s.IsChecked) return;
-                if (s.Name !== s.Name.toUpperCase()) warnings.push(`Sheet ${s.Number}: Name should be UPPERCASE.`);
-                const numPat = /^[A-Z]{1,2}\d-\d{2,3}$/;
-                if (!numPat.test(s.Number)) warnings.push(`Sheet ${s.Number}: Number format is non-AIA compliant.`);
-                const lowerName = s.Name.toLowerCase();
-                if (lowerName.includes("floor plan")) warnings.push(`Sheet ${s.Number}: AIA recommends "PLAN - FLOOR" rather than "FLOOR PLAN".`);
-                if (lowerName.includes("ceiling plan")) warnings.push(`Sheet ${s.Number}: AIA recommends "PLAN - REFLECTED CEILING" rather than "CEILING PLAN".`);
-            });
-            if (warnings.length === 0) recArea.innerHTML = `<span style="color: var(--success); font-weight: 500;">✔ All active sheet names comply with AIA guidelines.</span>`;
-            else recArea.innerHTML = warnings.map(w => `<div style="margin-bottom: 0.35rem; border-left: 2px solid var(--warning); padding-left: 0.4rem; color: var(--text-secondary);">⚠ ${w}</div>`).join('');
-        }
-
-        window.autoFixAIA = function() {
-            let fixedCount = 0;
-            State.sheets.forEach(s => {
-                if (!s.IsChecked) return;
-                if (s.Name !== s.Name.toUpperCase()) { s.Name = s.Name.toUpperCase(); fixedCount++; }
-                const oldName = s.Name;
-                s.Name = s.Name.replace("FLOOR PLAN", "PLAN - FLOOR").replace("REFLECTED CEILING PLAN", "PLAN - REFLECTED CEILING").replace("CEILING PLAN", "PLAN - REFLECTED CEILING").replace("ROOF PLAN", "PLAN - ROOF");
-                if (s.Name !== oldName) fixedCount++;
-                Object.keys(State.viewRenames).forEach(key => { if (key.startsWith(s.Number + "_")) State.viewRenames[key].ProposedName = s.Name; });
-            });
-            notifyListeners();
-            alert(`AIA Assistant: Formatted and auto-fixed ${fixedCount} naming guidelines.`);
         };
 
         window.mapLiveSheet = function(liveId, targetValue) { State.liveSheetMappings[liveId] = targetValue; notifyListeners(); };
@@ -2448,7 +2371,22 @@
 
         window.toggleViewDrawer = function(id) {
             const drawer = document.getElementById('view-drawer-' + id);
-            if (drawer) drawer.classList.toggle('active');
+            if (!State.expandedDrawers) State.expandedDrawers = new Set();
+            
+            if (drawer) {
+                drawer.classList.toggle('active');
+                if (drawer.classList.contains('active')) {
+                    State.expandedDrawers.add(String(id));
+                } else {
+                    State.expandedDrawers.delete(String(id));
+                }
+            }
+            
+            const icon = document.getElementById('drawer-icon-' + id);
+            if (icon) {
+                if (drawer && drawer.classList.contains('active')) icon.style.transform = "rotate(180deg)";
+                else icon.style.transform = "rotate(0deg)";
+            }
         };
 
         window.openEditModal = function(id, isLive) {
@@ -2545,17 +2483,23 @@
         
         window.assignViewToSheet = function(sheetId, viewIdStr) {
             if (!viewIdStr) return;
-            // Find live sheet since we can only assign views to mapped/live sheets
             const mappedLive = State.loadedSheets.find(ls => State.liveSheetMappings[ls.Id] === sheetId || ls.Id == sheetId);
             if (mappedLive) {
-                // Initialize ViewRenames if not exist
-                // To actually place a new view, we need to track it in execution intent.
-                // For now, we will add it to the 'PlacedViews' array artificially so the UI updates
                 if (!mappedLive.PlacedViews) mappedLive.PlacedViews = [];
                 const vObj = State.loadedViews.find(v => v.Id == viewIdStr);
                 if (vObj && !mappedLive.PlacedViews.some(pv => pv.Id == vObj.Id)) {
                     mappedLive.PlacedViews.push(vObj);
+                    
+                    window.justMovedSheets.add(sheetId);
+                    if (!State.expandedDrawers) State.expandedDrawers = new Set();
+                    State.expandedDrawers.add(String(sheetId));
+                    
                     notifyListeners();
+                    
+                    setTimeout(() => {
+                        window.justMovedSheets.delete(sheetId);
+                        renderChecklist();
+                    }, 3000);
                 }
             }
         };
@@ -2671,7 +2615,16 @@
 
                         const newSeqStr = String(idx + 1).padStart(2, '0');
                         const newNumber = `${prefix}-${seqStr}-${newSeqStr}`;
-                        const newName = `${itemObj.Name} - ${segName}`;
+                        let newName = `${itemObj.Name} - ${segName}`;
+                        
+                        // Uniqueness Fallback Rule: SC01, SC02, etc. if name already exists globally
+                        let attemptSuffix = 1;
+                        let proposedName = newName;
+                        while(State.loadedViews && State.loadedViews.some(v => (v.Name || v.name || "").toUpperCase() === proposedName.toUpperCase())) {
+                            proposedName = `${newName} - SC${String(attemptSuffix).padStart(2, '0')}`;
+                            attemptSuffix++;
+                        }
+                        newName = proposedName;
 
                         State.sheets.push({
                             Number: newNumber, Name: newName, Discipline: itemObj.Discipline,
@@ -2765,15 +2718,38 @@
             evaluateHeuristics(item);
             const jumpMarker = window.justMovedSheets.has(item.id) ? `<div class="jump-marker"></div>` : ``;
             
-            let nameHtml = `<div style="display:flex; align-items:center; gap:0.5rem;"><strong style="color:var(--accent-primary);">${item.name}</strong>`;
+            const viewsCount = item.placedViews ? item.placedViews.length : 0;
+            const viewsCountHtml = viewsCount > 0 ? ` <span style="font-size:0.7rem; opacity:0.6; font-weight:normal;">(${viewsCount} Views)</span>` : ``;
+            const rowId = item.liveId || item.id;
             
-            const proposal = window.activeProposals[item.id];
-            if (proposal && proposal !== 'resolved') {
-                nameHtml += `<div style="display:inline-flex; align-items:center; gap:0.4rem; background:rgba(6, 182, 212, 0.15); padding:2px 6px; border-radius:4px; border:1px solid rgba(6, 182, 212, 0.3); font-size:0.7rem;">
-                    <span style="color:var(--accent-primary);">${proposal.message}</span>
-                    <button class="edit-icon-btn" style="color:#10b981; font-weight:600; padding:0 2px;" onclick="acceptProposal('${item.id}', ${item.isLive})">✓ Accept</button>
-                    <button class="edit-icon-btn" style="color:#ef4444; font-weight:600; padding:0 2px;" onclick="rejectProposal('${item.id}')">✕ Reject</button>
+            const isExpanded = State.expandedDrawers && State.expandedDrawers.has(String(rowId));
+            const drawerActive = isExpanded ? "active" : "";
+            const iconRot = isExpanded ? "rotate(180deg)" : "rotate(0deg)";
+            
+            const chevronHtml = `<svg id="drawer-icon-${rowId}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transition: transform 0.2s; opacity:0.6; vertical-align:middle; margin-left:4px; transform: ${iconRot};"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+            
+            let nameHtml = `<div style="display:flex; flex-direction:column; flex-grow:1;">
+                <div style="display:flex; align-items:center; gap:0.5rem; flex-grow:1;">
+                    <input type="text" id="sheet-name-${rowId}" value="${item.name}" 
+                        onchange="updateSheetName('${rowId}', this.value)" 
+                        onclick="event.stopPropagation()"
+                        style="color:var(--accent-primary); font-weight:bold; background:transparent; border:none; border-bottom:1px dashed transparent; width:100%; max-width:250px; font-size:0.8rem; transition:all 0.2s; padding:0; outline:none; font-family:inherit;" 
+                        onfocus="this.style.borderBottomColor='var(--accent-primary)'" 
+                        onblur="this.style.borderBottomColor='transparent'">
+                    <span style="white-space:nowrap; flex-shrink:0;">${viewsCountHtml}${chevronHtml}</span>
                 </div>`;
+            
+            if (State.showAIASuggestions) {
+                const suggested = suggestAIAName(item.name);
+                const upperName = (item.name || "").toUpperCase();
+                if (suggested !== item.name && suggested !== upperName) {
+                    const diffHtml = generateDiffHtml(upperName, suggested);
+                    nameHtml += `<div style="font-size:0.65rem; margin-top:4px; cursor:pointer; background:rgba(16, 185, 129, 0.1); border: 1px dashed rgba(16, 185, 129, 0.3); padding:3px 6px; border-radius:4px; display:inline-block; align-self:flex-start;" 
+                                    onclick="event.stopPropagation(); document.getElementById('sheet-name-${rowId}').value='${suggested}'; updateSheetName('${rowId}', '${suggested}');" 
+                                    title="Click to apply AIA Fix">
+                        <strong style="color:var(--text-secondary); opacity:0.7; margin-right:4px;">AIA Fix:</strong> ${diffHtml}
+                    </div>`;
+                }
             }
             nameHtml += `</div>`;
 
@@ -2794,26 +2770,33 @@
 
             let drawerViewsHtml = ``;
             if (item.placedViews && item.placedViews.length > 0) {
-                item.placedViews.forEach(v => {
-                    const detailNum = v.DetailNumber ? `<span style="display:inline-block; min-width:18px; text-align:center; background:rgba(255,255,255,0.1); border-radius:3px; padding:1px 4px; font-size:0.65rem; color:var(--text-secondary); margin-right:4px;">${v.DetailNumber}</span>` : ``;
+                drawerViewsHtml += `<div style="display:grid; grid-template-columns: 120px 60px minmax(150px, 1fr) 70px; gap: 0.5rem; padding: 0.4rem 1rem 0.4rem 2.5rem; border-bottom: 1px solid #cbd5e1; background: #e2e8f0; color: #475569; font-size: 0.65rem; font-weight: 600; text-transform: uppercase; border-top-left-radius: 4px; border-top-right-radius: 4px;">
+                    <div>View Type</div>
+                    <div>Detail #</div>
+                    <div>View Name</div>
+                    <div style="text-align:right;">Action</div>
+                </div>`;
+                item.placedViews.forEach((v, index) => {
+                    const detailNum = (v.DetailNumber && v.DetailNumber.trim() !== '') ? v.DetailNumber : '--';
                     const vIdStr = v.Id.toString();
                     const liveIdStr = (item.liveId || item.id).toString();
                     const isScheduledRemoval = State.viewRemovals && State.viewRemovals[liveIdStr] && State.viewRemovals[liveIdStr].includes(vIdStr);
                     
                     const removeBtn = isScheduledRemoval ? 
                         `<button class="btn btn-secondary" onclick="cancelRemoveView('${liveIdStr}', '${vIdStr}')" style="padding:0.1rem 0.4rem; font-size:0.6rem; color:#f59e0b; border-color:#f59e0b;">Restore</button>` : 
-                        `<button class="btn btn-secondary" onclick="scheduleRemoveView('${liveIdStr}', '${vIdStr}')" style="padding:0.1rem 0.4rem; font-size:0.6rem; color:#ef4444; border-color:transparent;">Remove</button>`;
+                        `<button class="btn btn-secondary" onclick="scheduleRemoveView('${liveIdStr}', '${vIdStr}')" style="padding:0.1rem 0.4rem; font-size:0.6rem; color:#ef4444; border-color:transparent; background: rgba(239, 68, 68, 0.1);">Remove</button>`;
                     
-                    const styling = isScheduledRemoval ? `opacity: 0.4; text-decoration: line-through;` : ``;
+                    const styling = isScheduledRemoval ? `opacity: 0.5; text-decoration: line-through;` : ``;
+                    const vType = v.Type || '--';
+                    const vName = v.Name || v.name || 'Unnamed View';
+                    const isLast = index === item.placedViews.length - 1;
+                    const borderRadius = isLast ? 'border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;' : '';
 
-                    drawerViewsHtml += `<div style="display:flex; justify-content:space-between; align-items:center; padding: 0.1rem 1rem 0.1rem 2.5rem; border-bottom: 1px dashed rgba(255,255,255,0.02); background: rgba(0,0,0,0.1);">
-                        <div style="display:flex; align-items:center; ${styling}">
-                            <div style="width: 14px; margin-right: 0.5rem;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-secondary)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="opacity:0.3;"><polyline points="9 18 15 12 9 6"></polyline></svg></div>
-                            ${detailNum}
-                            <span style="color:var(--text-secondary); font-size:0.7rem;">${v.Name || v.name || 'Unnamed View'}</span>
-                            <span style="opacity:0.3; margin-left: 0.5rem; font-size:0.6rem;">${v.Type}</span>
-                        </div>
-                        <div>${removeBtn}</div>
+                    drawerViewsHtml += `<div style="display:grid; grid-template-columns: 120px 60px minmax(150px, 1fr) 70px; gap: 0.5rem; align-items:center; padding: 0.3rem 1rem 0.3rem 2.5rem; border-bottom: 1px solid #e2e8f0; background: #f8fafc; ${styling} ${borderRadius}">
+                        <div style="font-size:0.65rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#64748b;" title="${vType}">${vType}</div>
+                        <div style="font-family:monospace; font-size:0.7rem; color:#334155; font-weight:600;">${detailNum}</div>
+                        <div style="color:#1e293b; font-size:0.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500;" title="${vName}">${vName}</div>
+                        <div style="text-align:right;">${removeBtn}</div>
                     </div>`;
                 });
             } else {
@@ -2864,35 +2847,26 @@
                               <label style="display:flex; align-items:center; gap:0.2rem; font-size:0.65rem; cursor:pointer; color:var(--text-secondary);"><input type="checkbox" onchange="togglePurgeLiveSheet('${item.liveId}')"> Purge</label>`;
             }
 
-            const viewsCount = item.placedViews ? item.placedViews.length : 0;
-            const viewsBtnText = viewsCount > 0 ? `${viewsCount} Views` : `0 Views`;
-            const rowId = item.liveId || item.id;
-
             let segmentBtn = "";
             const upName = (item.name || "").toUpperCase();
             if (upName.includes("PLAN") && !item.number.match(/-(\d{2})$/)) {
-                segmentBtn = `<button class="btn btn-secondary" onclick="requestSegments('${item.id}')" style="font-size:0.65rem; padding:0.1rem 0.3rem; background:transparent; border-color:var(--border-color);" title="Calculate Segments">Grid</button>`;
+                segmentBtn = `<button class="btn btn-secondary" onclick="event.stopPropagation(); requestSegments('${item.id}')" style="font-size:0.65rem; padding:0.1rem 0.3rem; background:transparent; border-color:var(--border-color);" title="Calculate Segments">Grid</button>`;
             }
 
             return `<div>
-                <div class="unified-sheet-row status-${item.status}">
+                <div class="unified-sheet-row status-${item.status}" style="cursor:pointer;" onclick="toggleViewDrawer('${rowId}')">
                     <div style="display:flex; justify-content:center; align-items:center;">${jumpMarker}</div>
                     <div><span class="sheet-num-badge">${item.number}</span></div>
                     <div>${nameHtml}</div>
-                    <div style="display:flex; align-items:center; gap:0.5rem; white-space:nowrap;">
-                        <span onclick="toggleViewDrawer('${rowId}')" style="font-size:0.75rem; color:var(--accent-primary); cursor:pointer; transition:all 0.2s; opacity:0.8;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.8'">
-                            ${viewsBtnText} <span style="font-size:0.55rem; margin-left:2px;">▼</span>
-                        </span>
-                        ${segmentBtn}
-                    </div>
-                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; justify-content:flex-end;">${segmentBtn}</div>
+                    <div style="display:flex; justify-content:space-between; align-items:center;" onclick="event.stopPropagation()">
                         <div style="display:flex; flex-direction:row; gap:0.4rem; align-items:center; white-space:nowrap;">${actionText}</div>
                         <button class="edit-icon-btn" onclick="openEditModal('${item.id}', ${item.isLive})" title="Edit Sheet Properties" style="opacity:0.6; padding:0.2rem;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                         </button>
                     </div>
                 </div>
-                <div class="view-drawer active" id="view-drawer-${rowId}" style="margin-left: 24px; margin-bottom: 0.5rem; padding-top: 0.1rem;">
+                <div class="view-drawer ${drawerActive}" id="view-drawer-${rowId}" style="margin-left: 24px; margin-bottom: 0.5rem; padding-top: 0.1rem;">
                     ${drawerViewsHtml}
                     ${addViewHtml}
                 </div>
@@ -2935,8 +2909,8 @@
         }
 
 function syncUI() {
-            document.getElementById('width-val').textContent = `${State.building.width} ft`;
-            document.getElementById('length-val').textContent = `${State.building.length} ft`;
+            document.getElementById('width-val').value = State.building.width;
+            document.getElementById('length-val').value = State.building.length;
             const actionSheetsCount =
                 State.loadedSheets.filter(ls => State.liveSheetMappings[ls.Id] &&
                     State.liveSheetMappings[ls.Id] !== "keep" &&
