@@ -37,10 +37,10 @@
             font-family: var(--font-family);
             background-color: var(--bg-base);
             color: var(--text-primary);
-            min-height: 100vh;
+            height: 100vh;
             display: flex;
             flex-direction: column;
-            overflow-x: hidden;
+            overflow: hidden;
         }
 
         select option {
@@ -61,9 +61,7 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
+            flex: 0 0 auto;
         }
 
         header h1 {
@@ -76,6 +74,8 @@
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
+
+
 
         .status-badge {
             background-color: rgba(6, 182, 212, 0.1);
@@ -110,7 +110,7 @@
             flex: 1;
             gap: 0.5rem;
             padding: 1.5rem;
-            height: calc(100vh - 65px);
+            min-height: 0;
             overflow: hidden;
         }
         
@@ -126,7 +126,7 @@
             background-color: var(--accent-primary);
         }
 
-        @media (max-width: 1024px) {
+        @media (max-width: 600px) {
             main {
                 grid-template-columns: 1fr;
                 overflow-y: auto;
@@ -142,6 +142,7 @@
             display: flex;
             flex-direction: column;
             overflow: hidden;
+            min-height: 0;
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.1);
@@ -171,6 +172,7 @@
             display: flex;
             flex-direction: column;
             gap: 1.25rem;
+            min-height: 0;
         }
 
         .panel-content::-webkit-scrollbar {
@@ -939,6 +941,7 @@
             gap: 1.5rem;
             flex-wrap: wrap;
             font-size: 0.8rem;
+            flex: 0 0 auto;
         }
         .checker-title {
             display: flex;
@@ -1014,6 +1017,7 @@
             background: rgba(15, 23, 42, 0.4);
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
             transition: transform 0.2s ease, box-shadow 0.2s ease;
+            flex-shrink: 0;
         }
         .tree-group:hover {
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.2);
@@ -1245,53 +1249,60 @@
 
     <main>
         <!-- Panel 1: Main Sheet Template Checklist -->
-        <div class="panel">
+        <!-- Column 1 Wrapper -->
+        <div style="display: flex; flex-direction: column; gap: 0.5rem; overflow: hidden; height: 100%; min-height: 0;">
             
-            <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 0.5rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center;">
-                    <span>Sheet Alignment Workspace</span>
-                    <div class="search-container" style="margin-bottom: 0; flex: 0 1 250px;">
-                        <div style="display:flex; gap: 0.5rem; width: 100%;">
-                            <input type="text" id="search-sheets" placeholder="Search sheets..." value="" oninput="State.searchQuery=this.value; renderChecklist();" style="flex-grow:1; background-color: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.4rem; color: var(--text-primary);">
-                            <button class="btn btn-secondary" onclick="State.showAIASuggestions = !State.showAIASuggestions; renderChecklist();" style="white-space:nowrap; padding: 0.4rem 0.8rem;" title="Toggle AIA Name Suggestions">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px; vertical-align:middle;"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
-                                AIA Fix
+            <!-- Fixed Top Box (Sheet Alignment Workspace) -->
+            <div class="panel" style="flex: 0 0 auto; overflow: visible;">
+                <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 0.75rem; border-bottom: none; position: relative;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <span>Sheet Alignment Workspace</span>
+                        <div style="display:flex; gap:0.25rem;">
+                            <button class="btn btn-secondary" onclick="expandAllTree()" style="padding: 2px 6px;" title="Expand All">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                            </button>
+                            <button class="btn btn-secondary" onclick="collapseAllTree()" style="padding: 2px 6px;" title="Collapse All">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
                             </button>
                         </div>
                     </div>
-                    <div style="display:flex; gap:0.25rem;">
-                        <button class="btn btn-secondary" onclick="expandAllTree()" style="padding: 2px 6px;" title="Expand All">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
-                        </button>
-                        <button class="btn btn-secondary" onclick="collapseAllTree()" style="padding: 2px 6px;" title="Collapse All">
-                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                    
+                    <div style="display:flex; gap: 0.5rem; width: 100%;">
+                        <input type="text" id="search-sheets" placeholder="Search sheets..." value="" oninput="State.searchQuery=this.value; renderChecklist();" style="flex-grow:1; background-color: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 4px; padding: 0.5rem 0.75rem; color: var(--text-primary); font-size: 0.95rem;">
+                        <button class="btn btn-secondary" onclick="State.showAIASuggestions = !State.showAIASuggestions; renderChecklist();" style="white-space:nowrap; padding: 0.5rem 1rem;" title="Toggle AIA Name Suggestions">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px; vertical-align:middle;"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>
+                            AIA Fix
                         </button>
                     </div>
-                </div>
-                
-                <!-- Intent Alignment Legend -->
-                <div style="background-color: rgba(15, 23, 42, 0.5); margin: 0.5rem -1rem -1rem -1rem; padding: 0.75rem 1rem; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem;">
-                    <div style="color: var(--text-secondary); line-height: 1.4;">
-                    This checklist defines the <strong>Target Schema</strong> for the project. The tool matches this schema against the active Revit model and determines the sync action:
-                </div>
-                <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
-                    <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
-                        <span class="sheet-status-badge status-new" style="padding: 0.05rem 0.3rem;">New</span> Will create a new sheet in Revit.
-                    </span>
-                    <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
-                        <span class="sheet-status-badge status-conflict" style="padding: 0.05rem 0.3rem;">Conflict</span> Exists in Revit with different name. Will rename.
-                    </span>
-                    <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
-                        <span class="sheet-status-badge status-matched" style="padding: 0.05rem 0.3rem;">Matched</span> Correctly named in Revit. No action.
-                    </span>
-                    <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
-                        <span class="sheet-status-badge" style="padding: 0.05rem 0.3rem; background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">Unassigned</span> Exists in Revit only. Can be purged.
-                    </span>
-                </div>
+
+                    <!-- Intent Alignment Legend -->
+                    <div style="background-color: rgba(15, 23, 42, 0.5); margin: 0 -1rem -1rem -1rem; padding: 0.75rem 1rem; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.8rem; border-bottom-left-radius: 16px; border-bottom-right-radius: 16px;">
+                        <div style="color: var(--text-secondary); line-height: 1.4;">
+                            This checklist defines the <strong>Target Schema</strong> for the project. The tool matches this schema against the active Revit model and determines the sync action:
+                        </div>
+                        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+                            <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                                <span class="sheet-status-badge status-new" style="padding: 0.05rem 0.3rem;">New</span> Will create a new sheet in Revit.
+                            </span>
+                            <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                                <span class="sheet-status-badge status-conflict" style="padding: 0.05rem 0.3rem;">Conflict</span> Exists in Revit with different name. Will rename.
+                            </span>
+                            <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                                <span class="sheet-status-badge status-matched" style="padding: 0.05rem 0.3rem;">Matched</span> Correctly named in Revit. No action.
+                            </span>
+                            <span style="display: inline-flex; align-items: center; gap: 0.25rem;">
+                                <span class="sheet-status-badge" style="padding: 0.05rem 0.3rem; background: rgba(239, 68, 68, 0.1); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.2);">Unassigned</span> Exists in Revit only. Can be purged.
+                            </span>
+                        </div>
+                    </div>
                 </div>
             </div>
-            <div class="panel-content" id="checklist-container">
-                <!-- Populated dynamically -->
+
+            <!-- Scrollable List Box -->
+            <div class="panel" style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                <div class="panel-content" id="checklist-container" style="flex: 1; overflow-y: auto;">
+                    <!-- Populated dynamically -->
+                </div>
             </div>
         </div>
 
@@ -1325,6 +1336,36 @@
                 <div class="form-group">
                     <label for="titleblock-select">Title Block (from Revit)</label>
                     <select id="titleblock-select"></select>
+                </div>
+
+                <div class="divider"></div>
+
+                <!-- Template & Collections Manager -->
+                <div class="form-group" style="background-color: rgba(6, 182, 212, 0.03); padding: 0.75rem; border: 1px solid rgba(6, 182, 212, 0.15); border-radius: 8px;">
+                    <label style="font-weight: 600; color: var(--accent-primary); margin-bottom: 0.5rem; display: block;">Template & Collections Manager</label>
+                    
+                    <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                        <input type="text" id="new-collection-name" placeholder="New Collection Name..." style="flex: 1; background-color: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); padding: 0.35rem 0.5rem; font-size: 0.8rem;">
+                        <button class="btn btn-secondary" onclick="addCustomCollection()" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; width: auto;">Add</button>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem;">
+                        <select id="standard-template-select" style="flex: 1; background-color: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); padding: 0.35rem 0.5rem; font-size: 0.8rem;">
+                        </select>
+                        <button class="btn btn-secondary" onclick="loadStandardTemplate()" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; width: auto;">Load Sheets</button>
+                    </div>
+
+                    <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                        <input type="file" id="template-upload-input" accept=".csv" style="display: none;" onchange="importTemplateCSV(event)">
+                        <button class="btn btn-secondary" onclick="document.getElementById('template-upload-input').click()" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; flex: 1;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg>
+                            Import CSV
+                        </button>
+                        <button class="btn btn-secondary" onclick="exportTemplateCSV()" style="padding: 0.35rem 0.75rem; font-size: 0.8rem; flex: 1;">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 4px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 16 12 21 17 16"></polyline><line x1="12" y1="12" x2="12" y2="21"></line></svg>
+                            Export CSV
+                        </button>
+                    </div>
                 </div>
 
                 <div class="divider"></div>
@@ -1459,7 +1500,7 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label>Sheet Number</label>
-                    <input type="text" id="modal-sheet-num" disabled style="background: rgba(0,0,0,0.2); color: var(--text-secondary);">
+                    <input type="text" id="modal-sheet-num" oninput="validateSheetNumber()" style="background: rgba(15, 23, 42, 0.6); color: var(--text-primary); border: 1px solid var(--border-color);">
                 </div>
                 <div class="form-group">
                     <label>Proposed Name</label>
@@ -1467,7 +1508,7 @@
                 </div>
                 <div class="form-group">
                     <label>Sheet Collection</label>
-                    <select id="modal-sheet-set"></select>
+                    <select id="modal-sheet-set" onchange="validateSheetNumber()"></select>
                 </div>
                 <div class="form-group">
                     <label>Discipline</label>
@@ -1553,6 +1594,43 @@
             if (p) { p.SheetUse = value; saveSessionCache(); }
         }
 
+        function loadStandardTemplates() {
+            try {
+                const data = localStorage.getItem("ODI_Standard_Templates");
+                if (data) return JSON.parse(data);
+            } catch(e) {}
+            return [
+                {
+                    id: "arch_basic",
+                    name: "Basic Architectural Set",
+                    sheets: [
+                        { num: "G0.00", name: "COVER SHEET", disc: "GENERAL", use: "G", collection: "ARCHITECTURAL" },
+                        { num: "G0.01", name: "GENERAL NOTES", disc: "GENERAL", use: "G", collection: "ARCHITECTURAL" },
+                        { num: "A1.00", name: "OVERALL FLOOR PLAN", disc: "ARCHITECTURAL", use: "A", collection: "ARCHITECTURAL" },
+                        { num: "A1.01", name: "FIRST FLOOR PLAN", disc: "ARCHITECTURAL", use: "A", collection: "ARCHITECTURAL" },
+                        { num: "A1.02", name: "SECOND FLOOR PLAN", disc: "ARCHITECTURAL", use: "A", collection: "ARCHITECTURAL" },
+                        { num: "A1.11", name: "FIRST FLOOR REFLECTED CEILING PLAN", disc: "ARCHITECTURAL", use: "A", collection: "ARCHITECTURAL" },
+                        { num: "A2.01", name: "EXTERIOR ELEVATIONS", disc: "ARCHITECTURAL", use: "A", collection: "ARCHITECTURAL" },
+                        { num: "A3.01", name: "BUILDING SECTIONS", disc: "ARCHITECTURAL", use: "A", collection: "ARCHITECTURAL" },
+                        { num: "A4.01", name: "ENLARGED PLANS", disc: "ARCHITECTURAL", use: "A", collection: "ARCHITECTURAL" },
+                        { num: "A6.01", name: "DOOR & WINDOW SCHEDULES", disc: "ARCHITECTURAL", use: "A", collection: "ARCHITECTURAL" }
+                    ]
+                },
+                {
+                    id: "mep_basic",
+                    name: "Basic MEP Set",
+                    sheets: [
+                        { num: "M0.00", name: "MECHANICAL LEGEND AND NOTES", disc: "MECHANICAL", use: "M", collection: "MECHANICAL" },
+                        { num: "M1.01", name: "FIRST FLOOR MECHANICAL PLAN", disc: "MECHANICAL", use: "M", collection: "MECHANICAL" },
+                        { num: "E0.00", name: "ELECTRICAL LEGEND AND NOTES", disc: "ELECTRICAL", use: "E", collection: "ELECTRICAL" },
+                        { num: "E1.01", name: "FIRST FLOOR ELECTRICAL PLAN", disc: "ELECTRICAL", use: "E", collection: "ELECTRICAL" },
+                        { num: "P0.00", name: "PLUMBING LEGEND AND NOTES", disc: "PLUMBING", use: "P", collection: "PLUMBING" },
+                        { num: "P1.01", name: "FIRST FLOOR PLUMBING PLAN", disc: "PLUMBING", use: "P", collection: "PLUMBING" }
+                    ]
+                }
+            ];
+        }
+
         const State = {
             building: { width: 90, length: 80 },
             selectedScaleOverall: 0.125,
@@ -1580,7 +1658,9 @@
             separator: "-",
             separator2: "0",
             sheetUseValues: [],
-            activeGridTargetId: null
+            activeGridTargetId: null,
+            standardTemplates: loadStandardTemplates(),
+            collectionRenames: {}
         };
 
         const listeners = [];
@@ -1677,6 +1757,30 @@
                 else html += `<span style="color:#10b981; margin-right:4px;">${w}</span>`;
             });
             return html.trim();
+        }
+
+        function generateCharDiffHtml(oldStr, newStr) {
+            if (!oldStr) oldStr = "";
+            if (!newStr) newStr = "";
+            if (oldStr === newStr) return `<span style="opacity:0.7;">${newStr}</span>`;
+            let prefixLen = 0;
+            while(prefixLen < oldStr.length && prefixLen < newStr.length && oldStr[prefixLen] === newStr[prefixLen]) prefixLen++;
+            
+            let suffixLen = 0;
+            while(suffixLen < oldStr.length - prefixLen && suffixLen < newStr.length - prefixLen && oldStr[oldStr.length - 1 - suffixLen] === newStr[newStr.length - 1 - suffixLen]) suffixLen++;
+            
+            const prefix = newStr.substring(0, prefixLen);
+            const suffix = newStr.substring(newStr.length - suffixLen);
+            
+            const oldMid = oldStr.substring(prefixLen, oldStr.length - suffixLen);
+            const newMid = newStr.substring(prefixLen, newStr.length - suffixLen);
+            
+            let html = `<span style="opacity:0.6;">${prefix}</span>`;
+            if (oldMid) html += `<span style="color:#ef4444; text-decoration:line-through; background:rgba(239, 68, 68, 0.1); padding:0 2px;">${oldMid}</span>`;
+            if (newMid) html += `<span style="color:#10b981; background:rgba(16, 185, 129, 0.1); padding:0 2px;">${newMid}</span>`;
+            html += `<span style="opacity:0.6;">${suffix}</span>`;
+            
+            return html;
         }
 
         window.updateSheetName = function(id, newName) {
@@ -2195,8 +2299,49 @@
             State.sheets.forEach(preset => { const isMapped = State.loadedSheets.some(ls => State.liveSheetMappings[ls.Id] === preset.Number); State.createMissingSheets[preset.Number] = !isMapped; });
         }
 
-        window.toggleViewRename = function(viewKey) { if (State.viewRenames[viewKey]) State.viewRenames[viewKey].Enabled = !State.viewRenames[viewKey].Enabled; notifyListeners(); };
-        window.updateViewRenameName = function(viewKey, value) { if (State.viewRenames[viewKey]) State.viewRenames[viewKey].ProposedName = value; };
+        window.toggleViewRename = function(viewKey) { 
+            if (State.viewRenames[viewKey]) {
+                State.viewRenames[viewKey].Enabled = !State.viewRenames[viewKey].Enabled; 
+                notifyListeners(); 
+            }
+        };
+        window.updateViewRenameName = function(viewKey, value) { 
+            if (!State.viewRenames[viewKey]) {
+                State.viewRenames[viewKey] = { Enabled: true, ProposedName: value };
+            } else {
+                State.viewRenames[viewKey].ProposedName = value;
+                State.viewRenames[viewKey].Enabled = true;
+            }
+        };
+
+        window.validateViewRename = function(inputEl, viewIdStr) {
+            const proposedName = inputEl.value.trim().toLowerCase();
+            let isDuplicate = false;
+            
+            if (State.loadedViews) {
+                isDuplicate = State.loadedViews.some(v => v.Id.toString() !== viewIdStr && (v.Name || "").toLowerCase() === proposedName);
+            }
+            
+            if (!isDuplicate && State.viewRenames) {
+                Object.keys(State.viewRenames).forEach(key => {
+                    const renameViewId = key.split('_').pop();
+                    const renameData = State.viewRenames[key];
+                    if (renameViewId !== viewIdStr && renameData.Enabled && renameData.ProposedName && renameData.ProposedName.toLowerCase() === proposedName) {
+                        isDuplicate = true;
+                    }
+                });
+            }
+
+            if (isDuplicate) {
+                inputEl.style.borderBottomColor = "#ef4444";
+                inputEl.style.backgroundColor = "rgba(239, 68, 68, 0.1)";
+                inputEl.title = "⚠ Duplicate View Name detected!";
+            } else {
+                inputEl.style.borderBottomColor = "rgba(0,0,0,0.2)";
+                inputEl.style.backgroundColor = "transparent";
+                inputEl.title = "";
+            }
+        };
         window.togglePurgeCheck = function(number) { const item = State.purges.find(p => p.Number === number); if (item) { item.ShouldPurge = !item.ShouldPurge; notifyListeners(); } };
 
         window.changeLibrary = function(libraryName) {
@@ -2410,6 +2555,7 @@
             getSheetCollectionOptions().forEach(s => {
                 setSelect.innerHTML += `<option value="${s}">${s}</option>`;
             });
+            setSelect.innerHTML += `<option value="__new__">+ Add new...</option>`;
             setSelect.value = item.SheetCollection || "";
 
             const useSelect = document.getElementById('modal-sheet-use');
@@ -2423,6 +2569,46 @@
             document.getElementById('modal-sheet-disc').value = item.SheetDiscipline || "";
             
             modal.classList.add('active');
+            validateSheetNumber(); // Validate on open
+        };
+
+        window.validateSheetNumber = function() {
+            const numEl = document.getElementById('modal-sheet-num');
+            const setEl = document.getElementById('modal-sheet-set');
+            const num = numEl.value.trim().toUpperCase();
+            let coll = setEl.value;
+            if (coll === "__new__") coll = "";
+
+            const currentId = document.getElementById('modal-sheet-id').value;
+            const isLive = document.getElementById('modal-sheet-is-live').value === 'true';
+            
+            let isDuplicate = false;
+
+            if (State.loadedSheets) {
+                State.loadedSheets.forEach(s => {
+                    if (isLive && s.Id == currentId) return;
+                    const sColl = s.SheetCollection || "";
+                    if (s.Number === num && sColl === coll) isDuplicate = true;
+                });
+            }
+
+            if (!isDuplicate && State.sheets) {
+                State.sheets.forEach(s => {
+                    if (!isLive && s.Number === currentId) return;
+                    const sColl = s.SheetCollection || "";
+                    if (s.Number === num && sColl === coll) isDuplicate = true;
+                });
+            }
+
+            if (isDuplicate) {
+                numEl.style.borderColor = "#ef4444";
+                numEl.style.backgroundColor = "rgba(239, 68, 68, 0.1)";
+                numEl.title = "⚠ Duplicate Sheet Number in this Collection!";
+            } else {
+                numEl.style.borderColor = "var(--border-color)";
+                numEl.style.backgroundColor = "rgba(15, 23, 42, 0.6)";
+                numEl.title = "";
+            }
         };
 
         window.closeEditModal = function() {
@@ -2433,6 +2619,7 @@
             const id = document.getElementById('modal-sheet-id').value;
             const isLive = document.getElementById('modal-sheet-is-live').value === 'true';
             
+            const newNum = document.getElementById('modal-sheet-num').value.trim().toUpperCase();
             const newName = document.getElementById('modal-sheet-name').value.toUpperCase();
             const newSet = document.getElementById('modal-sheet-set').value;
             const newDisc = document.getElementById('modal-sheet-disc').value;
@@ -2451,6 +2638,7 @@
             if (isLive) {
                 const item = State.loadedSheets.find(s => s.Id == id);
                 if (item) {
+                    item.Number = newNum;
                     item.Name = newName;
                     item.SheetCollection = newSet || "";
                     item.SheetDiscipline = newDisc;
@@ -2459,6 +2647,7 @@
             } else {
                 const item = State.sheets.find(s => s.Number === id);
                 if (item) {
+                    item.Number = newNum;
                     item.Name = newName;
                     item.SheetCollection = newSet;
                     item.SheetDiscipline = newDisc;
@@ -2672,6 +2861,7 @@
                     name: preset.Name,
                     originalName: originalName,
                     originalNum: originalNum,
+                    originalCollection: mappedLive ? (mappedLive.SheetCollection || "Unassigned Sheets") : null,
                     status: status,
                     sheetCollection: preset.SheetCollection || (mappedLive ? mappedLive.SheetCollection : null) || "Unassigned Sheets",
                     discipline: preset.SheetDiscipline || (mappedLive ? mappedLive.SheetDiscipline : null) || getAIADiscipline(preset.Designator) || "Unassigned",
@@ -2753,8 +2943,12 @@
             }
             nameHtml += `</div>`;
 
-            if (item.originalName && (item.originalName !== item.name || item.originalNum !== item.number)) {
-                nameHtml += `<div style="font-size:0.7rem; color:var(--text-secondary); margin-top:2px;">Revit: ${item.originalNum} - ${item.originalName}</div>`;
+            if (item.originalName && (item.originalName !== item.name || item.originalNum !== item.number || (item.originalCollection && item.originalCollection !== item.sheetCollection))) {
+                nameHtml += `<div style="font-size:0.7rem; color:var(--text-secondary); margin-top:4px; display:flex; gap:0.75rem; flex-wrap:wrap;">`;
+                if (item.originalNum !== item.number) nameHtml += `<span>Num: ${generateCharDiffHtml(item.originalNum, item.number)}</span>`;
+                if (item.originalName !== item.name) nameHtml += `<span>Name: ${generateCharDiffHtml(item.originalName, item.name)}</span>`;
+                if (item.originalCollection && item.originalCollection !== item.sheetCollection) nameHtml += `<span>Set: ${generateCharDiffHtml(item.originalCollection, item.sheetCollection)}</span>`;
+                nameHtml += `</div>`;
             }
 
             // Global view usage checking
@@ -2792,10 +2986,26 @@
                     const isLast = index === item.placedViews.length - 1;
                     const borderRadius = isLast ? 'border-bottom-left-radius: 4px; border-bottom-right-radius: 4px;' : '';
 
+                    const vNameEscaped = vName.replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+                    const renameData = State.viewRenames && State.viewRenames[`${item.number}_${v.Id}`];
+                    const displayValue = renameData ? renameData.ProposedName : vNameEscaped;
+                    
+                    let diffViewHtml = "";
+                    if (renameData && renameData.ProposedName && renameData.ProposedName !== vName) {
+                        diffViewHtml = `<div style="font-size:0.65rem; color:var(--text-secondary); margin-top:2px;">Revit: ${generateCharDiffHtml(vName, renameData.ProposedName)}</div>`;
+                    }
+                    
+                    const renameInputHtml = `<div><input type="text" value="${displayValue}" 
+                        oninput="updateViewRenameName('${item.number}_${v.Id}', this.value); validateViewRename(this, '${v.Id}');"
+                        onfocus="this.style.borderBottomColor='var(--accent-primary)';"
+                        onblur="this.style.borderBottomColor='rgba(0,0,0,0.2)';"
+                        style="background:transparent; border:1px dashed transparent; border-bottom:1px dashed rgba(0,0,0,0.2); width:100%; font-size:0.75rem; font-weight:500; color:#1e293b; outline:none; padding:0;">
+                        ${diffViewHtml}</div>`;
+
                     drawerViewsHtml += `<div style="display:grid; grid-template-columns: 120px 60px minmax(150px, 1fr) 70px; gap: 0.5rem; align-items:center; padding: 0.3rem 1rem 0.3rem 2.5rem; border-bottom: 1px solid #e2e8f0; background: #f8fafc; ${styling} ${borderRadius}">
                         <div style="font-size:0.65rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#64748b;" title="${vType}">${vType}</div>
                         <div style="font-family:monospace; font-size:0.7rem; color:#334155; font-weight:600;">${detailNum}</div>
-                        <div style="color:#1e293b; font-size:0.75rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500;" title="${vName}">${vName}</div>
+                        ${renameInputHtml}
                         <div style="text-align:right;">${removeBtn}</div>
                     </div>`;
                 });
@@ -2873,6 +3083,55 @@
             </div>`;
         }
 
+        window.renameCollection = function(oldName) {
+            const newName = prompt(`Rename collection '${oldName}' to:`, oldName);
+            if (!newName || newName.trim() === "" || newName === oldName) return;
+            const cleanNew = newName.trim().toUpperCase();
+
+            // Track rename for export to Revit
+            let originalName = oldName;
+            for (const [k, v] of Object.entries(State.collectionRenames)) {
+                if (v === oldName) {
+                    originalName = k;
+                    break;
+                }
+            }
+            State.collectionRenames[originalName] = cleanNew;
+
+            let updated = 0;
+            if (State.loadedSheetCollections) {
+                const idx = State.loadedSheetCollections.indexOf(oldName);
+                if (idx !== -1) State.loadedSheetCollections[idx] = cleanNew;
+                else if (!State.loadedSheetCollections.includes(cleanNew)) State.loadedSheetCollections.push(cleanNew);
+            }
+
+            if (State.sheets) {
+                State.sheets.forEach(s => {
+                    const c = s.SheetCollection || "Unassigned Sheets";
+                    if (c === oldName || (oldName === "Unassigned Sheets" && !s.SheetCollection)) {
+                        s.SheetCollection = cleanNew;
+                        updated++;
+                    }
+                });
+            }
+            
+            if (State.loadedSheets) {
+                State.loadedSheets.forEach(s => {
+                    const c = s.SheetCollection || "Unassigned Sheets";
+                    if (c === oldName || (oldName === "Unassigned Sheets" && !s.SheetCollection)) {
+                        s.SheetCollection = cleanNew;
+                        updated++;
+                    }
+                });
+            }
+
+            if (updated > 0 || oldName !== cleanNew) {
+                saveSessionCache();
+                renderChecklist();
+                notifyListeners();
+            }
+        };
+
         function buildTree(unifiedList) {
             const groups = {};
             unifiedList.forEach(item => {
@@ -2885,11 +3144,12 @@
             const sortedKeys = Object.keys(groups).sort();
             sortedKeys.forEach(k => {
                 const headerText = `SHEET COLLECTION: ${k.toUpperCase()} (${groups[k].length})`;
+                const editIcon = `<span onclick="event.stopPropagation(); renameCollection('${k.replace(/'/g, "\\'")}')" style="margin-left:8px; cursor:pointer; opacity:0.6;" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='0.6'" title="Rename Collection"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg></span>`;
                 html += `
                 <div class="tree-group">
                     <div class="tree-header" onclick="toggleTree(this)">
                         <svg class="tree-toggle-icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
-                        ${headerText}
+                        ${headerText}${editIcon}
                     </div>
                     <div class="tree-children">
                         ${groups[k].map(renderUnifiedRow).join('')}
@@ -3174,7 +3434,8 @@ function syncUI() {
                         TitleBlockId: State.selectedTitleBlockId,
                         TitleBlock: tbName,
                         Sheets: finalizedSheets,
-                        Purges: purgeSheets
+                        Purges: purgeSheets,
+                        CollectionRenames: State.collectionRenames || {}
                     };
 
                     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
@@ -3201,10 +3462,214 @@ function syncUI() {
             window.addEventListener('resize', drawSimulation);
         }
 
+        window.addCustomCollection = function() {
+            const input = document.getElementById('new-collection-name');
+            const val = input.value.trim().toUpperCase();
+            if (!val) return;
+            if (!State.loadedSheetCollections) State.loadedSheetCollections = [];
+            if (!State.loadedSheetCollections.includes(val)) {
+                State.loadedSheetCollections.push(val);
+                input.value = "";
+                saveSessionCache();
+                renderChecklist();
+                alert(`Added new collection: ${val}`);
+            } else {
+                alert("Collection already exists.");
+            }
+        };
+
+        function refreshTemplateDropdown() {
+            const select = document.getElementById('standard-template-select');
+            if (!select) return;
+            select.innerHTML = "";
+            State.standardTemplates.forEach(t => {
+                select.innerHTML += `<option value="${t.id}">${t.name}</option>`;
+            });
+        }
+
+        function saveTemplatesCache() {
+            try {
+                localStorage.setItem("ODI_Standard_Templates", JSON.stringify(State.standardTemplates));
+            } catch(e) {}
+        }
+
+        window.loadStandardTemplate = function() {
+            const select = document.getElementById('standard-template-select');
+            const type = select.value;
+            const template = State.standardTemplates.find(t => t.id === type);
+            if (!template) return;
+            
+            const toAdd = template.sheets || [];
+
+            if (toAdd.length > 0) {
+                let addedCount = 0;
+                toAdd.forEach(item => {
+                    const exists = State.sheets.some(s => s.Number === item.num || s.Number === item.Number);
+                    if (!exists) {
+                        State.sheets.push({
+                            Number: item.num || item.Number,
+                            Name: item.name || item.Name,
+                            SheetCollection: item.collection || item.SheetCollection,
+                            SheetDiscipline: item.disc || item.SheetDiscipline,
+                            SheetUse: item.use || item.SheetUse,
+                            IsSimulatorGenerated: true,
+                            IsTemplate: true,
+                            Tags: item.Tags || item.tags || []
+                        });
+                        addedCount++;
+                    }
+                });
+                
+                if (addedCount > 0) {
+                    saveSessionCache();
+                    autoAlignSheets();
+                    notifyListeners();
+                    alert(`Successfully added ${addedCount} sheets to the Target Schema.`);
+                } else {
+                    alert("All sheets from this template already exist in the schema.");
+                }
+            }
+        };
+
+        window.exportTemplateCSV = function() {
+            let csvContent = "Template ID,Template Name,Sheet Number,Sheet Name,Sheet Collection,Sheet Discipline,Sheet Use,Tags\n";
+            
+            State.standardTemplates.forEach(t => {
+                const tId = `"${(t.id || "").replace(/"/g, '""')}"`;
+                const tName = `"${(t.name || "").replace(/"/g, '""')}"`;
+                
+                (t.sheets || []).forEach(s => {
+                    const sNum = `"${(s.num || s.Number || "").replace(/"/g, '""')}"`;
+                    const sName = `"${(s.name || s.Name || "").replace(/"/g, '""')}"`;
+                    const sColl = `"${(s.collection || s.SheetCollection || "").replace(/"/g, '""')}"`;
+                    const sDisc = `"${(s.disc || s.SheetDiscipline || "").replace(/"/g, '""')}"`;
+                    const sUse = `"${(s.use || s.SheetUse || "").replace(/"/g, '""')}"`;
+                    const sTags = `"${(s.tags || s.Tags || []).join(',').replace(/"/g, '""')}"`;
+                    
+                    csvContent += `${tId},${tName},${sNum},${sName},${sColl},${sDisc},${sUse},${sTags}\n`;
+                });
+            });
+
+            const dataStr = "data:text/csv;charset=utf-8," + encodeURIComponent(csvContent);
+            const dlAnchor = document.createElement('a');
+            dlAnchor.setAttribute("href", dataStr);
+            dlAnchor.setAttribute("download", "standard_templates_library.csv");
+            document.body.appendChild(dlAnchor);
+            dlAnchor.click();
+            dlAnchor.remove();
+        };
+
+        window.importTemplateCSV = function(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const text = e.target.result;
+                    const rows = [];
+                    let currentRow = [];
+                    let currentCell = '';
+                    let inQuotes = false;
+                    for (let i = 0; i < text.length; i++) {
+                        const c = text[i];
+                        if (inQuotes) {
+                            if (c === '"') {
+                                if (i + 1 < text.length && text[i + 1] === '"') {
+                                    currentCell += '"';
+                                    i++;
+                                } else {
+                                    inQuotes = false;
+                                }
+                            } else {
+                                currentCell += c;
+                            }
+                        } else {
+                            if (c === '"') {
+                                inQuotes = true;
+                            } else if (c === ',') {
+                                currentRow.push(currentCell);
+                                currentCell = '';
+                            } else if (c === '\n' || c === '\r') {
+                                currentRow.push(currentCell);
+                                if (currentRow.length > 1 || currentRow[0] !== '') {
+                                    rows.push(currentRow);
+                                }
+                                currentRow = [];
+                                currentCell = '';
+                                if (c === '\r' && i + 1 < text.length && text[i + 1] === '\n') {
+                                    i++;
+                                }
+                            } else {
+                                currentCell += c;
+                            }
+                        }
+                    }
+                    if (currentCell || currentRow.length > 0) {
+                        currentRow.push(currentCell);
+                        if (currentRow.length > 1 || currentRow[0] !== '') rows.push(currentRow);
+                    }
+
+                    const importedTemplatesMap = {};
+                    const newTemplates = [];
+                    
+                    let startIndex = 0;
+                    if (rows.length > 0 && rows[0][0].toLowerCase().includes('template')) {
+                        startIndex = 1;
+                    }
+                    
+                    for (let i = startIndex; i < rows.length; i++) {
+                        const r = rows[i];
+                        if (r.length < 4) continue;
+                        
+                        const tId = r[0] ? r[0].trim() : "Default";
+                        const tName = r[1] ? r[1].trim() : "Default Template";
+                        const sNum = r[2] ? r[2].trim() : "";
+                        const sName = r[3] ? r[3].trim() : "";
+                        const sColl = r[4] ? r[4].trim() : "";
+                        const sDisc = r[5] ? r[5].trim() : "";
+                        const sUse = r[6] ? r[6].trim() : "";
+                        const sTagsRaw = r[7] ? r[7].trim() : "";
+                        const sTags = sTagsRaw ? sTagsRaw.split(',').map(tag => tag.trim()).filter(t => t) : [];
+                        
+                        if (!sNum) continue;
+                        
+                        if (!importedTemplatesMap[tId]) {
+                            const newT = { id: tId, name: tName, sheets: [] };
+                            importedTemplatesMap[tId] = newT;
+                            newTemplates.push(newT);
+                        }
+                        
+                        importedTemplatesMap[tId].sheets.push({
+                            num: sNum,
+                            name: sName,
+                            collection: sColl,
+                            disc: sDisc,
+                            use: sUse,
+                            tags: sTags
+                        });
+                    }
+
+                    if (newTemplates.length > 0) {
+                        State.standardTemplates = newTemplates;
+                        saveTemplatesCache();
+                        refreshTemplateDropdown();
+                        alert(`Successfully imported ${newTemplates.length} templates from CSV.`);
+                    } else {
+                        alert("No valid template data found in CSV.");
+                    }
+                } catch (err) {
+                    alert("Error parsing CSV: " + err);
+                }
+                document.getElementById('template-upload-input').value = "";
+            };
+            reader.readAsText(file);
+        };
+
         // --- STARTUP ---
         document.addEventListener('DOMContentLoaded', () => {
             initializeData();
             initEvents();
+            refreshTemplateDropdown();
             registerListener(syncUI);
             notifyListeners();
         });
