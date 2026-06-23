@@ -230,226 +230,107 @@
                                 </Grid>
                             </Border>
 
-                            <!-- Fake Header -->
-                            <Grid Grid.Row="1" Grid.IsSharedSizeScope="True" Background="{DynamicResource ControlBrush}" Margin="0,0,20,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="20" SharedSizeGroup="ColExp"/>
-                                    <ColumnDefinition Width="40" SharedSizeGroup="ColCheck"/>
-                                    <ColumnDefinition Width="80" SharedSizeGroup="ColAction"/>
-                                    <ColumnDefinition Width="60" SharedSizeGroup="ColType"/>
-                                    <ColumnDefinition Width="150" SharedSizeGroup="ColNum"/>
-                                    <ColumnDefinition Width="*" SharedSizeGroup="ColName"/>
-                                    <ColumnDefinition Width="100" SharedSizeGroup="ColBtns"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="2" Text="ACTION" FontWeight="SemiBold" Foreground="{DynamicResource TextLightBrush}" Padding="5,5"/>
-                            <TextBlock Grid.Column="3" Text="TYPE" FontWeight="SemiBold" Foreground="{DynamicResource TextLightBrush}" Padding="5,5"/>
-<TextBlock Grid.Column="4" Text="NUMBER" FontWeight="SemiBold" Foreground="{DynamicResource TextLightBrush}" Padding="5,5"/>
-<TextBlock Grid.Column="5" Text="NAME" FontWeight="SemiBold" Foreground="{DynamicResource TextLightBrush}" Padding="5,5"/>
-</Grid>
-
-                            <ListBox Name="EditorTree" Grid.Row="2" Background="Transparent" BorderThickness="0" Padding="5" Grid.IsSharedSizeScope="True"
-                                     HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                                     VirtualizingStackPanel.IsVirtualizing="True" VirtualizingStackPanel.VirtualizationMode="Recycling" VirtualizingStackPanel.IsVirtualizingWhenGrouping="True">
-                                <ListBox.ItemContainerStyle>
-                                    <Style TargetType="ListBoxItem">
-                                        <Setter Property="Padding" Value="0"/>
-                                        <Setter Property="Margin" Value="0,1"/>
-                                        <Setter Property="BorderThickness" Value="0"/>
-                                        <Setter Property="Background" Value="Transparent"/>
-                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <!-- DataGrid replacing ListBox and Fake Header -->
+                            <DataGrid Name="EditorGrid" Grid.Row="1" Grid.RowSpan="2" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True" SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal" Background="Transparent" BorderThickness="0" RowBackground="{DynamicResource WindowBrush}" AlternatingRowBackground="{DynamicResource ControlBrush}" EnableRowVirtualization="False">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="DataGridRow">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding Action}" Value="PURGE">
+                                                <Setter Property="Opacity" Value="0.5"/>
+                                                <Setter Property="Background" Value="#FEE2E2"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
                                     </Style>
-                                </ListBox.ItemContainerStyle>
-                                <ListBox.ItemTemplate>
+                                </DataGrid.RowStyle>
+                                
+                                <DataGrid.Columns>
+                                    <DataGridTemplateColumn Header="Sync" Width="40">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Action}" IsReadOnly="True" FontWeight="Bold" Width="70"/>
+                                    
+                                    <DataGridTextColumn Header="Type" Binding="{Binding CollectionName}" IsReadOnly="True" Foreground="{DynamicResource TextLightBrush}" Width="120"/>
+                                    <DataGridTextColumn Header="Sheet Number" Binding="{Binding SheetNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="100">
+                                        <DataGridTextColumn.CellStyle>
+                                            <Style TargetType="DataGridCell">
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsNameUnique}" Value="False">
+                                                        <Setter Property="Background" Value="#FEE2E2"/>
+                                                        <Setter Property="Foreground" Value="#991B1B"/>
+                                                        <Setter Property="ToolTip" Value="Duplicate Sheet Number!"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </DataGridTextColumn.CellStyle>
+                                    </DataGridTextColumn>
+                                    
+                                    <!-- Combobox for Name Suggestions -->
+                                    <DataGridTemplateColumn Header="Sheet Name" Width="*">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <ComboBox IsEditable="True" Text="{Binding SheetName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding AvailableNames}" Margin="2,0"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    
+                                    <DataGridTemplateColumn Header="Tools" Width="70">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Button Content="Purge" Command="{Binding PurgeCommand}" Padding="5,0" Margin="2,0" Background="#FEE2E2" Foreground="#991B1B"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+
+                                <!-- Nested DataGrid for Views on Sheet -->
+                                <DataGrid.RowDetailsTemplate>
                                     <DataTemplate>
-                                        <!-- DISCIPLINE CONTAINER (mimicking the picture's red bordered group) -->
-                                        <Border BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" CornerRadius="5" Margin="0,5,0,5" Background="{DynamicResource WindowBrush}">
+                                        <Border Background="{DynamicResource ControlBrush}" Margin="30,0,0,0" Padding="10">
                                             <StackPanel>
-                                                
-                                                <!-- DISCIPLINE HEADER -->
-                                                <Border Background="{DynamicResource ToolbarBrush}" Padding="5,3" CornerRadius="4,4,0,0">
-                                                    <TextBlock Text="{Binding Name}" Foreground="{DynamicResource AccentBrush}" FontWeight="Bold" HorizontalAlignment="Center"/>
-                                                </Border>
-                                                
-                                                <!-- SHEETS IN THIS DISCIPLINE -->
-                                                <ItemsControl ItemsSource="{Binding Children}">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <StackPanel>
-                                                                <!-- SHEET CARD -->
-                                                                <Border BorderThickness="0,1,0,0" Padding="2" Background="{DynamicResource CardBrush}" BorderBrush="{DynamicResource BorderBrush}">
-                                                                    <Grid>
-                                                                        <Grid.ColumnDefinitions>
-                                                                            <ColumnDefinition SharedSizeGroup="ColExp"/>
-                                                                            <ColumnDefinition SharedSizeGroup="ColCheck"/>
-                                                                            <ColumnDefinition SharedSizeGroup="ColAction"/>
-                                                                            <ColumnDefinition SharedSizeGroup="ColType"/>
-                                                                            <ColumnDefinition SharedSizeGroup="ColNum"/>
-                                                                            <ColumnDefinition SharedSizeGroup="ColName"/>
-                                                                            <ColumnDefinition SharedSizeGroup="ColBtns"/>
-                                                                        </Grid.ColumnDefinitions>
-                                                                        
-                                                                        <!-- Expand/Collapse Button (Sheets only) -->
-                                                                        <ToggleButton Grid.Column="0" IsChecked="{Binding IsExpanded, Mode=TwoWay}" Command="{Binding ExpandCommand}"
-                                                                                      Visibility="{Binding ShowExpandToggle, Converter={StaticResource BoolToVis}}" 
-                                                                                      VerticalAlignment="Center" HorizontalAlignment="Center" Margin="2,0" Background="Transparent" BorderThickness="0">
-                                                                            <ToggleButton.Template>
-                                                                                <ControlTemplate TargetType="ToggleButton">
-                                                                                    <Border Background="Transparent" Height="16" Width="16">
-                                                                                        <Path x:Name="ExpandPath" Data="M0,0 L0,6 L6,0 z" Fill="{DynamicResource TextLightBrush}">
-                                                                                            <Path.RenderTransform>
-                                                                                                <RotateTransform Angle="135" CenterX="3" CenterY="3"/>
-                                                                                            </Path.RenderTransform>
-                                                                                        </Path>
-                                                                                    </Border>
-                                                                                    <ControlTemplate.Triggers>
-                                                                                        <Trigger Property="IsChecked" Value="True">
-                                                                                            <Setter Property="RenderTransform" TargetName="ExpandPath">
-                                                                                                <Setter.Value>
-                                                                                                    <RotateTransform Angle="180" CenterX="3" CenterY="3"/>
-                                                                                                </Setter.Value>
-                                                                                            </Setter>
-                                                                                            <Setter Property="Fill" TargetName="ExpandPath" Value="{DynamicResource AccentBrush}"/>
-                                                                                        </Trigger>
-                                                                                    </ControlTemplate.Triggers>
-                                                                                </ControlTemplate>
-                                                                            </ToggleButton.Template>
-                                                                        </ToggleButton>
-
-                                                                        <CheckBox Grid.Column="1" IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                                                                        
-                                                                        <Border Grid.Column="2" Background="{Binding ActionColorBrush}" CornerRadius="3" Padding="4,2" VerticalAlignment="Center" Margin="5,0">
-                                                                            <TextBlock Text="{Binding Action}" Foreground="White" FontWeight="Bold" FontSize="10"/>
-                                                                        </Border>
-                                                                        
-                                                                        <TextBlock Grid.Column="3" Text="{Binding ItemType}" Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center" Padding="5,0"/>
-                                                                        
-                                                                        <!-- READ MODE -->
-                                                                        <Grid Grid.Column="4" Grid.ColumnSpan="3" Style="{StaticResource DisplayGridStyle}">
-                                                                            <Grid.ColumnDefinitions>
-                                                                                <ColumnDefinition SharedSizeGroup="ColNum"/>
-                                                                                <ColumnDefinition SharedSizeGroup="ColName"/>
-                                                                                <ColumnDefinition SharedSizeGroup="ColBtns"/>
-                                                                            </Grid.ColumnDefinitions>
-                                                                            
-                                                                            <TextBlock Grid.Column="0" VerticalAlignment="Center" Padding="5,0">
-                                                                                <Run Text="{Binding NumberDiffNode.Prefix}" Foreground="{DynamicResource TextLightBrush}"/>
-                                                                                <Run Text="{Binding NumberDiffNode.Old}" TextDecorations="Strikethrough" Foreground="#EF4444" Background="#1AEF4444"/>
-                                                                                <Run Text="{Binding NumberDiffNode.New}" Foreground="#10B981" Background="#1A10B981"/>
-                                                                                <Run Text="{Binding NumberDiffNode.Suffix}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
-                                                                            </TextBlock>
-
-                                                                            <TextBlock Grid.Column="1" VerticalAlignment="Center" Padding="5,0" TextWrapping="Wrap">
-                                                                                <Run Text="{Binding NameDiffNode.Prefix}" Foreground="{DynamicResource TextLightBrush}"/>
-                                                                                <Run Text="{Binding NameDiffNode.Old}" TextDecorations="Strikethrough" Foreground="#EF4444" Background="#1AEF4444"/>
-                                                                                <Run Text="{Binding NameDiffNode.New}" Foreground="#10B981" Background="#1A10B981"/>
-                                                                                <Run Text="{Binding NameDiffNode.Suffix}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
-                                                                            </TextBlock>
-                                                                            
-                                                                            <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,5,0">
-                                                                                <Button Content="✎" ToolTip="Edit" Command="{Binding EditCommand}" Padding="8,2" FontSize="11" Background="{DynamicResource ButtonBrush}"/>
-                                                                                <Button Content="-" ToolTip="Purge" Command="{Binding PurgeCommand}" Padding="8,2" FontSize="11" Background="#FEE2E2" Foreground="#991B1B" FontWeight="Bold" Visibility="{Binding CanPurge, Converter={StaticResource BoolToVis}}"/>
-                                                                            </StackPanel>
-                                                                        </Grid>
-                                                                        
-                                                                        <!-- EDIT MODE -->
-                                                                        <Grid Grid.Column="4" Grid.ColumnSpan="3" Style="{StaticResource EditGridStyle}">
-                                                                            <Grid.ColumnDefinitions>
-                                                                                <ColumnDefinition SharedSizeGroup="ColNum"/>
-                                                                                <ColumnDefinition SharedSizeGroup="ColName"/>
-                                                                                <ColumnDefinition SharedSizeGroup="ColBtns"/>
-                                                                            </Grid.ColumnDefinitions>
-                                                                            
-                                                                            <TextBox Grid.Column="0" Text="{Binding NumberDiffNode.ProposedValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" Margin="2,2"/>
-                                                                            <TextBox Grid.Column="1" Text="{Binding NameDiffNode.ProposedValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" Margin="2,2"/>
-                                                                            
-                                                                            <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,5,0">
-                                                                                <Button Content="Done" Command="{Binding DoneCommand}" Padding="8,2" Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="SemiBold"/>
-                                                                            </StackPanel>
-                                                                        </Grid>
-                                                                    </Grid>
-                                                                </Border>
-                                                                
-                                                                <!-- VIEWS (Nested ItemsControl) -->
-                                                                <ItemsControl ItemsSource="{Binding Children}" Visibility="{Binding IsExpanded, Converter={StaticResource BoolToVis}}">
-                                                                    <ItemsControl.ItemTemplate>
-                                                                        <DataTemplate>
-                                                                            <!-- Notice Margin is 0 to keep columns perfectly aligned. Background distinguishes it. -->
-                                                                            <Border BorderThickness="0,1,0,0" BorderBrush="{DynamicResource BorderBrush}" Background="{DynamicResource ToolbarBrush}" Margin="0" Padding="2">
-                                                                                <Grid>
-                                                                                    <Grid.ColumnDefinitions>
-                                                                                        <ColumnDefinition SharedSizeGroup="ColExp"/>
-                                                                                        <ColumnDefinition SharedSizeGroup="ColCheck"/>
-                                                                                        <ColumnDefinition SharedSizeGroup="ColAction"/>
-                                                                                        <ColumnDefinition SharedSizeGroup="ColType"/>
-                                                                                        <ColumnDefinition SharedSizeGroup="ColNum"/>
-                                                                                        <ColumnDefinition SharedSizeGroup="ColName"/>
-                                                                                        <ColumnDefinition SharedSizeGroup="ColBtns"/>
-                                                                                    </Grid.ColumnDefinitions>
-                                                                                    
-                                                                                    <!-- Visual Hierarchy L-Shape -->
-                                                                                    <Border Grid.Column="0" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,1" Width="10" Height="14" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,0,4,0" CornerRadius="0,0,0,4"/>
-                                                                                    
-                                                                                    <CheckBox Grid.Column="1" IsChecked="{Binding IsChecked, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
-                                                                                    
-                                                                                    <Border Grid.Column="2" Background="{Binding ActionColorBrush}" CornerRadius="3" Padding="4,2" VerticalAlignment="Center" Margin="5,0">
-                                                                                        <TextBlock Text="{Binding Action}" Foreground="White" FontWeight="Bold" FontSize="10"/>
-                                                                                    </Border>
-                                                                                    
-                                                                                    <TextBlock Grid.Column="3" Text="{Binding ItemType}" Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center" Padding="5,0"/>
-                                                                                    
-                                                                                    <!-- READ MODE -->
-                                                                                    <Grid Grid.Column="4" Grid.ColumnSpan="3" Style="{StaticResource DisplayGridStyle}">
-                                                                                        <Grid.ColumnDefinitions>
-                                                                                            <ColumnDefinition SharedSizeGroup="ColNum"/>
-                                                                                            <ColumnDefinition SharedSizeGroup="ColName"/>
-                                                                                            <ColumnDefinition SharedSizeGroup="ColBtns"/>
-                                                                                        </Grid.ColumnDefinitions>
-                                                                                        
-                                                                                        <TextBlock Grid.Column="0" VerticalAlignment="Center" Padding="5,0">
-                                                                                            <Run Text="{Binding NumberDiffNode.Prefix}" Foreground="{DynamicResource TextLightBrush}"/>
-                                                                                            <Run Text="{Binding NumberDiffNode.Old}" TextDecorations="Strikethrough" Foreground="#EF4444" Background="#1AEF4444"/>
-                                                                                            <Run Text="{Binding NumberDiffNode.New}" Foreground="#10B981" Background="#1A10B981"/>
-                                                                                            <Run Text="{Binding NumberDiffNode.Suffix}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
-                                                                                        </TextBlock>
-                                                                                        <TextBlock Grid.Column="1" VerticalAlignment="Center" Padding="5,0" TextWrapping="Wrap">
-                                                                                            <Run Text="{Binding NameDiffNode.Prefix}" Foreground="{DynamicResource TextLightBrush}"/>
-                                                                                            <Run Text="{Binding NameDiffNode.Old}" TextDecorations="Strikethrough" Foreground="#EF4444" Background="#1AEF4444"/>
-                                                                                            <Run Text="{Binding NameDiffNode.New}" Foreground="#10B981" Background="#1A10B981"/>
-                                                                                            <Run Text="{Binding NameDiffNode.Suffix}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
-                                                                                        </TextBlock>
-                                                                                        <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,5,0">
-                                                                                            <Button Content="✎" ToolTip="Edit" Command="{Binding EditCommand}" Padding="8,2" FontSize="11" Background="{DynamicResource ButtonBrush}"/>
-                                                                                            <Button Content="-" ToolTip="Purge" Command="{Binding PurgeCommand}" Padding="8,2" FontSize="11" Background="#FEE2E2" Foreground="#991B1B" FontWeight="Bold" Visibility="{Binding CanPurge, Converter={StaticResource BoolToVis}}"/>
-                                                                                        </StackPanel>
-                                                                                    </Grid>
-                                                                                    
-                                                                                    <!-- EDIT MODE -->
-                                                                                    <Grid Grid.Column="4" Grid.ColumnSpan="3" Style="{StaticResource EditGridStyle}">
-                                                                                        <Grid.ColumnDefinitions>
-                                                                                            <ColumnDefinition SharedSizeGroup="ColNum"/>
-                                                                                            <ColumnDefinition SharedSizeGroup="ColName"/>
-                                                                                            <ColumnDefinition SharedSizeGroup="ColBtns"/>
-                                                                                        </Grid.ColumnDefinitions>
-                                                                                        <TextBox Grid.Column="0" Text="{Binding NumberDiffNode.ProposedValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" Margin="2,2"/>
-                                                                                        <TextBox Grid.Column="1" Text="{Binding NameDiffNode.ProposedValue, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource AccentBrush}" BorderThickness="1" Margin="2,2"/>
-                                                                                        <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,5,0">
-                                                                                            <Button Content="Done" Command="{Binding DoneCommand}" Padding="8,2" Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="SemiBold"/>
-                                                                                        </StackPanel>
-                                                                                    </Grid>
-                                                                                </Grid>
-                                                                            </Border>
-                                                                        </DataTemplate>
-                                                                    </ItemsControl.ItemTemplate>
-                                                                </ItemsControl>
-                                                            </StackPanel>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
+                                                <TextBlock Text="Views Placed on Sheet:" FontWeight="SemiBold" Foreground="{DynamicResource TextLightBrush}" Margin="0,0,0,5"/>
+                                            <!-- ItemsControl replacing Nested DataGrid for extreme stability -->
+                                            <ItemsControl ItemsSource="{Binding Views}" Margin="0,5,0,5">
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <Grid Margin="0,2">
+                                                            <Grid.ColumnDefinitions>
+                                                                <ColumnDefinition Width="120"/>
+                                                                <ColumnDefinition Width="100"/>
+                                                                <ColumnDefinition Width="*"/>
+                                                            </Grid.ColumnDefinitions>
+                                                            
+                                                            <ComboBox Grid.Column="0" Text="{Binding ViewType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,5,0">
+                                                                <ComboBoxItem Content="FloorPlan"/>
+                                                                <ComboBoxItem Content="CeilingPlan"/>
+                                                                <ComboBoxItem Content="Section"/>
+                                                                <ComboBoxItem Content="Elevation"/>
+                                                                <ComboBoxItem Content="DraftingView"/>
+                                                                <ComboBoxItem Content="ThreeD"/>
+                                                            </ComboBox>
+                                                            
+                                                            <ComboBox Grid.Column="1" Text="{Binding Scale, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,5,0">
+                                                                <ComboBoxItem Content="1/16&quot; = 1'-0&quot;"/>
+                                                                <ComboBoxItem Content="1/8&quot; = 1'-0&quot;"/>
+                                                                <ComboBoxItem Content="1/4&quot; = 1'-0&quot;"/>
+                                                                <ComboBoxItem Content="1/2&quot; = 1'-0&quot;"/>
+                                                                <ComboBoxItem Content="1&quot; = 1'-0&quot;"/>
+                                                            </ComboBox>
+                                                            
+                                                            <TextBox Grid.Column="2" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" VerticalContentAlignment="Center"/>
+                                                        </Grid>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                                <Button Content="+ Add View to Sheet" Command="{Binding AddViewCommand}" HorizontalAlignment="Left" Padding="10,2" Margin="0,5,0,0" Background="{DynamicResource ButtonBrush}"/>
                                             </StackPanel>
                                         </Border>
                                     </DataTemplate>
-                                </ListBox.ItemTemplate>
-                            </ListBox>
+                                </DataGrid.RowDetailsTemplate>
+                            </DataGrid>
 
                             <!-- Editor Footer Actions -->
                             <Border Grid.Row="3" Background="{DynamicResource FooterBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="5">
@@ -517,8 +398,10 @@
 
                                 <Grid>
                                     <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="200"/>
+                                        <ColumnDefinition Width="150"/>
+                                        <ColumnDefinition Width="200"/>
                                         <ColumnDefinition Width="250"/>
-                                        <ColumnDefinition Width="300"/>
                                     </Grid.ColumnDefinitions>
 
                                     <!-- 2. LEVELS (Left) -->
@@ -539,9 +422,45 @@
                                         </Border>
                                     </StackPanel>
                                     
-                                    <!-- 3. DISCIPLINES (Right) -->
-                                    <StackPanel Grid.Column="1">
-                                        <TextBlock Text="3. Disciplines to Include" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                                    <!-- 3. SHEET SERIES (Middle) -->
+                                    <StackPanel Grid.Column="1" Margin="0,0,20,0">
+                                        <TextBlock Text="3. Sheet Series" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                            <Button Name="Btn_SeriesAll" Content="Select All" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
+                                            <Button Name="Btn_SeriesNone" Content="Select None" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
+                                        </StackPanel>
+                                        <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Height="250" Background="{DynamicResource ControlBrush}">
+                                            <ListBox Name="List_Series" BorderThickness="0" Background="Transparent" SelectionMode="Extended">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="5"/>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <!-- 4. NAME MODIFIERS (Middle-Right) -->
+                                    <StackPanel Grid.Column="2" Margin="0,0,20,0">
+                                        <TextBlock Text="4. Name Modifiers" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                            <Button Name="Btn_ModAll" Content="Select All" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
+                                            <Button Name="Btn_ModNone" Content="Select None" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
+                                        </StackPanel>
+                                        <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Height="250" Background="{DynamicResource ControlBrush}">
+                                            <ListBox Name="List_Modifiers" BorderThickness="0" Background="Transparent" SelectionMode="Extended">
+                                                <ListBox.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="5"/>
+                                                    </DataTemplate>
+                                                </ListBox.ItemTemplate>
+                                            </ListBox>
+                                        </Border>
+                                    </StackPanel>
+
+                                    <!-- 5. DISCIPLINES (Right) -->
+                                    <StackPanel Grid.Column="3">
+                                        <TextBlock Text="5. Disciplines to Include" FontWeight="SemiBold" Margin="0,0,0,5"/>
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                             <Button Name="Btn_DiscAll" Content="Select All" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
                                             <Button Name="Btn_DiscNone" Content="Select None" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>

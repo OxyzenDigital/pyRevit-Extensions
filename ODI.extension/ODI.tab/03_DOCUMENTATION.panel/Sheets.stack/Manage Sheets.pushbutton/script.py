@@ -22,6 +22,7 @@ clr.AddReference("WindowsBase")
 
 from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventArgs
 from System.Collections.ObjectModel import ObservableCollection
+from System.Windows.Data import CollectionViewSource, PropertyGroupDescription
 from System.Windows.Media import SolidColorBrush, Color as WpfColor, Colors
 from System.Windows import MessageBox, Visibility
 from System.Windows.Controls import CheckBox
@@ -57,6 +58,16 @@ DISCIPLINE_CODES = {
   "RA": "EXISTING ARCHITECTURAL", "RS": "EXISTING STRUCTURAL",
   "RP": "EXISTING PLUMBING", "RM": "EXISTING MECHANICAL"
 }
+
+SERIES_MAP = {
+    "0": "General", "1": "Plans", "2": "Elevations", "3": "Sections",
+    "5": "Details", "6": "Schedules", "7": "Diagrams", "9": "ThreeD"
+}
+
+MODIFIERS = [
+    "Overall", "Dimensions", "Construction", "Enlarged", 
+    "Finishes", "Furniture", "Reflected Ceiling", "Framing"
+]
 
 # Intelligent Keyword Synonym Dictionary based on UDS Sheet Types
 SHEET_TYPE_SYNONYMS = {
@@ -174,31 +185,80 @@ class CollectionGroupNode(ViewModelBase):
         self.Name = name
         self.Children = []  # Holds DisciplineGroupNode instances
 
-class EditableGridRowNode(ViewModelBase):
-    def __init__(self, element_id, item_type, original_number, original_name, parent_sheet=None, is_template=False):
+class ViewViewModel(ViewModelBase):
+    def __init__(self, view_id, name, view_type="FloorPlan", scale="1/8\" = 1'-0\"", is_new=False):
         ViewModelBase.__init__(self)
-        self.ElementId = element_id
-        self.ItemType = item_type # "Sheet" or "View"
-        self.IsTemplate = is_template
-        self.ParentSheet = parent_sheet
-        self.TargetCollectionName = "00. General"
-        self.Children = []
+        self.ViewId = view_id
+        self._name = name
+        self._view_type = view_type
+        self._scale = scale
+        self._is_new = is_new
         
-        self.IsView = (item_type == "View")
-        self.ShowExpandToggle = (item_type == "Sheet")
+    @property
+    def Name(self): return self._name
+    @Name.setter
+    def Name(self, val):
+        self._name = val
+        self.OnPropertyChanged("Name")
+        
+    @property
+    def ViewType(self): return self._view_type
+    @ViewType.setter
+    def ViewType(self, val):
+        self._view_type = val
+        self.OnPropertyChanged("ViewType")
+
+    @property
+    def Scale(self): return self._scale
+    @Scale.setter
+    def Scale(self, val):
+        self._scale = val
+        self.OnPropertyChanged("Scale")
+        
+class SheetViewModel(ViewModelBase):
+    def __init__(self, element_id, number, name, collection_name, is_template=False, validation_callback=None):
+        ViewModelBase.__init__(self)
+        self.validation_callback = validation_callback
+        self.ElementId = element_id
+        self.IsTemplate = is_template
+        self._sheet_number = number
+        self._sheet_name = name
+        self._collection_name = collection_name
+        self.OriginalNumber = number
+        self.OriginalName = name
+        
+        self.Views = ObservableCollection[ViewViewModel]()
+        self.AvailableNames = ObservableCollection[str]()
         
         self._is_checked = False
+        self._is_name_unique = True
         self._action = "MATCHED" if not is_template else "CREATE"
-        self._is_editing = False
-        self._is_expanded = True
         
-        self.NumberDiffNode = DiffNode(original_number, self.update_action)
-        self.NameDiffNode = DiffNode(original_name, self.update_action)
-        
-        self.EditCommand = RelayCommand(self.toggle_edit)
-        self.DoneCommand = RelayCommand(self.toggle_edit)
         self.PurgeCommand = RelayCommand(self.mark_purge)
-        self.ExpandCommand = RelayCommand(self.toggle_expand)
+        self.AddViewCommand = RelayCommand(self.add_view)
+
+    @property
+    def SheetNumber(self): return self._sheet_number
+    @SheetNumber.setter
+    def SheetNumber(self, val):
+        self._sheet_number = val
+        self.OnPropertyChanged("SheetNumber")
+        self.update_action()
+
+    @property
+    def SheetName(self): return self._sheet_name
+    @SheetName.setter
+    def SheetName(self, val):
+        self._sheet_name = val
+        self.OnPropertyChanged("SheetName")
+        self.update_action()
+
+    @property
+    def CollectionName(self): return self._collection_name
+    @CollectionName.setter
+    def CollectionName(self, val):
+        self._collection_name = val
+        self.OnPropertyChanged("CollectionName")
 
     @property
     def IsChecked(self): return self._is_checked
@@ -206,28 +266,13 @@ class EditableGridRowNode(ViewModelBase):
     def IsChecked(self, val):
         self._is_checked = val
         self.OnPropertyChanged("IsChecked")
-
-    @property
-    def IsEditing(self): return self._is_editing
-    @IsEditing.setter
-    def IsEditing(self, val):
-        self._is_editing = val
-        self.OnPropertyChanged("IsEditing")
         
     @property
-    def IsExpanded(self): return self._is_expanded
-    @IsExpanded.setter
-    def IsExpanded(self, val):
-        self._is_expanded = val
-        self.OnPropertyChanged("IsExpanded")
-
-    def toggle_edit(self, parameter=None): self.IsEditing = not self.IsEditing
-    def mark_purge(self, parameter=None):
-        self.Action = "PURGE"
-        self.IsChecked = True
-        
-    def toggle_expand(self, parameter=None):
-        self.IsExpanded = not self.IsExpanded
+    def IsNameUnique(self): return self._is_name_unique
+    @IsNameUnique.setter
+    def IsNameUnique(self, val):
+        self._is_name_unique = val
+        self.OnPropertyChanged("IsNameUnique")
 
     @property
     def Action(self): return self._action
@@ -235,54 +280,40 @@ class EditableGridRowNode(ViewModelBase):
     def Action(self, val):
         self._action = val
         self.OnPropertyChanged("Action")
-        self.OnPropertyChanged("ActionColorBrush")
-
-    @property
-    def CanPurge(self): return not self.IsTemplate and self.ItemType == "Sheet"
 
     @property
     def DisciplineName(self):
-        match = re.match(r"^([A-Z]+)[- ]?(\d+)", self.NumberDiffNode.OriginalValue.upper())
+        match = re.match(r"^([A-Z]+)[- ]?(\d+)", self.SheetNumber.upper())
         disc_code = match.group(1) if match else "Other"
-        disc_map = {
-            "A": "Architectural",
-            "S": "Structural",
-            "M": "Mechanical",
-            "E": "Electrical",
-            "P": "Plumbing",
-            "C": "Civil",
-            "L": "Landscape",
-            "F": "Fire Protection",
-            "G": "General",
-            "I": "Interiors"
-        }
+        disc_map = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors" }
         name = disc_map.get(disc_code, "Discipline")
         return "{} - {}".format(disc_code, name) if disc_code != "Other" else "Uncategorized"
 
-    @property
-    def ActionColorBrush(self):
-        if self._action == "UPDATE": return SolidColorBrush(Colors.Orange)
-        if self._action == "CREATE": return SolidColorBrush(Colors.Green)
-        if self._action == "PURGE": return SolidColorBrush(Colors.Red)
-        return SolidColorBrush(Colors.LightGray)
+    def mark_purge(self, parameter=None):
+        self.Action = "PURGE"
+        self.IsChecked = True
+        
+    def add_view(self, parameter=None):
+        self.Views.Add(ViewViewModel(ElementId.InvalidElementId, "New View", is_new=True))
 
     def update_action(self):
-        if self.IsTemplate: return
-        if self.NumberDiffNode.HasDiff or self.NameDiffNode.HasDiff:
-            if self._action != "UPDATE":
-                self.Action = "UPDATE"
-                self.IsChecked = True
+        if self.IsTemplate: 
+            if self.validation_callback: self.validation_callback()
+            return
+        if self.SheetNumber != self.OriginalNumber or self.SheetName != self.OriginalName:
+            self.Action = "UPDATE"
+            self.IsChecked = True
         else:
-            if self._action == "UPDATE":
-                self.Action = "MATCHED"
-                self.IsChecked = False
+            self.Action = "MATCHED"
+            self.IsChecked = False
+        if self.validation_callback: self.validation_callback()
 
 class NavTreeNode(ViewModelBase):
-    def __init__(self, name, node_type, sheet_id=None):
+    def __init__(self, name, node_type, tag=None):
         ViewModelBase.__init__(self)
         self.Name = name
         self.NodeType = node_type
-        self.SheetId = sheet_id
+        self.Tag = tag
         self.Children = ObservableCollection[NavTreeNode]()
         self._is_expanded = True
         self._is_selected = False
@@ -330,7 +361,7 @@ def get_sheet_collection_name(sheet):
             col_elem = doc.GetElement(param.AsElementId())
             if col_elem: return col_elem.Name
     else:
-        param = sheet.LookupParameter("Sheet Collection")
+        param = sheet.LookupParameter(" Sheet Collection")
         if param and param.HasValue: return param.AsString()
     return "00. General"
 
@@ -352,7 +383,7 @@ def assign_sheet_to_collection(doc, sheet, collection_name):
         except:
             pass # Pre-2025
             
-        param = sheet.LookupParameter("Sheet Collection")
+        param = sheet.LookupParameter(" Sheet Collection")
         if param and not param.IsReadOnly:
             param.Set(collection_name)
     except Exception as e:
@@ -370,29 +401,38 @@ def generate_suffixes(rows, cols):
         else: suffixes.append("A" + alphabet[i-26])
     return suffixes
 
-def generate_discipline_sheets(disc_code, levels, rows, cols):
+def generate_discipline_sheets(disc_code, levels, active_series, rows, cols):
     targets = []
     suffixes = generate_suffixes(rows, cols)
     
-    # 0. General Cover
-    targets.append({"num": "{}-001".format(disc_code), "name": "Cover Sheet / Index", "collection": "00. General", "type": "0"})
+    if "0" in active_series:
+        targets.append({"num": "{}-001".format(disc_code), "name": "Cover Sheet / Index", "collection": "00. General", "type": "0"})
     
-    # 1. Plans
-    for idx, lvl in enumerate(levels):
-        seq = (idx + 1) * 10
-        base_num = "{}-1{:02d}".format(disc_code, seq)
+    if "1" in active_series:
+        for idx, lvl in enumerate(levels):
+            seq = (idx + 1) * 10
+            base_num = "{}-1{:02d}".format(disc_code, seq)
+            
+            if len(suffixes) == 1:
+                targets.append({"num": base_num, "name": "Floor Plan {}".format(lvl), "collection": "01. Plans", "type": "1"})
+            else:
+                targets.append({"num": base_num, "name": "Floor Plan {} - OVERALL".format(lvl), "collection": "01. Plans", "type": "1"})
+                for s in suffixes:
+                    targets.append({"num": "{}{}".format(base_num, s), "name": "Enlarged Plan {} Part {}".format(lvl, s), "collection": "01. Plans", "type": "1"})
+                    
+    if "2" in active_series:
+        targets.append({"num": "{}-201".format(disc_code), "name": "Elevations", "collection": "02. Elevations", "type": "2"})
+    if "3" in active_series:
+        targets.append({"num": "{}-301".format(disc_code), "name": "Sections", "collection": "03. Sections", "type": "3"})
+    if "5" in active_series:
+        targets.append({"num": "{}-501".format(disc_code), "name": "Details", "collection": "05. Details", "type": "5"})
+    if "6" in active_series:
+        targets.append({"num": "{}-601".format(disc_code), "name": "Schedules", "collection": "06. Schedules", "type": "6"})
+    if "7" in active_series:
+        targets.append({"num": "{}-701".format(disc_code), "name": "Diagrams", "collection": "07. Diagrams", "type": "7"})
+    if "9" in active_series:
+        targets.append({"num": "{}-901".format(disc_code), "name": "3D Views", "collection": "09. 3D Views", "type": "9"})
         
-        if len(suffixes) == 1:
-            targets.append({"num": base_num, "name": "Floor Plan {}".format(lvl), "collection": "01. Plans", "type": "1"})
-        else:
-            targets.append({"num": base_num, "name": "Floor Plan {} - OVERALL".format(lvl), "collection": "01. Plans", "type": "1"})
-            for s in suffixes:
-                targets.append({"num": "{}{}".format(base_num, s), "name": "Enlarged Plan {} Part {}".format(lvl, s), "collection": "01. Plans", "type": "1"})
-                
-    # 2. Elevations
-    targets.append({"num": "{}-201".format(disc_code), "name": "Elevations", "collection": "02. Elevations", "type": "2"})
-    # 3. Sections
-    targets.append({"num": "{}-301".format(disc_code), "name": "Sections", "collection": "03. Sections", "type": "3"})
     return targets
 
 # --- Intelligent Fuzzy Match Algorithm ---
@@ -459,6 +499,8 @@ class ManageSheetsWindow(forms.WPFWindow):
         self.Btn_DiscNone.Click += lambda s,e: self.toggle_list(self.DisciplineNodes, False)
         self.Btn_LevelAll.Click += lambda s,e: self.toggle_list(self.LevelNodes, True)
         self.Btn_LevelNone.Click += lambda s,e: self.toggle_list(self.LevelNodes, False)
+        self.Btn_SeriesAll.Click += lambda s,e: self.toggle_list(self.SeriesNodes, True)
+        self.Btn_SeriesNone.Click += lambda s,e: self.toggle_list(self.SeriesNodes, False)
         
         # Expand/Collapse Handlers
         self.Btn_ExpandNav.Click += lambda s,e: self.toggle_tree(self.NavRoot, True)
@@ -478,11 +520,14 @@ class ManageSheetsWindow(forms.WPFWindow):
         self.TargetSchemaRoot = ObservableCollection[NavTreeNode]()
         self.TargetSchemaTree.ItemsSource = self.TargetSchemaRoot
         
-        self.EditorItems = ObservableCollection[EditableGridRowNode]()
-        self.EditorTree.ItemsSource = self.EditorItems
+        self.EditorItems = ObservableCollection[object]()
+        self.EditorGrid.ItemsSource = self.EditorItems
         
         self.LevelNodes = ObservableCollection[SelectableNode]()
         self.List_Levels.ItemsSource = self.LevelNodes
+        
+        self.SeriesNodes = ObservableCollection[SelectableNode]()
+        self.List_Series.ItemsSource = self.SeriesNodes
         
         self.DisciplineNodes = ObservableCollection[SelectableNode]()
         self.List_Disciplines.ItemsSource = self.DisciplineNodes
@@ -525,6 +570,11 @@ class ManageSheetsWindow(forms.WPFWindow):
         for k, v in DISCIPLINE_CODES.items():
             is_chk = k in saved_discs
             self.DisciplineNodes.Add(SelectableNode("{} - {}".format(k, v), is_checked=is_chk, callback=self.generate_target_schema))
+            
+        saved_series = cfg.get_option("series", ["0", "1", "2", "3"])
+        for k, v in SERIES_MAP.items():
+            is_chk = k in saved_series
+            self.SeriesNodes.Add(SelectableNode("{} - {}".format(k, v), is_checked=is_chk, callback=self.generate_target_schema))
 
     def save_settings(self):
         try:
@@ -538,6 +588,14 @@ class ManageSheetsWindow(forms.WPFWindow):
                 code = n.Name.split(' - ')[0]
                 selected_discs.append(code)
         cfg.disciplines = selected_discs
+        
+        selected_series = []
+        for n in self.SeriesNodes:
+            if n.IsChecked:
+                code = n.Name.split(' - ')[0]
+                selected_series.append(code)
+        cfg.series = selected_series
+        
         script.save_config()
         
     def trigger_generation(self, sender, e):
@@ -557,26 +615,44 @@ class ManageSheetsWindow(forms.WPFWindow):
                 code = n.Name.split(' - ')[0]
                 selected_discs.append(code)
                 
+        active_series = []
+        for n in self.SeriesNodes:
+            if n.IsChecked:
+                code = n.Name.split(' - ')[0]
+                active_series.append(code)
+                
         active_levels = [lvl.Name for lvl in self.LevelNodes if lvl.IsChecked]
         
         self.generated_targets = []
         for d in selected_discs:
-            self.generated_targets.extend(generate_discipline_sheets(d, active_levels, r, c))
+            self.generated_targets.extend(generate_discipline_sheets(d, active_levels, active_series, r, c))
             
         self.TargetSchemaRoot.Clear()
         t_root = NavTreeNode("AIA Schema", "Root")
         self.TargetSchemaRoot.Add(t_root)
         c_map = {}
+        d_map = {}
         for t in self.generated_targets:
             c_name = t["collection"]
             if c_name not in c_map:
                 cn = NavTreeNode(c_name, "Collection")
                 c_map[c_name] = cn
                 t_root.Children.Add(cn)
-            sn = NavTreeNode("{} - {}".format(t["num"], t["name"]), "Sheet")
-            c_map[c_name].Children.Add(sn)
+                
+            match = re.match(r"^([A-Z]+)[- ]?(\d+)", t["num"].upper())
+            disc_code = match.group(1) if match else "Other"
+            disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors" }
+            disc_name = "{} - {}".format(disc_code, disc_dict.get(disc_code, "Discipline")) if disc_code != "Other" else "Uncategorized"
+            
+            disc_key = (c_name, disc_name)
+            if disc_key not in d_map:
+                dn = NavTreeNode(disc_name, "Discipline", tag=c_name)
+                d_map[disc_key] = dn
+                c_map[c_name].Children.Add(dn)
+                
             t_root.Count += 1
             c_map[c_name].Count += 1
+            d_map[disc_key].Count += 1
             
         if not self.generated_targets:
             self.Btn_RunMatch.IsEnabled = False
@@ -597,6 +673,7 @@ class ManageSheetsWindow(forms.WPFWindow):
         self.NavRoot.Add(root_node)
         
         col_map = {}
+        disc_map = {}
         for s in sheets:
             if s.IsPlaceholder: continue
             
@@ -608,23 +685,30 @@ class ManageSheetsWindow(forms.WPFWindow):
             else:
                 col_node = col_map[c_name]
                 
-            sh_nav = NavTreeNode("{} - {}".format(s.SheetNumber, s.Name), "Sheet", s.Id)
-            col_node.Children.Add(sh_nav)
+            sh_row = SheetViewModel(s.Id, s.SheetNumber, s.Name, c_name, validation_callback=self.run_validation)
+            self.all_grid_nodes.append(sh_row)
+            
+            disc_name = sh_row.DisciplineName
+            disc_key = (c_name, disc_name)
+            if disc_key not in disc_map:
+                d_node = NavTreeNode(disc_name, "Discipline", tag=c_name)
+                disc_map[disc_key] = d_node
+                col_node.Children.Add(d_node)
+            else:
+                d_node = disc_map[disc_key]
+                
             root_node.Count += 1
             col_node.Count += 1
-            
-            sh_row = EditableGridRowNode(s.Id, "Sheet", s.SheetNumber, s.Name)
-            sh_row.TargetCollectionName = c_name
-            self.all_grid_nodes.append(sh_row)
+            d_node.Count += 1
             
             views = 0
             for v_id in s.GetAllPlacedViews():
                 v = doc.GetElement(v_id)
                 if not v or v.ViewType in [ViewType.Schedule, ViewType.Legend, ViewType.PanelSchedule]: continue
-                v_row = EditableGridRowNode(v.Id, "View", "", v.Name, parent_sheet=sh_row)
-                sh_row.Children.append(v_row)
+                v_row = ViewViewModel(v.Id, v.Name, str(v.ViewType))
+                sh_row.Views.Add(v_row)
                 views += 1
-            sh_nav.Count = views # Populates the ({x} Views) suffix
+        self.run_validation()
             
     def on_tree_selection_changed(self, sender, e):
         node = self.NavTree.SelectedItem
@@ -637,23 +721,15 @@ class ManageSheetsWindow(forms.WPFWindow):
                 
         elif node.NodeType == "Collection":
             self.Txt_GridTitle.Text = "Collection: " + node.Name
-            valid_sheets = [s for s in self.all_grid_nodes if s.TargetCollectionName == node.Name]
+            valid_sheets = [s for s in self.all_grid_nodes if s.CollectionName == node.Name]
                     
-        elif node.NodeType == "Sheet":
-            self.Txt_GridTitle.Text = "Sheet: " + node.Name
-            valid_sheets = [s for s in self.all_grid_nodes if s.ElementId == node.SheetId]
-            
-        groups = {}
-        for s in valid_sheets:
-            disc = s.DisciplineName
-            if disc not in groups:
-                groups[disc] = DisciplineGroupNode(disc)
-            groups[disc].Children.append(s)
+        elif node.NodeType == "Discipline":
+            self.Txt_GridTitle.Text = "Discipline: " + node.Name
+            valid_sheets = [s for s in self.all_grid_nodes if s.DisciplineName == node.Name and s.CollectionName == node.Tag]
             
         self.EditorItems.Clear()
-        # Sort by discipline name (A, C, E, etc.)
-        for d in sorted(groups.keys()):
-            self.EditorItems.Add(groups[d])
+        for s in valid_sheets:
+            self.EditorItems.Add(s)
 
     def run_fuzzy_match(self, sender, e):
         if not self.generated_targets: return
@@ -662,8 +738,8 @@ class ManageSheetsWindow(forms.WPFWindow):
         for r in self.all_grid_nodes:
             if r.IsTemplate: continue
             
-            live_num = r.NumberDiffNode.OriginalValue
-            live_name = r.NameDiffNode.OriginalValue
+            live_num = r.OriginalNumber
+            live_name = r.OriginalName
             
             # 1. Parse Discipline Prefix from Live Sheet Number (e.g. 'A' from 'A-101' or 'MH' from 'MH201')
             match = re.match(r"^([A-Z]+)[- ]?(\d+)", live_num.upper())
@@ -688,22 +764,22 @@ class ManageSheetsWindow(forms.WPFWindow):
                     best_match = t
                     
             if best_match and best_score > 0.4: # Lowered threshold slightly because penalties can drag scores down
-                r.NameDiffNode.ProposedValue = best_match["name"]
-                r.NumberDiffNode.ProposedValue = best_match["num"]
-                r.TargetCollectionName = best_match["collection"]
+                r.SheetName = best_match["name"]
+                r.SheetNumber = best_match["num"]
+                r.CollectionName = best_match["collection"]
                 mapped_count += 1
                 
+        self.run_validation()
         MessageBox.Show("Smart Fuzzy match complete!\nSuccessfully mapped {} live sheets to Target Schema.".format(mapped_count), "Match Results")
                     
     def add_missing(self, sender, e):
         if not self.generated_targets: return
-        existing_numbers = set([r.NumberDiffNode.ProposedValue for r in self.all_grid_nodes])
+        existing_numbers = set([r.SheetNumber for r in self.all_grid_nodes])
                 
         added = 0
         for t in self.generated_targets:
             if t["num"] not in existing_numbers:
-                new_sh = EditableGridRowNode(ElementId.InvalidElementId, "Sheet", t["num"], t["name"], is_template=True)
-                new_sh.TargetCollectionName = t["collection"]
+                new_sh = SheetViewModel(ElementId.InvalidElementId, t["num"], t["name"], t["collection"], is_template=True, validation_callback=self.run_validation)
                 new_sh.IsChecked = True
                 self.all_grid_nodes.append(new_sh)
                 
@@ -716,6 +792,26 @@ class ManageSheetsWindow(forms.WPFWindow):
                 
         if added > 0:
             MessageBox.Show("Added {} missing sheets from AIA Schema to the Grid.".format(added), "Info")
+        self.run_validation()
+
+    def run_validation(self):
+        all_numbers = {}
+        for r in self.all_grid_nodes:
+            if r.Action == "PURGE": continue
+            num = str(r.SheetNumber).strip().lower()
+            if num not in all_numbers:
+                all_numbers[num] = []
+            all_numbers[num].append(r)
+            
+        has_error = False
+        for num, items in all_numbers.items():
+            if len(items) > 1:
+                has_error = True
+                for i in items: i.IsNameUnique = False
+            else:
+                for i in items: i.IsNameUnique = True
+                
+        self.Btn_Push.IsEnabled = not has_error
 
     def sync_to_revit(self, sender, e):
         renames, creates, purges = 0, 0, 0
@@ -727,33 +823,43 @@ class ManageSheetsWindow(forms.WPFWindow):
                     if r.Action == "UPDATE" or r.Action == "MATCHED":
                         s_elem = doc.GetElement(r.ElementId)
                         if s_elem:
-                            if r.NumberDiffNode.HasDiff: s_elem.SheetNumber = r.NumberDiffNode.ProposedValue
-                            if r.NameDiffNode.HasDiff: s_elem.Name = r.NameDiffNode.ProposedValue
-                            assign_sheet_to_collection(doc, s_elem, r.TargetCollectionName)
+                            if r.SheetNumber != r.OriginalNumber: s_elem.SheetNumber = r.SheetNumber
+                            if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
+                            assign_sheet_to_collection(doc, s_elem, r.CollectionName)
                             renames += 1
                     elif r.Action == "CREATE":
                         titleblocks = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_TitleBlocks).WhereElementIsElementType().ToElements()
                         if titleblocks:
                             new_sheet = ViewSheet.Create(doc, titleblocks[0].Id)
-                            new_sheet.SheetNumber = r.NumberDiffNode.ProposedValue
-                            new_sheet.Name = r.NameDiffNode.ProposedValue
-                            assign_sheet_to_collection(doc, new_sheet, r.TargetCollectionName)
+                            new_sheet.SheetNumber = r.SheetNumber
+                            new_sheet.Name = r.SheetName
+                            assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
                             creates += 1
                     elif r.Action == "PURGE":
                         doc.Delete(r.ElementId)
                         purges += 1
                         
                 if r.Action != "PURGE":
-                    for cv in r.Children:
-                        if cv.IsChecked and cv.Action == "UPDATE" and cv.NameDiffNode.HasDiff:
-                            v_elem = doc.GetElement(cv.ElementId)
-                            if v_elem:
-                                v_elem.Name = cv.NameDiffNode.ProposedValue
-                                renames += 1
+                    for v in r.Views:
+                        if v.ViewId != ElementId.InvalidElementId:
+                            v_elem = doc.GetElement(v.ViewId)
+                            if v_elem and v_elem.Name != v.Name:
+                                try:
+                                    v_elem.Name = v.Name
+                                    renames += 1
+                                except: pass
+                        elif v._is_new:
+                            # TODO: Phase 2: Create new view using v.ViewType and v.Scale
+                            # TODO: Phase 3: Place viewport on sheet
+                            pass
+                            
             t.Commit()
             
-        MessageBox.Show("Push Completed!\nCreated: {}\nUpdated: {}\nPurged: {}".format(creates, renames, purges), "Success")
-        self.Close()
+        MessageBox.Show("Sync Complete!\nRenamed: {}\nCreated: {}\nPurged: {}".format(renames, creates, purges), "Success")
+        self.all_grid_nodes = []
+        self.EditorItems.Clear()
+        self.NavRoot.Clear()
+        self.load_revit_data()
 
 if __name__ == '__main__':
     ManageSheetsWindow().ShowDialog()
