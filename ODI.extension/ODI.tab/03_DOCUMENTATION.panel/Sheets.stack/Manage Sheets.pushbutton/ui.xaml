@@ -22,11 +22,43 @@
         <SolidColorBrush x:Key="FooterBrush" Color="#EFEFEF"/>
         <SolidColorBrush x:Key="AltRowBrush" Color="#FAFAFA"/>
 
-        <SolidColorBrush x:Key="CardBorderBrush" Color="#E5E7EB"/>
-        <SolidColorBrush x:Key="TracedBrush" Color="#E5E7EB"/>
-        <SolidColorBrush x:Key="TracedBorderBrush" Color="#9CA3AF"/>
+        <SolidColorBrush x:Key="CardBorderBrush" Color="#DCDCDC"/>
+        <SolidColorBrush x:Key="SelectionTextBrush" Color="Black"/>
+        <SolidColorBrush x:Key="InactiveSelectionBrush" Color="#E0E0E0"/>
+        <SolidColorBrush x:Key="CardTextBrush" Color="#000000"/>
+        <SolidColorBrush x:Key="CardSubTextBrush" Color="#666666"/>
+        <SolidColorBrush x:Key="CardLabelBrush" Color="#888888"/>
+        <SolidColorBrush x:Key="CardValueBrush" Color="#000000"/>
+        <SolidColorBrush x:Key="CardAccentBrush" Color="#0078D7"/>
+        <SolidColorBrush x:Key="ErrorBrush" Color="#FEE2E2"/>
+        <SolidColorBrush x:Key="ErrorTextBrush" Color="#991B1B"/>
 
         <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <Style x:Key="DarkGridTextStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="2,0"/>
+        </Style>
+        <Style x:Key="DarkGridTextLightStyle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource TextLightBrush}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+            <Setter Property="Margin" Value="2,0"/>
+        </Style>
+
+        <Style x:Key="BaseGridCell" TargetType="DataGridCell">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Style.Triggers>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                    <Setter Property="BorderBrush" Value="Transparent"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
 
         <Style TargetType="Button">
             <Setter Property="Background" Value="{DynamicResource ButtonBrush}"/>
@@ -52,6 +84,131 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <Style TargetType="TabItem">
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border Name="Border" Background="{DynamicResource ToolbarBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1,1,1,0" Padding="15,8" Margin="0,0,2,0">
+                            <ContentPresenter x:Name="ContentSite" VerticalAlignment="Center" HorizontalAlignment="Center" ContentSource="Header" Margin="10,2"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Border" Property="Background" Value="{DynamicResource CardBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="False">
+                                <Setter Property="Foreground" Value="{DynamicResource TextLightBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="2"/>
+        </Style>
+
+        <ControlTemplate TargetType="ToggleButton" x:Key="ComboBoxToggleButton">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition />
+                    <ColumnDefinition Width="20" />
+                </Grid.ColumnDefinitions>
+                <Border x:Name="Border" Grid.ColumnSpan="2" CornerRadius="0" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" />
+                <Border Grid.Column="0" CornerRadius="0" Margin="1" Background="{TemplateBinding Background}" BorderBrush="Transparent" BorderThickness="0" />
+                <Path x:Name="Arrow" Grid.Column="1" Fill="{DynamicResource TextBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Data="M 0 0 L 4 4 L 8 0 Z"/>
+            </Grid>
+        </ControlTemplate>
+
+        <ControlTemplate TargetType="TextBox" x:Key="ComboBoxTextBox">
+            <Border x:Name="PART_ContentHost" Focusable="False" Background="{TemplateBinding Background}" />
+        </ControlTemplate>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Name="ToggleButton" Template="{StaticResource ComboBoxToggleButton}" Grid.Column="2" Focusable="false" IsChecked="{Binding Path=IsDropDownOpen,Mode=TwoWay,RelativeSource={RelativeSource TemplatedParent}}" ClickMode="Press" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"/>
+                            <ContentPresenter Name="ContentSite" IsHitTestVisible="False" Content="{TemplateBinding SelectionBoxItem}" ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}" ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}" Margin="3,3,23,3" VerticalAlignment="Center" HorizontalAlignment="Left" TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            <TextBox x:Name="PART_EditableTextBox" Style="{x:Null}" Template="{StaticResource ComboBoxTextBox}" Foreground="{TemplateBinding Foreground}" HorizontalAlignment="Left" VerticalAlignment="Center" Margin="3,3,23,3" Focusable="True" Background="Transparent" Visibility="Hidden" IsReadOnly="{TemplateBinding IsReadOnly}"/>
+                            <Popup Name="Popup" Placement="Bottom" IsOpen="{TemplateBinding IsDropDownOpen}" AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
+                                <Grid Name="DropDown" SnapsToDevicePixels="True" MinWidth="{TemplateBinding ActualWidth}" MaxHeight="{TemplateBinding MaxDropDownHeight}">
+                                    <Border x:Name="DropDownBorder" Background="{DynamicResource ControlBrush}" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"/>
+                                    <ScrollViewer Margin="0" SnapsToDevicePixels="True">
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained" />
+                                    </ScrollViewer>
+                                </Grid>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="HasItems" Value="false">
+                                <Setter TargetName="DropDownBorder" Property="MinHeight" Value="95"/>
+                            </Trigger>
+                            <Trigger Property="IsGrouping" Value="true">
+                                <Setter Property="ScrollViewer.CanContentScroll" Value="false"/>
+                            </Trigger>
+                            <Trigger Property="IsEditable" Value="true">
+                                <Setter Property="IsTabStop" Value="false"/>
+                                <Setter TargetName="PART_EditableTextBox" Property="Visibility" Value="Visible"/>
+                                <Setter TargetName="ContentSite" Property="Visibility" Value="Hidden"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Padding" Value="4,2"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border Name="Bd" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SelectionBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{DynamicResource InactiveSelectionBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        </Style>
+        
+        <Style TargetType="ListBox">
+            <Setter Property="Background" Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+        </Style>
+
+        <Style TargetType="DataGridColumnHeader">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Background" Value="{DynamicResource ToolbarBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="0,0,1,1"/>
+            <Setter Property="Padding" Value="5"/>
         </Style>
 
         <!-- Base TreeView Item Style (From Quantify) -->
@@ -177,7 +334,7 @@
                                     <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 <Border Grid.Row="0" Background="{DynamicResource ToolbarBrush}" Padding="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-                                    <TextBlock Text="Model Collections &amp; Sheets" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <TextBlock Text="Model Collections &amp; Sheets" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
                                 </Border>
                                 
                                 <TreeView Name="NavTree" Grid.Row="1" Background="Transparent" BorderThickness="0" Padding="5" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
@@ -231,13 +388,17 @@
                             </Border>
 
                             <!-- DataGrid replacing ListBox and Fake Header -->
-                            <DataGrid Name="EditorGrid" Grid.Row="1" Grid.RowSpan="2" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True" SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal" Background="Transparent" BorderThickness="0" RowBackground="{DynamicResource WindowBrush}" AlternatingRowBackground="{DynamicResource ControlBrush}" EnableRowVirtualization="False">
+                            <DataGrid Name="EditorGrid" Grid.Row="1" Grid.RowSpan="2" AutoGenerateColumns="False" CanUserAddRows="False" IsReadOnly="True" SelectionMode="Single" HeadersVisibility="Column" GridLinesVisibility="Horizontal" HorizontalGridLinesBrush="{DynamicResource BorderBrush}" Background="Transparent" BorderThickness="0" RowBackground="{DynamicResource WindowBrush}" AlternatingRowBackground="{DynamicResource AltRowBrush}" EnableRowVirtualization="False" CellStyle="{StaticResource BaseGridCell}">
                                 <DataGrid.RowStyle>
                                     <Style TargetType="DataGridRow">
+                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
                                         <Style.Triggers>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter Property="Background" Value="{DynamicResource InactiveSelectionBrush}"/>
+                                            </Trigger>
                                             <DataTrigger Binding="{Binding Action}" Value="PURGE">
                                                 <Setter Property="Opacity" Value="0.5"/>
-                                                <Setter Property="Background" Value="#FEE2E2"/>
+                                                <Setter Property="Background" Value="{DynamicResource ErrorBrush}"/>
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>
@@ -251,16 +412,22 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTextColumn Header="Status" Binding="{Binding Action}" IsReadOnly="True" FontWeight="Bold" Width="70"/>
+                                    <DataGridTextColumn Header="Status" Binding="{Binding Action}" IsReadOnly="True" Width="70">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock" BasedOn="{StaticResource DarkGridTextStyle}">
+                                                <Setter Property="FontWeight" Value="Bold"/>
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
                                     
-                                    <DataGridTextColumn Header="Type" Binding="{Binding CollectionName}" IsReadOnly="True" Foreground="{DynamicResource TextLightBrush}" Width="120"/>
-                                    <DataGridTextColumn Header="Sheet Number" Binding="{Binding SheetNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Width="100">
+                                    <DataGridTextColumn Header="Type" Binding="{Binding CollectionName}" IsReadOnly="True" ElementStyle="{StaticResource DarkGridTextLightStyle}" Width="120"/>
+                                    <DataGridTextColumn Header="Sheet Number" Binding="{Binding SheetNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ElementStyle="{StaticResource DarkGridTextStyle}" Width="100">
                                         <DataGridTextColumn.CellStyle>
-                                            <Style TargetType="DataGridCell">
+                                            <Style TargetType="DataGridCell" BasedOn="{StaticResource BaseGridCell}">
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsNameUnique}" Value="False">
-                                                        <Setter Property="Background" Value="#FEE2E2"/>
-                                                        <Setter Property="Foreground" Value="#991B1B"/>
+                                                        <Setter Property="Background" Value="{DynamicResource ErrorBrush}"/>
+                                                        <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
                                                         <Setter Property="ToolTip" Value="Duplicate Sheet Number!"/>
                                                     </DataTrigger>
                                                 </Style.Triggers>
@@ -272,7 +439,7 @@
                                     <DataGridTemplateColumn Header="Sheet Name" Width="*">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <ComboBox IsEditable="True" Text="{Binding SheetName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding AvailableNames}" Margin="2,0"/>
+                                                <ComboBox IsEditable="True" Text="{Binding SheetName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" ItemsSource="{Binding AvailableNames}" Margin="2,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}"/>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -280,7 +447,7 @@
                                     <DataGridTemplateColumn Header="Tools" Width="70">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <Button Content="Purge" Command="{Binding PurgeCommand}" Padding="5,0" Margin="2,0" Background="#FEE2E2" Foreground="#991B1B"/>
+                                                <Button Content="Purge" Command="{Binding PurgeCommand}" Padding="5,0" Margin="2,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource ErrorTextBrush}" BorderThickness="1" Foreground="{DynamicResource ErrorTextBrush}"/>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -303,7 +470,7 @@
                                                                 <ColumnDefinition Width="*"/>
                                                             </Grid.ColumnDefinitions>
                                                             
-                                                            <ComboBox Grid.Column="0" Text="{Binding ViewType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,5,0">
+                                                            <ComboBox Grid.Column="0" IsEditable="True" Text="{Binding ViewType, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,5,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}">
                                                                 <ComboBoxItem Content="FloorPlan"/>
                                                                 <ComboBoxItem Content="CeilingPlan"/>
                                                                 <ComboBoxItem Content="Section"/>
@@ -312,7 +479,7 @@
                                                                 <ComboBoxItem Content="ThreeD"/>
                                                             </ComboBox>
                                                             
-                                                            <ComboBox Grid.Column="1" Text="{Binding Scale, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,5,0">
+                                                            <ComboBox Grid.Column="1" IsEditable="True" Text="{Binding Scale, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Margin="0,0,5,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}">
                                                                 <ComboBoxItem Content="1/16&quot; = 1'-0&quot;"/>
                                                                 <ComboBoxItem Content="1/8&quot; = 1'-0&quot;"/>
                                                                 <ComboBoxItem Content="1/4&quot; = 1'-0&quot;"/>
@@ -361,7 +528,7 @@
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <Border Grid.Row="0" Background="{DynamicResource ToolbarBrush}" Padding="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,1">
-                                <TextBlock Text="Dynamically Generated Schema" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                <TextBlock Text="Dynamically Generated Schema" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
                             </Border>
                             <TreeView Name="TargetSchemaTree" Grid.Row="1" Background="Transparent" BorderThickness="0,0,1,0" BorderBrush="{DynamicResource BorderBrush}" Padding="5">
                                 <TreeView.ItemTemplate>
@@ -413,6 +580,11 @@
                                         </StackPanel>
                                         <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Height="250" Background="{DynamicResource ControlBrush}">
                                             <ListBox Name="List_Levels" BorderThickness="0" Background="Transparent" SelectionMode="Extended">
+                                                <ListBox.ItemContainerStyle>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    </Style>
+                                                </ListBox.ItemContainerStyle>
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate>
                                                         <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="5"/>
@@ -431,6 +603,11 @@
                                         </StackPanel>
                                         <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Height="250" Background="{DynamicResource ControlBrush}">
                                             <ListBox Name="List_Series" BorderThickness="0" Background="Transparent" SelectionMode="Extended">
+                                                <ListBox.ItemContainerStyle>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    </Style>
+                                                </ListBox.ItemContainerStyle>
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate>
                                                         <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="5"/>
@@ -449,6 +626,11 @@
                                         </StackPanel>
                                         <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Height="250" Background="{DynamicResource ControlBrush}">
                                             <ListBox Name="List_Modifiers" BorderThickness="0" Background="Transparent" SelectionMode="Extended">
+                                                <ListBox.ItemContainerStyle>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    </Style>
+                                                </ListBox.ItemContainerStyle>
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate>
                                                         <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="5"/>
@@ -460,13 +642,18 @@
 
                                     <!-- 5. DISCIPLINES (Right) -->
                                     <StackPanel Grid.Column="3">
-                                        <TextBlock Text="5. Disciplines to Include" FontWeight="SemiBold" Margin="0,0,0,5"/>
+                                        <TextBlock Text="5. Disciplines to Include" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,5"/>
                                         <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
                                             <Button Name="Btn_DiscAll" Content="Select All" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
                                             <Button Name="Btn_DiscNone" Content="Select None" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
                                         </StackPanel>
                                         <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Height="250" Background="{DynamicResource ControlBrush}">
                                             <ListBox Name="List_Disciplines" BorderThickness="0" Background="Transparent" SelectionMode="Extended">
+                                                <ListBox.ItemContainerStyle>
+                                                    <Style TargetType="ListBoxItem">
+                                                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                                                    </Style>
+                                                </ListBox.ItemContainerStyle>
                                                 <ListBox.ItemTemplate>
                                                     <DataTemplate>
                                                         <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="5"/>
