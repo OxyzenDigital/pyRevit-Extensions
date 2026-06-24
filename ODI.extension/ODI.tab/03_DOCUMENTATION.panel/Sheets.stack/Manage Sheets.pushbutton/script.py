@@ -24,6 +24,7 @@ from System.ComponentModel import INotifyPropertyChanged, PropertyChangedEventAr
 from System.Collections.ObjectModel import ObservableCollection
 from System.Windows.Data import CollectionViewSource, PropertyGroupDescription
 from System.Windows.Media import SolidColorBrush, Color as WpfColor, Colors
+import System
 from System.Windows import MessageBox, Visibility, SystemColors
 from System.Windows.Controls import CheckBox
 from System.Windows.Input import ICommand
@@ -253,6 +254,12 @@ class ManageSheetsWindow(forms.WPFWindow):
         self.Txt_GridRows.TextChanged += self.trigger_generation
         self.Txt_GridCols.TextChanged += self.trigger_generation
 
+        # Search Filters
+        self.Txt_SearchLevels.TextChanged += self.filter_levels
+        self.Txt_SearchDisciplines.TextChanged += self.filter_disciplines
+        self.Txt_SearchSeries.TextChanged += self.filter_series
+        self.Txt_SearchModifiers.TextChanged += self.filter_modifiers
+
         # Data Models
         self.NavRoot = ObservableCollection[NavTreeNode]()
         self.NavTree.ItemsSource = self.NavRoot
@@ -270,6 +277,8 @@ class ManageSheetsWindow(forms.WPFWindow):
         self.SeriesNodes = ObservableCollection[SelectableNode]()
         self.List_Series.ItemsSource = self.SeriesNodes
         
+        self.ModifierNodes = ObservableCollection[SelectableNode]()
+        self.List_Modifiers.ItemsSource = self.ModifierNodes
         self.DisciplineNodes = ObservableCollection[SelectableNode]()
         self.List_Disciplines.ItemsSource = self.DisciplineNodes
         
@@ -328,7 +337,7 @@ class ManageSheetsWindow(forms.WPFWindow):
             self.Resources[SystemColors.InactiveSelectionHighlightTextBrushKey] = bc.ConvertFromString(colors["TextBrush"])
 
     def on_tab_changed(self, sender, e):
-        if self.MainTabControl.SelectedIndex == 0:
+        if self.MainTabControl.SelectedIndex == 1:
             self.FooterBorder.Visibility = Visibility.Visible
         else:
             self.FooterBorder.Visibility = Visibility.Collapsed
@@ -346,17 +355,44 @@ class ManageSheetsWindow(forms.WPFWindow):
         for node in self.all_grid_nodes:
             node.IsExpanded = state
 
+
+    def filter_levels(self, sender, e):
+        view = CollectionViewSource.GetDefaultView(self.LevelNodes)
+        txt = self.Txt_SearchLevels.Text.lower()
+        if not txt: view.Filter = None
+        else: view.Filter = System.Predicate[object](lambda item: txt in item.Name.lower())
+        
+    def filter_disciplines(self, sender, e):
+        view = CollectionViewSource.GetDefaultView(self.DisciplineNodes)
+        txt = self.Txt_SearchDisciplines.Text.lower()
+        if not txt: view.Filter = None
+        else: view.Filter = System.Predicate[object](lambda item: txt in item.Name.lower())
+        
+    def filter_modifiers(self, sender, e):
+        view = CollectionViewSource.GetDefaultView(self.ModifierNodes)
+        txt = self.Txt_SearchModifiers.Text.lower()
+        if not txt: view.Filter = None
+        else: view.Filter = System.Predicate[object](lambda item: txt in item.Name.lower())
+    def filter_series(self, sender, e):
+        view = CollectionViewSource.GetDefaultView(self.SeriesNodes)
+        txt = self.Txt_SearchSeries.Text.lower()
+        if not txt: view.Filter = None
+        else: view.Filter = System.Predicate[object](lambda item: txt in item.Name.lower())
+
     def load_settings(self):
         self.Txt_GridRows.Text = str(cfg.get_option("grid_rows", 1))
         self.Txt_GridCols.Text = str(cfg.get_option("grid_cols", 1))
         
         saved_discs = cfg.get_option("disciplines", ["A", "M", "E", "P"])
-        for k, v in DISCIPLINE_CODES.items():
+        aia_order = ['CS', 'G', 'H', 'V', 'B', 'C', 'L', 'S', 'A', 'I', 'Q', 'F', 'P', 'D', 'M', 'E', 'W', 'T', 'R', 'X', 'Z', 'O']
+        sorted_disciplines = sorted(DISCIPLINE_CODES.items(), key=lambda x: aia_order.index(x[0]) if x[0] in aia_order else 999)
+        for k, v in sorted_disciplines:
             is_chk = k in saved_discs
             self.DisciplineNodes.Add(SelectableNode("{} - {}".format(k, v), is_checked=is_chk, callback=self.generate_target_schema))
             
         saved_series = cfg.get_option("series", ["0", "1", "2", "3"])
-        for k, v in SERIES_MAP.items():
+        sorted_series = sorted(SERIES_MAP.items(), key=lambda x: x[0])
+        for k, v in sorted_series:
             is_chk = k in saved_series
             self.SeriesNodes.Add(SelectableNode("{} - {}".format(k, v), is_checked=is_chk, callback=self.generate_target_schema))
 
@@ -414,29 +450,32 @@ class ManageSheetsWindow(forms.WPFWindow):
         self.TargetSchemaRoot.Clear()
         t_root = NavTreeNode("AIA Schema", "Root")
         self.TargetSchemaRoot.Add(t_root)
-        c_map = {}
+        
         d_map = {}
+        c_map = {}
+        
         for t in self.generated_targets:
-            c_name = t["collection"]
-            if c_name not in c_map:
-                cn = NavTreeNode(c_name, "Collection")
-                c_map[c_name] = cn
-                t_root.Children.Add(cn)
-                
             match = re.match(r"^([A-Z]+)[- ]?(\d+)", t["num"].upper())
             disc_code = match.group(1) if match else "Other"
             disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors" }
             disc_name = "{} - {}".format(disc_code, disc_dict.get(disc_code, "Discipline")) if disc_code != "Other" else "Uncategorized"
             
-            disc_key = (c_name, disc_name)
-            if disc_key not in d_map:
-                dn = NavTreeNode(disc_name, "Discipline", tag=c_name)
-                d_map[disc_key] = dn
-                c_map[c_name].Children.Add(dn)
+            if disc_name not in d_map:
+                dn = NavTreeNode(disc_name, "Discipline", tag=disc_name)
+                d_map[disc_name] = dn
+                t_root.Children.Add(dn)
+                
+            c_name = t["collection"]
+            coll_key = (disc_name, c_name)
+            
+            if coll_key not in c_map:
+                cn = NavTreeNode(c_name, "Collection", tag=disc_name)
+                c_map[coll_key] = cn
+                d_map[disc_name].Children.Add(cn)
                 
             t_root.Count += 1
-            c_map[c_name].Count += 1
-            d_map[disc_key].Count += 1
+            d_map[disc_name].Count += 1
+            c_map[coll_key].Count += 1
             
         if not self.generated_targets:
             self.Btn_RunMatch.IsEnabled = False
