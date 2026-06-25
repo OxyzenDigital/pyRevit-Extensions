@@ -569,7 +569,11 @@ class ManageSheetsPanel(forms.WPFPanel):
         self.generate_target_schema() # Initial run
 
     def on_refresh_clicked(self, sender, e):
-        self.load_revit_data()
+        try:
+            self.load_revit_data()
+        except Exception as ex:
+            import traceback
+            forms.alert(traceback.format_exc(), title="Error Refreshing Data")
 
     def on_visible_changed(self, sender, e):
         if self.IsVisible:
@@ -1010,7 +1014,10 @@ class ManageSheetsPanel(forms.WPFPanel):
             
             c_name = get_sheet_collection_name(doc, s)
             
-            disc_name, cg_name, draw_type = classification.classify_sheet(s.SheetNumber, s.Name)
+            c_result = classification.classify_sheet(s.SheetNumber, s.Name)
+            disc_name = c_result.get("discipline", "Unknown")
+            cg_name = c_result.get("contentGroup", "Uncategorized")
+            draw_type = c_result.get("drawingType", "Unknown")
             
             if disc_name not in disc_map:
                 d_node = NavTreeNode(disc_name, "Discipline", tag=disc_name)
@@ -1163,7 +1170,9 @@ class ManageSheetsPanel(forms.WPFPanel):
                                     if r.SheetNumber != r.OriginalNumber: s_elem.SheetNumber = r.SheetNumber
                                     if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
                                     assign_sheet_to_collection(doc, s_elem, r.CollectionName)
-                                    disc_name, cg_name, _ = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                    c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                    disc_name = c_res.get("discipline", "Unknown")
+                                    cg_name = c_res.get("contentGroup", "Uncategorized")
                                     set_sheet_parameter(s_elem, "Discipline", disc_name)
                                     set_sheet_parameter(s_elem, "Content Group", cg_name)
                                     renames += 1
@@ -1174,7 +1183,9 @@ class ManageSheetsPanel(forms.WPFPanel):
                                     new_sheet.SheetNumber = r.SheetNumber
                                     new_sheet.Name = r.SheetName
                                     assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
-                                    disc_name, cg_name, _ = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                    c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                    disc_name = c_res.get("discipline", "Unknown")
+                                    cg_name = c_res.get("contentGroup", "Uncategorized")
                                     set_sheet_parameter(new_sheet, "Discipline", disc_name)
                                     set_sheet_parameter(new_sheet, "Content Group", cg_name)
                                     creates += 1

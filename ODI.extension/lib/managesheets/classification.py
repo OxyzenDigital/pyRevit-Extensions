@@ -68,7 +68,9 @@ def normalize_sheet_name(name):
 
 reload_classification()
 
-def classify_sheet(sheet_name):
+def classify_sheet(sheet_number, sheet_name=None):
+    if sheet_name is None:
+        sheet_name = sheet_number
     lower_name = sheet_name.lower()
     norm_name = normalize_sheet_name(sheet_name)
     
