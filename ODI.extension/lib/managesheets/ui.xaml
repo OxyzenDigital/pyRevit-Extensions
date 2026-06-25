@@ -1,11 +1,8 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Manage Sheets" Height="700" Width="1250"
-        WindowStartupLocation="CenterScreen"
-        WindowStyle="None" AllowsTransparency="True" ResizeMode="CanResizeWithGrip"
-        Background="{DynamicResource WindowBrush}"
-        Foreground="{DynamicResource TextBrush}">
-    <Window.Resources>
+<Page xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      Background="{DynamicResource WindowBrush}"
+      Foreground="{DynamicResource TextBrush}">
+    <Page.Resources>
         <!-- Quantify & Measure Exact Color Schema -->
         <SolidColorBrush x:Key="WindowBrush" Color="#F3F3F3"/>
         <SolidColorBrush x:Key="ToolbarBrush" Color="#EBF4FA"/>
@@ -325,33 +322,17 @@
             </Setter>
         </Style>
 
-    </Window.Resources>
+    </Page.Resources>
 
-    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1">
+    <Border BorderThickness="0">
         <Grid>
             <Grid.RowDefinitions>
-                <RowDefinition Height="40"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
-            <!-- Custom Header -->
-            <Border Name="HeaderDrag" Grid.Row="0" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1">
-                <Grid Margin="10,0">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="Manage Sheets" FontWeight="Bold" FontSize="14" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Text=" | AIA Sheet Generator &amp; Sync" Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center" Margin="5,0,0,0"/>
-                    </StackPanel>
-                    <Button Name="Btn_WinClose" Grid.Column="1" Content="✕" Background="Transparent" Foreground="{DynamicResource TextBrush}" FontWeight="Bold" Padding="10,5" Margin="0"/>
-                </Grid>
-            </Border>
-
             <!-- Main TabControl -->
-            <TabControl Name="MainTabControl" Grid.Row="1" Background="{DynamicResource WindowBrush}" BorderThickness="0" Margin="10">
+            <TabControl Name="MainTabControl" Grid.Row="0" Background="{DynamicResource WindowBrush}" BorderThickness="0" Margin="10">
                 
                 <!-- TAB 1: PROJECT SETUP -->
                 <TabItem Header="Project Setup">
@@ -369,7 +350,7 @@
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
                             <Border Grid.Row="0" Background="Transparent" Padding="10" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,1,1">
-                                <TextBlock Text="Dynamically Generated Schema" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
+                                <TextBlock Text="CAD Standard Schema" FontWeight="Bold" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
                             </Border>
                             <TreeView Name="TargetSchemaTree" Grid.Row="1" Background="Transparent" BorderThickness="0,0,1,0" BorderBrush="{DynamicResource BorderBrush}" Padding="5" ItemContainerStyle="{StaticResource BaseTreeItemStyle}">
                                 <TreeView.ItemTemplate>
@@ -393,7 +374,17 @@
                             </Grid.RowDefinitions>
                             
                             <StackPanel Grid.Row="0" Margin="20,20,20,10">
-                                <TextBlock Text="AIA Configuration Settings" FontSize="18" FontWeight="Bold" Margin="0,0,0,10" Foreground="{DynamicResource TextBrush}"/>
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="AIA Configuration Settings" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource TextBrush}"/>
+                                    <StackPanel Name="AutoRefreshWarningPanel" Grid.Column="1" Orientation="Vertical" HorizontalAlignment="Right" Visibility="Collapsed">
+                                        <Button Name="Btn_RefreshData" Content="↻ Load/Refresh Revit Data" Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Bold" Padding="10,5" BorderThickness="0" Cursor="Hand" HorizontalAlignment="Right"/>
+                                        <TextBlock Text="Large project (>150 sheets). Auto-refresh paused. Click to manually load." Foreground="{DynamicResource ErrorBrush}" FontSize="10" Margin="0,2,0,0" HorizontalAlignment="Right"/>
+                                    </StackPanel>
+                                </Grid>
                                 <TextBlock Text="Check your selections and return to the Sheet Reviewer to map existing sheets." Foreground="{DynamicResource TextLightBrush}" Margin="0,0,0,20" TextWrapping="Wrap"/>
                                 
                                 <!-- 1. GRID SIZE (Top Group Box) -->
@@ -402,11 +393,20 @@
                                         <TextBlock Text="1. Enlargement Grid Size" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,10"/>
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="Rows:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
-                                            <TextBox Name="Txt_GridRows" Text="1" Width="40" TextAlignment="Center" VerticalContentAlignment="Center"/>
-                                            <TextBlock Text="Cols:" VerticalAlignment="Center" Margin="15,0,5,0" Foreground="{DynamicResource TextBrush}"/>
-                                            <TextBox Name="Txt_GridCols" Text="1" Width="40" TextAlignment="Center" VerticalContentAlignment="Center"/>
+                                            <Slider Name="Sld_GridRows" Minimum="1" Maximum="10" Value="1" Width="80" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                            <TextBox Name="Txt_GridRows" Text="{Binding ElementName=Sld_GridRows, Path=Value, UpdateSourceTrigger=PropertyChanged}" Width="30" Margin="5,0,15,0" TextAlignment="Center" VerticalContentAlignment="Center"/>
+                                            
+                                            <TextBlock Text="Cols:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                            <Slider Name="Sld_GridCols" Minimum="1" Maximum="10" Value="1" Width="80" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
+                                            <TextBox Name="Txt_GridCols" Text="{Binding ElementName=Sld_GridCols, Path=Value, UpdateSourceTrigger=PropertyChanged}" Width="30" Margin="5,0,0,0" TextAlignment="Center" VerticalContentAlignment="Center"/>
                                         </StackPanel>
                                         <TextBlock Text="(Default 1x1 disables enlargement suffixes like NW, NE, etc.)" Foreground="{DynamicResource TextLightBrush}" Margin="0,5,0,0" FontSize="11"/>
+                                        <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                            <TextBlock Text="Naming Scheme:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                            <ComboBox Name="Cmb_NamingScheme" IsEditable="True" Width="200" VerticalAlignment="Center"/>
+                                            <Button Name="Btn_EditNamingSchemes" Content="⚙ Edit" Width="50" Height="22" Margin="5,0,0,0" ToolTip="Edit Naming Schemes for this project"/>
+                                        </StackPanel>
+                                        <CheckBox Name="Chk_GlobalCover" Content="Generate single Global Cover/General set (CS)" Margin="0,10,0,0" Foreground="{DynamicResource TextBrush}" ToolTip="When checked, generates exactly 3 global CS-000 series sheets instead of duplicating them per discipline."/>
                                     </StackPanel>
                                 </Border>
                             </StackPanel>
@@ -523,6 +523,7 @@
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="*"/>
+                                        <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <TextBlock Grid.Row="0" Text="5. Name Modifiers" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,5"/>
                                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,5">
@@ -530,20 +531,27 @@
                                         <Button Name="Btn_ModNone" Content="Select None" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
                                     </StackPanel>
                                     <TextBox Name="Txt_SearchModifiers" Grid.Row="2" Margin="0,0,0,5" Padding="2" Foreground="{DynamicResource TextBrush}" Background="{DynamicResource ControlBrush}"/>
-                                    <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource ControlBrush}">
-                                        <ListBox Name="List_Modifiers" BorderThickness="0" Background="Transparent" SelectionMode="Extended" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                                            <ListBox.ItemContainerStyle>
-                                                <Style TargetType="{x:Type ListBoxItem}">
-                                                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                                                </Style>
-                                            </ListBox.ItemContainerStyle>
-                                            <ListBox.ItemTemplate>
-                                                <DataTemplate>
-                                                    <CheckBox Content="{Binding Name}" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="5" Foreground="{DynamicResource TextBrush}"/>
-                                                </DataTemplate>
-                                            </ListBox.ItemTemplate>
-                                        </ListBox>
+                                    <Border Grid.Row="3" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" CornerRadius="4" Background="{DynamicResource ControlBrush}" Margin="0,0,0,5">
+                                        <TreeView Name="Tree_Modifiers" Background="Transparent" BorderThickness="0" Padding="2" ItemContainerStyle="{StaticResource BaseTreeItemStyle}">
+                                            <TreeView.ItemTemplate>
+                                                <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                                                    <StackPanel Orientation="Horizontal" Margin="0,2">
+                                                        <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                                        <TextBlock Text="{Binding Name}" FontWeight="{Binding FontWeight}" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}"/>
+                                                        <TextBlock Text="{Binding DisplayCount}" Foreground="{DynamicResource TextLightBrush}" FontSize="10" Margin="5,0,0,0" VerticalAlignment="Center" Visibility="{Binding ShowCount, Converter={StaticResource BoolToVis}}"/>
+                                                    </StackPanel>
+                                                </HierarchicalDataTemplate>
+                                            </TreeView.ItemTemplate>
+                                        </TreeView>
                                     </Border>
+                                    <Grid Grid.Row="4">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBox Name="Txt_NewModifier" Grid.Column="0" Margin="0,0,5,0" Padding="2" Foreground="{DynamicResource TextBrush}" Background="{DynamicResource ControlBrush}" ToolTip="Add a custom modifier..."/>
+                                        <Button Name="Btn_AddModifier" Grid.Column="1" Content="Add" Padding="10,2" Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Bold"/>
+                                    </Grid>
                                 </Grid>
                             </Grid>
                         </Grid>
@@ -616,6 +624,8 @@
                                         <TextBlock Name="Txt_GridTitle" Text="Select an item in the navigation tree..." FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,15,0"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal">
+                                        <Button Name="Btn_Refresh" Content="↻ Refresh" Background="Transparent" Foreground="{DynamicResource TextBrush}" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}"/>
+                                        <Button Name="Btn_ResetAll" Content="⎌ Reset All" Background="Transparent" Foreground="{DynamicResource TextBrush}" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" Margin="5,0,0,0"/>
                                         <Button Name="Btn_AddMissing" Content="+ Add Missing Schema Sheets" Background="{DynamicResource ControlBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"/>
                                         <Button Name="Btn_RunMatch" Content="Run Schema Match" FontWeight="Bold" Background="{DynamicResource AccentBrush}" Foreground="White" Margin="10,0,0,0"/>
                                     </StackPanel>
@@ -679,10 +689,13 @@
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
                                     
-                                    <DataGridTemplateColumn Header="Tools" Width="70">
+                                    <DataGridTemplateColumn Header="Tools" Width="120">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
-                                                <Button Content="Purge" Command="{Binding PurgeCommand}" Padding="5,0" Margin="2,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource ErrorTextBrush}" BorderThickness="1" Foreground="{DynamicResource ErrorTextBrush}"/>
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                    <Button Content="Undo" Command="{Binding UndoCommand}" Padding="5,0" Margin="2,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource TextLightBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}"/>
+                                                    <Button Content="Purge" Command="{Binding PurgeCommand}" Padding="5,0" Margin="2,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource ErrorTextBrush}" BorderThickness="1" Foreground="{DynamicResource ErrorTextBrush}"/>
+                                                </StackPanel>
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
@@ -750,7 +763,7 @@
                 </TabControl>
 
             <!-- Reviewer Footer (Only visible when Syncing is relevant) -->
-            <Border Name="FooterBorder" Grid.Row="2" Background="{DynamicResource FooterBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="15,10">
+            <Border Name="FooterBorder" Grid.Row="1" Background="{DynamicResource FooterBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,1,0,0" Padding="15,10">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -765,4 +778,4 @@
             </Border>
         </Grid>
     </Border>
-</Window>
+</Page>
