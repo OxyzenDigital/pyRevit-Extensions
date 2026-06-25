@@ -335,6 +335,147 @@ class NamingSchemeSettingsDialog(forms.WPFWindow):
         self.DialogResult = False
         self.Close()
 
+
+class ModifierSettingsDialog(forms.WPFWindow):
+    def __init__(self, current_dict):
+        xaml_path = os.path.join(os.path.dirname(__file__), "modifier_settings.xaml")
+        forms.WPFWindow.__init__(self, xaml_path)
+        self.apply_theme()
+        
+        # Deep copy the dict so we don't modify it until saved
+        import json
+        self.class_dict = json.loads(json.dumps(current_dict))
+        
+        self.List_Disciplines.SelectionChanged += self.on_disc_selected
+        self.List_Modifiers.SelectionChanged += self.on_mod_selected
+        
+        self.Btn_AddDiscipline.Click += self.on_add_disc
+        self.Btn_RemoveDiscipline.Click += self.on_remove_disc
+        self.Btn_AddModifier.Click += self.on_add_mod
+        self.Btn_RemoveModifier.Click += self.on_remove_mod
+        self.Btn_AddSheet.Click += self.on_add_sheet
+        self.Btn_RemoveSheet.Click += self.on_remove_sheet
+        
+        self.Btn_Save.Click += self.on_save
+        self.Btn_Cancel.Click += self.on_cancel
+        
+        self.refresh_disciplines()
+        
+    def apply_theme(self):
+        from System.Windows.Media import BrushConverter
+        bc = BrushConverter()
+        
+        if is_dark_theme():
+            colors = {
+                "WindowBrush": "#1F2937",
+                "ControlBrush": "#111827",
+                "TextBrush": "#F9FAFB",
+                "BorderBrush": "#4B5563",
+                "ButtonBrush": "#374151",
+                "AccentBrush": "#3B82F6",
+            }
+        else:
+            colors = {
+                "WindowBrush": "#F3F3F3",
+                "ControlBrush": "#FFFFFF",
+                "TextBrush": "#333333",
+                "BorderBrush": "#CCCCCC",
+                "ButtonBrush": "#DDDDDD",
+                "AccentBrush": "#0078D7",
+            }
+            
+        for key, hex_val in colors.items():
+            if self.Resources.Contains(key):
+                self.Resources[key] = bc.ConvertFromString(hex_val)
+            else:
+                self.Resources.Add(key, bc.ConvertFromString(hex_val))
+
+    def refresh_disciplines(self):
+        self.List_Disciplines.ItemsSource = None
+        self.List_Disciplines.ItemsSource = sorted(self.class_dict.keys())
+        
+    def on_disc_selected(self, sender, e):
+        sel = self.List_Disciplines.SelectedItem
+        self.List_Modifiers.ItemsSource = None
+        self.List_Sheets.ItemsSource = None
+        if sel and sel in self.class_dict:
+            # Sort modifiers according to AIA code (0-9) by looking at their sheets
+            def sort_key(mod_name):
+                sheets = self.class_dict[sel][mod_name]
+                if sheets and len(sheets) > 0 and len(sheets[0]) >= 2:
+                    return str(sheets[0][1])
+                return "9" # fallback
+            self.List_Modifiers.ItemsSource = sorted(self.class_dict[sel].keys(), key=sort_key)
+            
+    def on_mod_selected(self, sender, e):
+        disc = self.List_Disciplines.SelectedItem
+        mod = self.List_Modifiers.SelectedItem
+        self.List_Sheets.ItemsSource = None
+        if disc and mod and disc in self.class_dict and mod in self.class_dict[disc]:
+            sheets_raw = self.class_dict[disc][mod]
+            display_sheets = ["{} [{}]".format(s[0], s[1]) if len(s) >= 2 else str(s) for s in sheets_raw]
+            self.List_Sheets.ItemsSource = display_sheets
+            
+    def on_add_disc(self, sender, e):
+        name = forms.ask_for_string(default="New Discipline", prompt="Enter Discipline Name:", title="Add Discipline")
+        if name and name not in self.class_dict:
+            self.class_dict[name] = {}
+            self.refresh_disciplines()
+            
+    def on_remove_disc(self, sender, e):
+        sel = self.List_Disciplines.SelectedItem
+        if sel and sel in self.class_dict:
+            del self.class_dict[sel]
+            self.refresh_disciplines()
+            
+    def on_add_mod(self, sender, e):
+        disc = self.List_Disciplines.SelectedItem
+        if not disc: return
+        name = forms.ask_for_string(default="New Modifier", prompt="Enter Modifier Name:", title="Add Modifier")
+        if name and name not in self.class_dict[disc]:
+            self.class_dict[disc][name] = []
+            self.on_disc_selected(None, None)
+            
+    def on_remove_mod(self, sender, e):
+        disc = self.List_Disciplines.SelectedItem
+        mod = self.List_Modifiers.SelectedItem
+        if disc and mod and mod in self.class_dict[disc]:
+            del self.class_dict[disc][mod]
+            self.on_disc_selected(None, None)
+            
+    def on_add_sheet(self, sender, e):
+        disc = self.List_Disciplines.SelectedItem
+        mod = self.List_Modifiers.SelectedItem
+        if not disc or not mod: return
+        name = forms.ask_for_string(default="Sheet Name, 1", prompt="Enter Sheet Name and Code separated by comma:\nCodes: 0=General, 1=Plans, 2=Elevs, 3=Sects, 5=Details, 6=Schedules", title="Add Sheet")
+        if name:
+            parts = [p.strip() for p in name.split(',')]
+            if len(parts) >= 2:
+                self.class_dict[disc][mod].append([parts[0], parts[1]])
+                self.on_mod_selected(None, None)
+            else:
+                forms.alert("Please provide both name and code separated by a comma. (e.g. 'Floor Plan, 1')")
+                
+    def on_remove_sheet(self, sender, e):
+        disc = self.List_Disciplines.SelectedItem
+        mod = self.List_Modifiers.SelectedItem
+        idx = self.List_Sheets.SelectedIndex
+        if disc and mod and idx >= 0:
+            del self.class_dict[disc][mod][idx]
+            self.on_mod_selected(None, None)
+            
+    def on_save(self, sender, e):
+        uidoc = HOST_APP.uiapp.ActiveUIDocument
+        if uidoc:
+            project_settings.save_classification_dict(uidoc.Document, self.class_dict)
+            classification.reload_classification(self.class_dict)
+        self.DialogResult = True
+        self.Close()
+        
+    def on_cancel(self, sender, e):
+        self.DialogResult = False
+        self.Close()
+
 class ManageSheetsPanel(forms.WPFPanel):
     panel_title = "Manage Sheets"
     panel_id = "f4c9c1a5-8e3b-4b1a-a123-0d6b7c8e9f22"
@@ -364,6 +505,7 @@ class ManageSheetsPanel(forms.WPFPanel):
         self.Btn_AddMissing.Click += self.add_missing
         self.Btn_Push.Click += self.sync_to_revit
         self.Btn_EditNamingSchemes.Click += self.on_edit_naming_schemes
+        self.Btn_EditModifiers.Click += self.on_edit_modifiers
         
         self.MainTabControl.SelectionChanged += self.on_tab_changed
         
@@ -598,19 +740,30 @@ class ManageSheetsPanel(forms.WPFPanel):
         self.Cmb_NamingScheme.SelectionChanged += self.trigger_generation
         
         self.ModifierRoot.Clear()
-        for disc, groups in classification.CLASSIFICATION_DICT.items():
-            disc_node = NavTreeNode(disc, "ContentGroup")
-            for cg, types in groups.items():
-                for item in types:
-                    if len(item) >= 2:
-                        t_name, t_code = item[0], str(item[1])
-                        m_node = NavTreeNode(t_name, "Modifier")
-                        m_node.Tag = t_code
-                        m_node.callback = self.generate_target_schema
-                        m_node.IsChecked = t_name in saved_modifiers
-                        disc_node.Children.Add(m_node)
-            if disc_node.Children:
-                self.ModifierRoot.Add(disc_node)
+
+        c_dict = classification.CLASSIFICATION_DICT
+        
+        # Sort Disciplines first based on AIA order mapping if possible, else alphabetically
+        disc_keys = sorted(c_dict.keys())
+        
+        for disc in disc_keys:
+            groups = c_dict[disc]
+            disc_node = NavTreeNode(disc, "Discipline")
+            self.ModifierRoot.Add(disc_node)
+            
+            # Sort modifiers by their drawing code
+            def get_code(mod):
+                shs = groups[mod]
+                if shs and len(shs) > 0 and len(shs[0]) >= 2: return str(shs[0][1])
+                return "9"
+            
+            sorted_groups = sorted(groups.keys(), key=get_code)
+            
+            for cg in sorted_groups:
+                m_node = NavTreeNode(cg, "Modifier")
+                m_node.callback = self.generate_target_schema
+                m_node.IsChecked = cg in saved_modifiers
+                disc_node.Children.Add(m_node)
             
         # Add custom modifiers to a "Custom" group
         if custom_modifiers:
@@ -703,7 +856,8 @@ class ManageSheetsPanel(forms.WPFPanel):
 
     def on_edit_naming_schemes(self, sender, e):
         dialog = NamingSchemeSettingsDialog(self._loaded_naming_schemes)
-        dialog.Owner = self.Parent
+        try: dialog.Owner = self.Parent
+        except: pass
         if dialog.ShowDialog():
             # Update Document with new schemes
             project_settings.save_naming_schemes(revit.doc, dialog.schemes_dict)
@@ -718,6 +872,14 @@ class ManageSheetsPanel(forms.WPFPanel):
             else:
                 self.Cmb_NamingScheme.SelectedItem = "Segment-Based"
             self.generate_target_schema()
+            
+    def on_edit_modifiers(self, sender, e):
+        dialog = ModifierSettingsDialog(classification.CLASSIFICATION_DICT)
+        try: dialog.Owner = self.Parent
+        except: pass
+        if dialog.ShowDialog():
+            # Already saved in dialog, just refresh the tree
+            self.load_settings()
 
     def generate_target_schema(self):
         self.save_settings()
@@ -809,6 +971,12 @@ class ManageSheetsPanel(forms.WPFPanel):
         uidoc = HOST_APP.uiapp.ActiveUIDocument
         doc = uidoc.Document if uidoc else None
         if not doc or not uidoc: return
+        
+        c_dict = project_settings.load_classification_dict(doc)
+        if c_dict:
+            classification.reload_classification(c_dict)
+        else:
+            classification.reload_classification()
         
         # Cache this document to prevent duplicate loading
         self.last_loaded_doc_hash = doc.PathName + "_" + doc.Title
