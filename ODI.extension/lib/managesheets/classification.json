@@ -1,0 +1,1110 @@
+{
+    "DRAWING_TYPES": {
+        "0": "General",
+        "1": "Plans",
+        "2": "Elevations",
+        "3": "Sections",
+        "4": "Large Scale Views",
+        "5": "Details",
+        "6": "Schedules and Diagrams",
+        "7": "User Defined",
+        "8": "User Defined",
+        "9": "3D Views"
+    },
+    "CLASSIFICATION_DICT": {
+        "Architectural": {
+            "General": [
+                [
+                    "Cover Sheet",
+                    "0"
+                ],
+                [
+                    "Project Information",
+                    "0"
+                ],
+                [
+                    "Code Analysis",
+                    "0"
+                ],
+                [
+                    "General Notes",
+                    "0"
+                ],
+                [
+                    "Building Data",
+                    "0"
+                ],
+                [
+                    "Drawing Index",
+                    "0"
+                ],
+                [
+                    "Symbols",
+                    "0"
+                ],
+                [
+                    "Abbreviations",
+                    "0"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Existing Site Plan",
+                    "1"
+                ],
+                [
+                    "Existing Floor Plan",
+                    "1"
+                ],
+                [
+                    "Existing Roof Plan",
+                    "1"
+                ],
+                [
+                    "Existing Elevations",
+                    "2"
+                ],
+                [
+                    "Existing Sections",
+                    "3"
+                ]
+            ],
+            "Demolition": [
+                [
+                    "Demolition Plan",
+                    "1"
+                ],
+                [
+                    "Ceiling Demolition Plan",
+                    "1"
+                ],
+                [
+                    "Selective Demolition Plan",
+                    "1"
+                ]
+            ],
+            "Life Safety": [
+                [
+                    "Life Safety Plan",
+                    "1"
+                ],
+                [
+                    "Occupancy Plan",
+                    "1"
+                ],
+                [
+                    "Egress Plan",
+                    "1"
+                ],
+                [
+                    "Accessibility Plan",
+                    "1"
+                ]
+            ],
+            "New Construction": [
+                [
+                    "Construction Plan",
+                    "1"
+                ],
+                [
+                    "Architectural Floor Plan",
+                    "1"
+                ],
+                [
+                    "Dimension Plan",
+                    "1"
+                ],
+                [
+                    "Partition Plan",
+                    "1"
+                ],
+                [
+                    "Furniture Plan",
+                    "1"
+                ],
+                [
+                    "Equipment Plan",
+                    "1"
+                ]
+            ],
+            "Finishes": [
+                [
+                    "Finish Plan",
+                    "1"
+                ],
+                [
+                    "Floor Finish Plan",
+                    "1"
+                ],
+                [
+                    "Material Plan",
+                    "1"
+                ],
+                [
+                    "Color Finish Plan",
+                    "1"
+                ]
+            ],
+            "Ceilings": [
+                [
+                    "Reflected Ceiling Plan",
+                    "1"
+                ],
+                [
+                    "Ceiling Finish Plan",
+                    "1"
+                ],
+                [
+                    "Lighting Coordination Plan",
+                    "1"
+                ]
+            ],
+            "Roof": [
+                [
+                    "Roof Plan",
+                    "1"
+                ],
+                [
+                    "Roof Drainage Plan",
+                    "1"
+                ],
+                [
+                    "Roof Equipment Coordination Plan",
+                    "1"
+                ]
+            ],
+            "Enlarged Areas": [
+                [
+                    "Enlarged Restroom Plan",
+                    "1"
+                ],
+                [
+                    "Enlarged Kitchen Plan",
+                    "1"
+                ],
+                [
+                    "Enlarged Stair Plan",
+                    "1"
+                ],
+                [
+                    "Enlarged Tenant Plan",
+                    "1"
+                ]
+            ],
+            "Elevations": [
+                [
+                    "Exterior Elevations",
+                    "2"
+                ],
+                [
+                    "Interior Elevations",
+                    "2"
+                ],
+                [
+                    "Storefront Elevations",
+                    "2"
+                ],
+                [
+                    "Kitchen Elevations",
+                    "2"
+                ],
+                [
+                    "Restroom Elevations",
+                    "2"
+                ]
+            ],
+            "Sections": [
+                [
+                    "Building Sections",
+                    "3"
+                ],
+                [
+                    "Wall Sections",
+                    "3"
+                ],
+                [
+                    "Stair Sections",
+                    "3"
+                ],
+                [
+                    "Roof Sections",
+                    "3"
+                ]
+            ],
+            "Schedules": [
+                [
+                    "Door Schedule",
+                    "6"
+                ],
+                [
+                    "Window Schedule",
+                    "6"
+                ],
+                [
+                    "Finish Schedule",
+                    "6"
+                ],
+                [
+                    "Room Schedule",
+                    "6"
+                ],
+                [
+                    "Hardware Schedule",
+                    "6"
+                ]
+            ],
+            "Details": [
+                [
+                    "Architectural Details",
+                    "5"
+                ],
+                [
+                    "Door Details",
+                    "5"
+                ],
+                [
+                    "Window Details",
+                    "5"
+                ],
+                [
+                    "Storefront Details",
+                    "5"
+                ],
+                [
+                    "Waterproofing Details",
+                    "5"
+                ],
+                [
+                    "Flashing Details",
+                    "5"
+                ]
+            ],
+            "3D Views": [
+                [
+                    "Perspectives",
+                    "9"
+                ],
+                [
+                    "Axonometric Views",
+                    "9"
+                ],
+                [
+                    "Renderings",
+                    "9"
+                ],
+                [
+                    "BIM Views",
+                    "9"
+                ]
+            ]
+        },
+        "Structural": {
+            "General": [
+                [
+                    "Structural Notes",
+                    "0"
+                ],
+                [
+                    "Design Criteria",
+                    "0"
+                ],
+                [
+                    "Special Inspections",
+                    "0"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Existing Structural Plans",
+                    "1"
+                ],
+                [
+                    "Existing Framing Plans",
+                    "1"
+                ]
+            ],
+            "Demolition": [
+                [
+                    "Structural Demolition Plan",
+                    "1"
+                ]
+            ],
+            "Foundations": [
+                [
+                    "Foundation Plan",
+                    "1"
+                ],
+                [
+                    "Footing Plan",
+                    "1"
+                ],
+                [
+                    "Pier Plan",
+                    "1"
+                ],
+                [
+                    "Slab Plan",
+                    "1"
+                ]
+            ],
+            "Framing": [
+                [
+                    "Floor Framing Plan",
+                    "1"
+                ],
+                [
+                    "Roof Framing Plan",
+                    "1"
+                ],
+                [
+                    "Structural Framing Plan",
+                    "1"
+                ],
+                [
+                    "Mezzanine Framing Plan",
+                    "1"
+                ]
+            ],
+            "Lateral Systems": [
+                [
+                    "Shear Wall Plan",
+                    "1"
+                ],
+                [
+                    "Bracing Plan",
+                    "1"
+                ],
+                [
+                    "Lateral Force Plan",
+                    "1"
+                ]
+            ],
+            "Sections": [
+                [
+                    "Structural Sections",
+                    "3"
+                ],
+                [
+                    "Foundation Sections",
+                    "3"
+                ],
+                [
+                    "Shear Wall Elevations",
+                    "2"
+                ]
+            ],
+            "Schedules": [
+                [
+                    "Structural Schedules",
+                    "6"
+                ]
+            ],
+            "Details": [
+                [
+                    "Steel Details",
+                    "5"
+                ],
+                [
+                    "Concrete Details",
+                    "5"
+                ],
+                [
+                    "Wood Details",
+                    "5"
+                ],
+                [
+                    "Connection Details",
+                    "5"
+                ]
+            ]
+        },
+        "Civil": {
+            "General": [
+                [
+                    "Civil Notes",
+                    "0"
+                ],
+                [
+                    "Legend",
+                    "0"
+                ],
+                [
+                    "General Information",
+                    "0"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Boundary Survey",
+                    "1"
+                ],
+                [
+                    "Topographic Survey",
+                    "1"
+                ],
+                [
+                    "Existing Conditions Plan",
+                    "1"
+                ]
+            ],
+            "Demolition": [
+                [
+                    "Site Demolition Plan",
+                    "1"
+                ]
+            ],
+            "Site Development": [
+                [
+                    "Site Plan",
+                    "1"
+                ],
+                [
+                    "Site Layout Plan",
+                    "1"
+                ],
+                [
+                    "ADA Site Plan",
+                    "1"
+                ],
+                [
+                    "Fire Lane Plan",
+                    "1"
+                ]
+            ],
+            "Grading and Drainage": [
+                [
+                    "Grading Plan",
+                    "1"
+                ],
+                [
+                    "Drainage Plan",
+                    "1"
+                ],
+                [
+                    "Stormwater Plan",
+                    "1"
+                ]
+            ],
+            "Utilities": [
+                [
+                    "Utility Plan",
+                    "1"
+                ],
+                [
+                    "Water Plan",
+                    "1"
+                ],
+                [
+                    "Sewer Plan",
+                    "1"
+                ],
+                [
+                    "Franchise Utility Plan",
+                    "1"
+                ]
+            ],
+            "Paving": [
+                [
+                    "Paving Plan",
+                    "1"
+                ],
+                [
+                    "Striping Plan",
+                    "1"
+                ],
+                [
+                    "Signing Plan",
+                    "1"
+                ]
+            ],
+            "Details": [
+                [
+                    "Utility Details",
+                    "5"
+                ],
+                [
+                    "Paving Details",
+                    "5"
+                ],
+                [
+                    "Drainage Details",
+                    "5"
+                ]
+            ]
+        },
+        "Mechanical": {
+            "General": [
+                [
+                    "Mechanical Notes",
+                    "0"
+                ],
+                [
+                    "Mechanical Schedules",
+                    "6"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Existing HVAC Plan",
+                    "1"
+                ]
+            ],
+            "Demolition": [
+                [
+                    "Mechanical Demolition Plan",
+                    "1"
+                ]
+            ],
+            "HVAC": [
+                [
+                    "Mechanical Floor Plan",
+                    "1"
+                ],
+                [
+                    "HVAC Plan",
+                    "1"
+                ],
+                [
+                    "Ductwork Plan",
+                    "1"
+                ],
+                [
+                    "Ventilation Plan",
+                    "1"
+                ],
+                [
+                    "Roof Mechanical Plan",
+                    "1"
+                ]
+            ],
+            "Piping": [
+                [
+                    "Refrigerant Piping Plan",
+                    "1"
+                ],
+                [
+                    "Condensate Plan",
+                    "1"
+                ],
+                [
+                    "Hydronic Plan",
+                    "1"
+                ]
+            ],
+            "Diagrams": [
+                [
+                    "HVAC Schematic",
+                    "6"
+                ],
+                [
+                    "Control Diagram",
+                    "6"
+                ],
+                [
+                    "Sequence Diagram",
+                    "6"
+                ]
+            ],
+            "Details": [
+                [
+                    "Mechanical Details",
+                    "5"
+                ]
+            ]
+        },
+        "Plumbing": {
+            "General": [
+                [
+                    "Plumbing Notes",
+                    "0"
+                ],
+                [
+                    "Plumbing Schedules",
+                    "6"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Existing Plumbing Plan",
+                    "1"
+                ]
+            ],
+            "Demolition": [
+                [
+                    "Plumbing Demolition Plan",
+                    "1"
+                ]
+            ],
+            "Water Systems": [
+                [
+                    "Domestic Water Plan",
+                    "1"
+                ],
+                [
+                    "Hot Water Plan",
+                    "1"
+                ],
+                [
+                    "Water Distribution Plan",
+                    "1"
+                ]
+            ],
+            "Sanitary Systems": [
+                [
+                    "Waste and Vent Plan",
+                    "1"
+                ],
+                [
+                    "Sanitary Sewer Plan",
+                    "1"
+                ],
+                [
+                    "Grease Waste Plan",
+                    "1"
+                ]
+            ],
+            "Storm Systems": [
+                [
+                    "Storm Drain Plan",
+                    "1"
+                ],
+                [
+                    "Roof Drainage Plan",
+                    "1"
+                ]
+            ],
+            "Gas Systems": [
+                [
+                    "Gas Piping Plan",
+                    "1"
+                ]
+            ],
+            "Isometrics": [
+                [
+                    "Water Isometric",
+                    "7"
+                ],
+                [
+                    "Waste Isometric",
+                    "7"
+                ],
+                [
+                    "Gas Isometric",
+                    "7"
+                ]
+            ],
+            "Details": [
+                [
+                    "Plumbing Details",
+                    "5"
+                ]
+            ]
+        },
+        "Electrical": {
+            "General": [
+                [
+                    "Electrical Notes",
+                    "0"
+                ],
+                [
+                    "Electrical Schedules",
+                    "6"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Existing Electrical Plan",
+                    "1"
+                ]
+            ],
+            "Demolition": [
+                [
+                    "Electrical Demolition Plan",
+                    "1"
+                ]
+            ],
+            "Power": [
+                [
+                    "Power Plan",
+                    "1"
+                ],
+                [
+                    "Receptacle Plan",
+                    "1"
+                ],
+                [
+                    "Equipment Connection Plan",
+                    "1"
+                ],
+                [
+                    "Site Power Plan",
+                    "1"
+                ]
+            ],
+            "Lighting": [
+                [
+                    "Lighting Plan",
+                    "1"
+                ],
+                [
+                    "Emergency Lighting Plan",
+                    "1"
+                ],
+                [
+                    "Site Lighting Plan",
+                    "1"
+                ]
+            ],
+            "Fire Alarm": [
+                [
+                    "Fire Alarm Plan",
+                    "1"
+                ],
+                [
+                    "Fire Alarm Riser",
+                    "7"
+                ]
+            ],
+            "Low Voltage": [
+                [
+                    "Data Plan",
+                    "1"
+                ],
+                [
+                    "Telecom Plan",
+                    "1"
+                ],
+                [
+                    "Security Plan",
+                    "1"
+                ],
+                [
+                    "Access Control Plan",
+                    "1"
+                ],
+                [
+                    "CCTV Plan",
+                    "1"
+                ]
+            ],
+            "Diagrams": [
+                [
+                    "One-Line Diagram",
+                    "6"
+                ],
+                [
+                    "Riser Diagram",
+                    "6"
+                ],
+                [
+                    "Panel Schedules",
+                    "6"
+                ]
+            ],
+            "Details": [
+                [
+                    "Electrical Details",
+                    "5"
+                ]
+            ]
+        },
+        "Fire Protection": {
+            "General": [
+                [
+                    "Fire Protection Notes",
+                    "0"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Existing Fire Protection Plan",
+                    "1"
+                ]
+            ],
+            "Demolition": [
+                [
+                    "Fire Protection Demolition Plan",
+                    "1"
+                ]
+            ],
+            "Sprinkler Systems": [
+                [
+                    "Fire Protection Plan",
+                    "1"
+                ],
+                [
+                    "Sprinkler Plan",
+                    "1"
+                ],
+                [
+                    "Standpipe Plan",
+                    "1"
+                ]
+            ],
+            "Diagrams": [
+                [
+                    "Riser Diagram",
+                    "6"
+                ],
+                [
+                    "Zone Diagram",
+                    "6"
+                ]
+            ],
+            "Details": [
+                [
+                    "Fire Protection Details",
+                    "5"
+                ]
+            ]
+        },
+        "Landscape": {
+            "General": [
+                [
+                    "Landscape Notes",
+                    "0"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Existing Landscape Plan",
+                    "1"
+                ],
+                [
+                    "Tree Survey",
+                    "1"
+                ]
+            ],
+            "Site Landscape": [
+                [
+                    "Landscape Plan",
+                    "1"
+                ],
+                [
+                    "Planting Plan",
+                    "1"
+                ],
+                [
+                    "Hardscape Plan",
+                    "1"
+                ],
+                [
+                    "Site Furnishing Plan",
+                    "1"
+                ]
+            ],
+            "Irrigation": [
+                [
+                    "Irrigation Plan",
+                    "1"
+                ],
+                [
+                    "Irrigation Zones",
+                    "1"
+                ]
+            ],
+            "Details": [
+                [
+                    "Planting Details",
+                    "5"
+                ],
+                [
+                    "Irrigation Details",
+                    "5"
+                ],
+                [
+                    "Landscape Details",
+                    "5"
+                ]
+            ]
+        },
+        "Interiors": {
+            "General": [
+                [
+                    "Interior Notes",
+                    "0"
+                ]
+            ],
+            "Existing Conditions": [
+                [
+                    "Existing Interior Plan",
+                    "1"
+                ]
+            ],
+            "Demolition": [
+                [
+                    "Interior Demolition Plan",
+                    "1"
+                ]
+            ],
+            "Interior Plans": [
+                [
+                    "Interior Construction Plan",
+                    "1"
+                ],
+                [
+                    "Furniture Plan",
+                    "1"
+                ],
+                [
+                    "Finish Plan",
+                    "1"
+                ],
+                [
+                    "Floor Finish Plan",
+                    "1"
+                ],
+                [
+                    "Millwork Plan",
+                    "1"
+                ],
+                [
+                    "Signage Plan",
+                    "1"
+                ]
+            ],
+            "Elevations": [
+                [
+                    "Interior Elevations",
+                    "2"
+                ],
+                [
+                    "Millwork Elevations",
+                    "2"
+                ],
+                [
+                    "Casework Elevations",
+                    "2"
+                ]
+            ],
+            "Schedules": [
+                [
+                    "Furniture Schedule",
+                    "6"
+                ],
+                [
+                    "Finish Schedule",
+                    "6"
+                ],
+                [
+                    "Millwork Schedule",
+                    "6"
+                ]
+            ],
+            "Details": [
+                [
+                    "Interior Details",
+                    "5"
+                ],
+                [
+                    "Millwork Details",
+                    "5"
+                ]
+            ]
+        }
+    },
+    "SHEET_TYPE_SYNONYMS": {
+        "0": [
+            "COVER",
+            "INDEX",
+            "GENERAL",
+            "NOTES",
+            "SYMBOLS"
+        ],
+        "1": [
+            "PLAN",
+            "DEMOLITION",
+            "LAYOUT",
+            "RCP",
+            "REFLECTED",
+            "CEILING",
+            "FRAMING",
+            "LEVEL",
+            "FLOOR",
+            "ROOF",
+            "SITE",
+            "GRADING",
+            "OVERALL",
+            "ENLARGED PLAN"
+        ],
+        "2": [
+            "ELEVATION",
+            "EXTERIOR",
+            "INTERIOR",
+            "FACADE",
+            "PROFILE"
+        ],
+        "3": [
+            "SECTION",
+            "CROSS SECTION",
+            "WALL SECTION",
+            "BUILDING SECTION"
+        ],
+        "4": [
+            "ENLARGED",
+            "LARGE SCALE",
+            "RISER"
+        ],
+        "5": [
+            "DETAIL",
+            "TYPICAL",
+            "CONNECTION",
+            "ASSEMBLY"
+        ],
+        "6": [
+            "SCHEDULE",
+            "LEGEND",
+            "DIAGRAM",
+            "ABBREVIATION",
+            "KEY"
+        ],
+        "7": [],
+        "8": [],
+        "9": [
+            "3D",
+            "ISOMETRIC",
+            "PERSPECTIVE",
+            "RENDERING",
+            "AXONOMETRIC"
+        ]
+    },
+    "NAMING_SCHEMES": {
+        "Segment-Based": [],
+        "Quadrant-Based": [
+            "Northwest",
+            "Northeast",
+            "Southwest",
+            "Southeast"
+        ],
+        "Area-Based": [
+            "Area A",
+            "Area B",
+            "Area C",
+            "Area D"
+        ],
+        "Grid-Based": [
+            "Grid A1",
+            "Grid A2",
+            "Grid B1",
+            "Grid B2"
+        ],
+        "Functional": [
+            "Lobby Zone",
+            "Restroom Core",
+            "Kitchen Area",
+            "Tenant Suite A",
+            "Mechanical Room"
+        ],
+        "Hybrid": [
+            "Northwest Restrooms",
+            "Southeast Lobby",
+            "Northeast Kitchen"
+        ],
+        "Purpose-Driven": [
+            "Millwork Zone",
+            "Casework Area",
+            "Equipment Layout Area",
+            "Door & Hardware Area"
+        ]
+    }
+}

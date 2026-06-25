@@ -166,12 +166,14 @@ class SheetViewModel(ViewModelBase):
         
         self.PurgeCommand = RelayCommand(self.mark_purge)
         self.AddViewCommand = RelayCommand(self.add_view)
+        self.UndoCommand = RelayCommand(self.undo_changes)
 
     @property
     def SheetNumber(self): return self._sheet_number
     @SheetNumber.setter
     def SheetNumber(self, val):
-        self._sheet_number = val
+        if val is None: val = ""
+        self._sheet_number = str(val)
         self.OnPropertyChanged("SheetNumber")
         self.update_action()
 
@@ -179,7 +181,8 @@ class SheetViewModel(ViewModelBase):
     def SheetName(self): return self._sheet_name
     @SheetName.setter
     def SheetName(self, val):
-        self._sheet_name = val
+        if val is None: val = ""
+        self._sheet_name = str(val)
         self.OnPropertyChanged("SheetName")
         self.update_action()
 
@@ -223,6 +226,24 @@ class SheetViewModel(ViewModelBase):
         self.Action = "PURGE"
         self.IsChecked = True
         
+    def undo_changes(self, parameter=None):
+        self.SheetNumber = self.OriginalNumber
+        self.SheetName = self.OriginalName
+        
+        # Remove newly added views
+        new_views = [v for v in self.Views if getattr(v, '_is_new', False)]
+        for nv in new_views:
+            self.Views.Remove(nv)
+            
+        if self.IsTemplate:
+            self.Action = "CREATE"
+            self.IsChecked = True
+        else:
+            self.Action = "MATCHED"
+            self.IsChecked = False
+            
+        if self.validation_callback: self.validation_callback()
+        
     def add_view(self, parameter=None):
         self.Views.Add(ViewViewModel(ElementId.InvalidElementId, "New View", is_new=True))
 
@@ -244,9 +265,11 @@ class NavTreeNode(ViewModelBase):
         self.Name = name
         self.NodeType = node_type
         self.Tag = tag
+        self.callback = None
         self.Children = ObservableCollection[NavTreeNode]()
         self._is_expanded = True
         self._is_selected = False
+        self._is_checked = False
         self._count = 0
         
     @property
@@ -262,6 +285,14 @@ class NavTreeNode(ViewModelBase):
     def IsSelected(self, val):
         self._is_selected = val
         self.OnPropertyChanged("IsSelected")
+
+    @property
+    def IsChecked(self): return self._is_checked
+    @IsChecked.setter
+    def IsChecked(self, val):
+        self._is_checked = val
+        self.OnPropertyChanged("IsChecked")
+        if self.callback: self.callback()
         
     @property
     def Count(self): return self._count
