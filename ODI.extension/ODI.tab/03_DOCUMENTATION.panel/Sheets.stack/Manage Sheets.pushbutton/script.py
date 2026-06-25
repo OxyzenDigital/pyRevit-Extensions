@@ -21,8 +21,6 @@ def instantiate_pane():
 def show_pane():
     from managesheets.panel import ManageSheetsPanel
     panel = forms.get_dockable_panel(ManageSheetsPanel.panel_id)
-    # PyRevit WPFPanel custom setup helps recreate the UI elements
-    panel.custom_setup() 
     if panel.IsShown():
         panel.Hide()
     else:
