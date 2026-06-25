@@ -2,7 +2,7 @@
 import json
 import System
 import clr
-from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, DataStorage
+from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, DataStorage, AccessLevel
 from Autodesk.Revit.DB import FilteredElementCollector, Transaction
 
 # A unique GUID for our naming schemes Extensible Storage Schema
@@ -12,8 +12,8 @@ def get_or_create_schema():
     schema = Schema.Lookup(SCHEMA_GUID)
     if not schema:
         builder = SchemaBuilder(SCHEMA_GUID)
-        builder.SetReadAccessLevel(Autodesk.Revit.DB.ExtensibleStorage.AccessLevel.Public)
-        builder.SetWriteAccessLevel(Autodesk.Revit.DB.ExtensibleStorage.AccessLevel.Public)
+        builder.SetReadAccessLevel(AccessLevel.Public)
+        builder.SetWriteAccessLevel(AccessLevel.Public)
         builder.SetSchemaName("ManageSheetsSettings")
         
         # Add a string field to hold the JSON dict
@@ -24,6 +24,9 @@ def get_or_create_schema():
 
 def load_naming_schemes(doc):
     """Loads custom naming schemes from Extensible Storage in the document."""
+    if not doc:
+        return None
+        
     schema = get_or_create_schema()
     collector = FilteredElementCollector(doc).OfClass(DataStorage)
     
