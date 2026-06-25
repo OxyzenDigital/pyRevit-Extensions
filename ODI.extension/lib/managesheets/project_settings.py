@@ -2,8 +2,8 @@
 import json
 import System
 import clr
-from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder
-from Autodesk.Revit.DB import DataStorage, FilteredElementCollector, Transaction
+from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, FieldBuilder, DataStorage
+from Autodesk.Revit.DB import FilteredElementCollector, Transaction
 
 # A unique GUID for our naming schemes Extensible Storage Schema
 SCHEMA_GUID = System.Guid("F034C698-13AE-4054-9FEA-7E5C3EFE2EBE")
