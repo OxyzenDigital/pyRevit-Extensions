@@ -245,6 +245,8 @@ class NamingSchemeSettingsDialog(forms.WPFWindow):
     def __init__(self, current_schemes):
         xaml_path = os.path.join(os.path.dirname(__file__), "naming_settings.xaml")
         forms.WPFWindow.__init__(self, xaml_path)
+        self.apply_theme()
+        
         self.schemes_dict = {k: list(v) for k, v in current_schemes.items()}
         
         self.List_Schemes.SelectionChanged += self.on_scheme_selected
@@ -257,6 +259,36 @@ class NamingSchemeSettingsDialog(forms.WPFWindow):
         
         self.refresh_schemes()
         
+    def apply_theme(self):
+        from System.Windows.Media import BrushConverter
+        from System.Windows import SystemColors
+        bc = BrushConverter()
+        
+        if is_dark_theme():
+            colors = {
+                "WindowBrush": "#1F2937",
+                "ControlBrush": "#111827",
+                "TextBrush": "#F9FAFB",
+                "BorderBrush": "#4B5563",
+                "ButtonBrush": "#374151",
+                "AccentBrush": "#3B82F6",
+            }
+        else:
+            colors = {
+                "WindowBrush": "#F3F3F3",
+                "ControlBrush": "#FFFFFF",
+                "TextBrush": "#333333",
+                "BorderBrush": "#CCCCCC",
+                "ButtonBrush": "#DDDDDD",
+                "AccentBrush": "#0078D7",
+            }
+            
+        for key, hex_val in colors.items():
+            if self.Resources.Contains(key):
+                self.Resources[key] = bc.ConvertFromString(hex_val)
+            else:
+                self.Resources.Add(key, bc.ConvertFromString(hex_val))
+
     def refresh_schemes(self):
         self.List_Schemes.ItemsSource = None
         self.List_Schemes.ItemsSource = sorted(self.schemes_dict.keys())
