@@ -988,45 +988,45 @@ class ManageSheetsPanel(forms.WPFPanel):
                 t.Start()
                 try:
                     for r in self.all_grid_nodes:
-                    if r.IsChecked:
-                        if r.Action == "UPDATE" or r.Action == "MATCHED":
-                            s_elem = doc.GetElement(r.ElementId)
-                            if s_elem:
-                                if r.SheetNumber != r.OriginalNumber: s_elem.SheetNumber = r.SheetNumber
-                                if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
-                                assign_sheet_to_collection(doc, s_elem, r.CollectionName)
-                                disc_name, cg_name, _ = classification.classify_sheet(r.SheetNumber, r.SheetName)
-                                set_sheet_parameter(s_elem, "Discipline", disc_name)
-                                set_sheet_parameter(s_elem, "Content Group", cg_name)
-                                renames += 1
-                        elif r.Action == "CREATE":
-                            titleblocks = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_TitleBlocks).WhereElementIsElementType().ToElements()
-                            if titleblocks:
-                                new_sheet = ViewSheet.Create(doc, titleblocks[0].Id)
-                                new_sheet.SheetNumber = r.SheetNumber
-                                new_sheet.Name = r.SheetName
-                                assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
-                                disc_name, cg_name, _ = classification.classify_sheet(r.SheetNumber, r.SheetName)
-                                set_sheet_parameter(new_sheet, "Discipline", disc_name)
-                                set_sheet_parameter(new_sheet, "Content Group", cg_name)
-                                creates += 1
-                        elif r.Action == "PURGE":
-                            doc.Delete(r.ElementId)
-                            purges += 1
+                        if r.IsChecked:
+                            if r.Action == "UPDATE" or r.Action == "MATCHED":
+                                s_elem = doc.GetElement(r.ElementId)
+                                if s_elem:
+                                    if r.SheetNumber != r.OriginalNumber: s_elem.SheetNumber = r.SheetNumber
+                                    if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
+                                    assign_sheet_to_collection(doc, s_elem, r.CollectionName)
+                                    disc_name, cg_name, _ = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                    set_sheet_parameter(s_elem, "Discipline", disc_name)
+                                    set_sheet_parameter(s_elem, "Content Group", cg_name)
+                                    renames += 1
+                            elif r.Action == "CREATE":
+                                titleblocks = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_TitleBlocks).WhereElementIsElementType().ToElements()
+                                if titleblocks:
+                                    new_sheet = ViewSheet.Create(doc, titleblocks[0].Id)
+                                    new_sheet.SheetNumber = r.SheetNumber
+                                    new_sheet.Name = r.SheetName
+                                    assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
+                                    disc_name, cg_name, _ = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                    set_sheet_parameter(new_sheet, "Discipline", disc_name)
+                                    set_sheet_parameter(new_sheet, "Content Group", cg_name)
+                                    creates += 1
+                            elif r.Action == "PURGE":
+                                doc.Delete(r.ElementId)
+                                purges += 1
                             
-                    if r.Action != "PURGE":
-                        for v in r.Views:
-                            if v.ViewId != ElementId.InvalidElementId:
-                                v_elem = doc.GetElement(v.ViewId)
-                                if v_elem and v_elem.Name != v.Name:
-                                    try:
-                                        v_elem.Name = v.Name
-                                        renames += 1
-                                    except: pass
-                            elif v._is_new:
-                                # TODO: Phase 2: Create new view using v.ViewType and v.Scale
-                                # TODO: Phase 3: Place viewport on sheet
-                                pass
+                        if r.Action != "PURGE":
+                            for v in r.Views:
+                                if v.ViewId != ElementId.InvalidElementId:
+                                    v_elem = doc.GetElement(v.ViewId)
+                                    if v_elem and v_elem.Name != v.Name:
+                                        try:
+                                            v_elem.Name = v.Name
+                                            renames += 1
+                                        except: pass
+                                elif v._is_new:
+                                    # TODO: Phase 2: Create new view using v.ViewType and v.Scale
+                                    # TODO: Phase 3: Place viewport on sheet
+                                    pass
                                 
                     t.Commit()
                     MessageBox.Show("Sync Complete!\nRenamed: {}\nCreated: {}\nPurged: {}".format(renames, creates, purges), "Success")
