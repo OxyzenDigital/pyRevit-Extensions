@@ -980,13 +980,14 @@ class ManageSheetsPanel(forms.WPFPanel):
 
     def sync_to_revit(self, sender, e):
         def _sync_action():
-            uidoc = __revit__.ActiveUIDocument
+            uidoc = HOST_APP.uiapp.ActiveUIDocument
             doc = uidoc.Document if uidoc else None
             if not doc: return
             renames, creates, purges = 0, 0, 0
             with Transaction(doc, "Manage Sheets Sync") as t:
                 t.Start()
-                for r in self.all_grid_nodes:
+                try:
+                    for r in self.all_grid_nodes:
                     if r.IsChecked:
                         if r.Action == "UPDATE" or r.Action == "MATCHED":
                             s_elem = doc.GetElement(r.ElementId)
@@ -1027,13 +1028,17 @@ class ManageSheetsPanel(forms.WPFPanel):
                                 # TODO: Phase 3: Place viewport on sheet
                                 pass
                                 
-                t.Commit()
-                
-                MessageBox.Show("Sync Complete!\nRenamed: {}\nCreated: {}\nPurged: {}".format(renames, creates, purges), "Success")
-            self.all_grid_nodes = []
-            self.EditorItems.Clear()
-            self.NavRoot.Clear()
-            self.load_revit_data()
+                    t.Commit()
+                    MessageBox.Show("Sync Complete!\nRenamed: {}\nCreated: {}\nPurged: {}".format(renames, creates, purges), "Success")
+                    self.all_grid_nodes = []
+                    self.EditorItems.Clear()
+                    self.NavRoot.Clear()
+                    self.load_revit_data()
+                except Exception as ex:
+                    t.RollBack()
+                    import traceback
+                    err_msg = traceback.format_exc()
+                    MessageBox.Show("Sync Failed! All changes have been safely rolled back.\n\nError details:\n" + err_msg, "Sync Error")
         
         from pyrevit.revit.events import execute_in_revit_context
         execute_in_revit_context("Manage Sheets Sync", _sync_action)
