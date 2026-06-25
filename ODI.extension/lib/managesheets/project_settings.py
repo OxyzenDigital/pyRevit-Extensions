@@ -56,16 +56,22 @@ def save_naming_schemes(doc, schemes_dict):
             
     json_str = json.dumps(schemes_dict)
     
-    # We open a separate dedicated transaction just for saving settings
-    with Transaction(doc, "Save Manage Sheets Settings") as t:
-        t.Start()
-        if not target_ds:
-            target_ds = DataStorage.Create(doc)
+    def _save():
+        with Transaction(doc, "Save Manage Sheets Settings") as t:
+            t.Start()
+            if not target_ds:
+                new_ds = DataStorage.Create(doc)
+                entity = Entity(schema)
+                entity.Set[System.String]("NamingSchemesJson", json_str)
+                new_ds.SetEntity(entity)
+            else:
+                entity = Entity(schema)
+                entity.Set[System.String]("NamingSchemesJson", json_str)
+                target_ds.SetEntity(entity)
+            t.Commit()
             
-        entity = Entity(schema)
-        entity.Set[System.String]("NamingSchemesJson", json_str)
-        target_ds.SetEntity(entity)
-        t.Commit()
+    from pyrevit.revit.events import execute_in_revit_context
+    execute_in_revit_context("Save Manage Sheets Naming", _save)
 
 def get_or_create_classification_schema():
     schema = Schema.Lookup(CLASSIFICATION_SCHEMA_GUID)
@@ -111,12 +117,19 @@ def save_classification_dict(doc, class_dict):
             
     json_str = json.dumps(class_dict)
     
-    with Transaction(doc, "Save Manage Sheets Classification") as t:
-        t.Start()
-        if not target_ds:
-            target_ds = DataStorage.Create(doc)
+    def _save():
+        with Transaction(doc, "Save Manage Sheets Classification") as t:
+            t.Start()
+            if not target_ds:
+                new_ds = DataStorage.Create(doc)
+                entity = Entity(schema)
+                entity.Set[System.String]("ClassificationJson", json_str)
+                new_ds.SetEntity(entity)
+            else:
+                entity = Entity(schema)
+                entity.Set[System.String]("ClassificationJson", json_str)
+                target_ds.SetEntity(entity)
+            t.Commit()
             
-        entity = Entity(schema)
-        entity.Set[System.String]("ClassificationJson", json_str)
-        target_ds.SetEntity(entity)
-        t.Commit()
+    from pyrevit.revit.events import execute_in_revit_context
+    execute_in_revit_context("Save Manage Sheets Classification", _save)
