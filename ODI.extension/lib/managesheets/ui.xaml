@@ -525,7 +525,14 @@
                                         <RowDefinition Height="*"/>
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" Text="5. Name Modifiers" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" Margin="0,0,0,5"/>
+                                    <Grid Grid.Row="0" Margin="0,0,0,5">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <TextBlock Grid.Column="0" Text="5. Name Modifiers" FontWeight="SemiBold" Foreground="{DynamicResource TextBrush}" VerticalAlignment="Center"/>
+                                        <Button Name="Btn_EditModifiers" Grid.Column="1" Content="⚙ Edit" Width="50" Height="22" Margin="5,0,0,0" ToolTip="Edit Classification &amp; Modifiers for this project"/>
+                                    </Grid>
                                     <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,5">
                                         <Button Name="Btn_ModAll" Content="Select All" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>
                                         <Button Name="Btn_ModNone" Content="Select None" Padding="5,2" FontSize="10" Background="Transparent" Foreground="{DynamicResource AccentBrush}"/>

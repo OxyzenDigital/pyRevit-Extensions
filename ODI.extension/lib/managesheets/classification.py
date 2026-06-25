@@ -29,19 +29,31 @@ NAMING_SCHEMES = config.get("NAMING_SCHEMES", {})
 # Key: lowercased sheet name
 # Value: dict with keys: discipline, contentGroup, drawingType, drawingTypeCode
 FLAT_CLASSIFICATION = {}
-for disc, groups in CLASSIFICATION_DICT.items():
-    for group, sheets in groups.items():
-        for item in sheets:
-            if len(item) >= 2:
-                s_name = item[0]
-                s_code = str(item[1])
-                FLAT_CLASSIFICATION[s_name.lower()] = {
-                    "discipline": disc,
-                    "contentGroup": group,
-                    "drawingType": DRAWING_TYPES.get(s_code, "Unknown"),
-                    "drawingTypeCode": s_code,
-                    "originalName": s_name
-                }
+NORM_FLAT = {}
+
+def reload_classification(custom_dict=None):
+    global CLASSIFICATION_DICT, FLAT_CLASSIFICATION, NORM_FLAT
+    if custom_dict:
+        CLASSIFICATION_DICT = custom_dict
+    else:
+        config = load_config()
+        CLASSIFICATION_DICT = config.get("CLASSIFICATION_DICT", {})
+        
+    FLAT_CLASSIFICATION = {}
+    for disc, groups in CLASSIFICATION_DICT.items():
+        for group, sheets in groups.items():
+            for item in sheets:
+                if len(item) >= 2:
+                    s_name = item[0]
+                    s_code = str(item[1])
+                    FLAT_CLASSIFICATION[s_name.lower()] = {
+                        "discipline": disc,
+                        "contentGroup": group,
+                        "drawingType": DRAWING_TYPES.get(s_code, "Unknown"),
+                        "drawingTypeCode": s_code,
+                        "originalName": s_name
+                    }
+    NORM_FLAT = {normalize_sheet_name(k): v for k, v in FLAT_CLASSIFICATION.items()}
 
 def normalize_sheet_name(name):
     """Normalize sheet name for better fuzzy matching."""
@@ -54,7 +66,7 @@ def normalize_sheet_name(name):
     name = re.sub(r'\s+', ' ', name).strip().lower()
     return name
 
-NORM_FLAT = {normalize_sheet_name(k): v for k, v in FLAT_CLASSIFICATION.items()}
+reload_classification()
 
 def classify_sheet(sheet_name):
     lower_name = sheet_name.lower()
