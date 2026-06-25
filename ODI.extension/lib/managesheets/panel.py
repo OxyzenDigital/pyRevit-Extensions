@@ -34,7 +34,7 @@ from Autodesk.Revit.DB import (
     ElementId, ViewSheet, View, ViewType, BuiltInParameter, ParameterTypeId,
     Level, ForgeTypeId
 )
-from pyrevit import revit, forms, script
+from pyrevit import revit, forms, script, HOST_APP
 import classification
 import project_settings
 
@@ -442,7 +442,8 @@ class ManageSheetsPanel(forms.WPFPanel):
 
     def check_and_load_data(self):
         try:
-            doc = __revit__.ActiveUIDocument.Document
+            uidoc = HOST_APP.uiapp.ActiveUIDocument
+            doc = uidoc.Document if uidoc else None
             if not doc:
                 return
             
@@ -805,7 +806,7 @@ class ManageSheetsPanel(forms.WPFPanel):
             self.toggle_tree(self.TargetSchemaRoot, True)
 
     def load_revit_data(self):
-        uidoc = __revit__.ActiveUIDocument
+        uidoc = HOST_APP.uiapp.ActiveUIDocument
         doc = uidoc.Document if uidoc else None
         if not doc or not uidoc: return
         
