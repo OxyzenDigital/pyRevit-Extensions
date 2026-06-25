@@ -734,7 +734,12 @@ class ManageSheetsPanel(forms.WPFPanel):
         self.Chk_GlobalCover.IsChecked = cfg.get_option("global_cover", False)
         
         # Load Naming Schemes
-        self._loaded_naming_schemes = project_settings.load_naming_schemes(revit.doc)
+        uidoc = HOST_APP.uiapp.ActiveUIDocument
+        doc = uidoc.Document if uidoc else None
+        if doc:
+            self._loaded_naming_schemes = project_settings.load_naming_schemes(doc)
+        else:
+            self._loaded_naming_schemes = project_settings.load_naming_schemes(None)
         if not self._loaded_naming_schemes:
             self._loaded_naming_schemes = classification.NAMING_SCHEMES
             
@@ -859,31 +864,42 @@ class ManageSheetsPanel(forms.WPFPanel):
         self.generate_target_schema()
 
     def on_edit_naming_schemes(self, sender, e):
-        dialog = NamingSchemeSettingsDialog(self._loaded_naming_schemes)
-        try: dialog.Owner = self.Parent
-        except: pass
-        if dialog.ShowDialog():
-            # Update Document with new schemes
-            project_settings.save_naming_schemes(revit.doc, dialog.schemes_dict)
-            self._loaded_naming_schemes = dialog.schemes_dict
-            
-            # Refresh ComboBox
-            prev_sel = self.Cmb_NamingScheme.SelectedItem or self.Cmb_NamingScheme.Text
-            self.Cmb_NamingScheme.ItemsSource = None
-            self.Cmb_NamingScheme.ItemsSource = self._loaded_naming_schemes.keys()
-            if prev_sel in self._loaded_naming_schemes:
-                self.Cmb_NamingScheme.SelectedItem = prev_sel
-            else:
-                self.Cmb_NamingScheme.SelectedItem = "Segment-Based"
-            self.generate_target_schema()
+        try:
+            dialog = NamingSchemeSettingsDialog(self._loaded_naming_schemes)
+            try: dialog.Owner = self.Parent
+            except: pass
+            if dialog.ShowDialog():
+                uidoc = HOST_APP.uiapp.ActiveUIDocument
+                doc = uidoc.Document if uidoc else None
+                if doc:
+                    # Update Document with new schemes
+                    project_settings.save_naming_schemes(doc, dialog.schemes_dict)
+                self._loaded_naming_schemes = dialog.schemes_dict
+                
+                # Refresh ComboBox
+                prev_sel = self.Cmb_NamingScheme.SelectedItem or self.Cmb_NamingScheme.Text
+                self.Cmb_NamingScheme.ItemsSource = None
+                self.Cmb_NamingScheme.ItemsSource = self._loaded_naming_schemes.keys()
+                if prev_sel in self._loaded_naming_schemes:
+                    self.Cmb_NamingScheme.SelectedItem = prev_sel
+                else:
+                    self.Cmb_NamingScheme.SelectedItem = "Segment-Based"
+                self.generate_target_schema()
+        except Exception as ex:
+            import traceback
+            forms.alert(traceback.format_exc(), title="Error Editing Naming Schemes")
             
     def on_edit_modifiers(self, sender, e):
-        dialog = ModifierSettingsDialog(classification.CLASSIFICATION_DICT)
-        try: dialog.Owner = self.Parent
-        except: pass
-        if dialog.ShowDialog():
-            # Already saved in dialog, just refresh the tree
-            self.load_settings()
+        try:
+            dialog = ModifierSettingsDialog(classification.CLASSIFICATION_DICT)
+            try: dialog.Owner = self.Parent
+            except: pass
+            if dialog.ShowDialog():
+                # Already saved in dialog, just refresh the tree
+                self.load_settings()
+        except Exception as ex:
+            import traceback
+            forms.alert(traceback.format_exc(), title="Error Editing Modifiers")
 
     def generate_target_schema(self):
         self.save_settings()
