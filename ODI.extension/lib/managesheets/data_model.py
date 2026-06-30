@@ -90,9 +90,10 @@ class DiffNode(ViewModelBase):
             self._action_callback()
 
 class SelectableNode(ViewModelBase):
-    def __init__(self, name, is_checked=True, callback=None):
+    def __init__(self, name, is_checked=True, callback=None, display_name=None):
         ViewModelBase.__init__(self)
         self.Name = name
+        self.DisplayName = display_name if display_name else name
         self._is_checked = is_checked
         self.callback = callback
     @property
@@ -115,6 +116,12 @@ class CollectionGroupNode(ViewModelBase):
         self.Name = name
         self.Children = []  # Holds DisciplineGroupNode instances
 
+class UnplacedViewNode(ViewModelBase):
+    def __init__(self, view_id, name):
+        ViewModelBase.__init__(self)
+        self.Id = view_id
+        self.Name = name
+
 class ViewViewModel(ViewModelBase):
     def __init__(self, view_id, name, view_type="FloorPlan", scale="1/8\" = 1'-0\"", is_new=False):
         ViewModelBase.__init__(self)
@@ -123,6 +130,15 @@ class ViewViewModel(ViewModelBase):
         self._view_type = view_type
         self._scale = scale
         self._is_new = is_new
+        self._source_view_id = ElementId.InvalidElementId
+        self._validation_warning = ""
+        
+    @property
+    def ValidationWarning(self): return self._validation_warning
+    @ValidationWarning.setter
+    def ValidationWarning(self, val):
+        self._validation_warning = val
+        self.OnPropertyChanged("ValidationWarning")
         
     @property
     def Name(self): return self._name
@@ -145,8 +161,22 @@ class ViewViewModel(ViewModelBase):
         self._scale = val
         self.OnPropertyChanged("Scale")
         
+    @property
+    def SourceViewId(self): return self._source_view_id
+    @SourceViewId.setter
+    def SourceViewId(self, val):
+        self._source_view_id = val
+        self.OnPropertyChanged("SourceViewId")
+        self.OnPropertyChanged("IsCreateNewMode")
+
+    @property
+    def IsNewView(self): return self._is_new
+
+    @property
+    def IsCreateNewMode(self): 
+        return self._is_new and self._source_view_id == ElementId.InvalidElementId
 class SheetViewModel(ViewModelBase):
-    def __init__(self, element_id, number, name, collection_name, is_template=False, validation_callback=None):
+    def __init__(self, element_id, number, name, collection_name, discipline_name="Unknown", content_group_name="Uncategorized", is_template=False, validation_callback=None):
         ViewModelBase.__init__(self)
         self.validation_callback = validation_callback
         self.ElementId = element_id
@@ -154,6 +184,8 @@ class SheetViewModel(ViewModelBase):
         self._sheet_number = number
         self._sheet_name = name
         self._collection_name = collection_name
+        self._discipline_name = discipline_name
+        self._content_group_name = content_group_name
         self.OriginalNumber = number
         self.OriginalName = name
         
@@ -167,6 +199,23 @@ class SheetViewModel(ViewModelBase):
         self.PurgeCommand = RelayCommand(self.mark_purge)
         self.AddViewCommand = RelayCommand(self.add_view)
         self.UndoCommand = RelayCommand(self.undo_changes)
+        
+        self.populate_available_names()
+        
+    def populate_available_names(self):
+        import classification
+        self.AvailableNames.Clear()
+        
+        base_name = self.SheetName
+        if base_name.endswith("s") and not base_name.endswith("ss"):
+            base_name = base_name[:-1]
+            
+        self.AvailableNames.Add(base_name)
+        
+        schemes = classification.NAMING_SCHEMES
+        for scheme_list in schemes.values():
+            for mod in scheme_list:
+                self.AvailableNames.Add("{} - {}".format(base_name, mod))
 
     @property
     def SheetNumber(self): return self._sheet_number
@@ -215,12 +264,18 @@ class SheetViewModel(ViewModelBase):
         self.OnPropertyChanged("Action")
 
     @property
-    def DisciplineName(self):
-        match = re.match(r"^([A-Z]+)[- ]?(\d+)", self.SheetNumber.upper())
-        disc_code = match.group(1) if match else "Other"
-        disc_map = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors" }
-        name = disc_map.get(disc_code, "Discipline")
-        return "{} - {}".format(disc_code, name) if disc_code != "Other" else "Uncategorized"
+    def DisciplineName(self): return self._discipline_name
+    @DisciplineName.setter
+    def DisciplineName(self, val):
+        self._discipline_name = val
+        self.OnPropertyChanged("DisciplineName")
+
+    @property
+    def ContentGroupName(self): return self._content_group_name
+    @ContentGroupName.setter
+    def ContentGroupName(self, val):
+        self._content_group_name = val
+        self.OnPropertyChanged("ContentGroupName")
 
     def mark_purge(self, parameter=None):
         self.Action = "PURGE"
@@ -245,7 +300,11 @@ class SheetViewModel(ViewModelBase):
         if self.validation_callback: self.validation_callback()
         
     def add_view(self, parameter=None):
-        self.Views.Add(ViewViewModel(ElementId.InvalidElementId, "New View", is_new=True))
+        base_name = self.SheetName
+        if base_name.endswith("s") and not base_name.endswith("ss"):
+            base_name = base_name[:-1]
+        new_name = "{} - View {}".format(base_name, len(self.Views) + 1)
+        self.Views.Add(ViewViewModel(ElementId.InvalidElementId, new_name, is_new=True))
 
     def update_action(self):
         if self.IsTemplate: 
@@ -260,17 +319,23 @@ class SheetViewModel(ViewModelBase):
         if self.validation_callback: self.validation_callback()
 
 class NavTreeNode(ViewModelBase):
-    def __init__(self, name, node_type, tag=None):
+    def __init__(self, name, node_type, tag=None, parent=None):
         ViewModelBase.__init__(self)
         self.Name = name
         self.NodeType = node_type
         self.Tag = tag
+        self.Parent = parent
         self.callback = None
         self.Children = ObservableCollection[NavTreeNode]()
         self._is_expanded = True
         self._is_selected = False
         self._is_checked = False
+        self._is_target_included = True
+        self._is_visible = True
+        self._is_enabled = True
         self._count = 0
+        self.target_callback = None
+        self._is_updating = False
         
     @property
     def IsExpanded(self): return self._is_expanded
@@ -278,6 +343,11 @@ class NavTreeNode(ViewModelBase):
     def IsExpanded(self, val):
         self._is_expanded = val
         self.OnPropertyChanged("IsExpanded")
+
+    @property
+    def IsThreeState(self):
+        return len(self.Children) > 0
+
 
     @property
     def IsSelected(self): return self._is_selected
@@ -290,9 +360,83 @@ class NavTreeNode(ViewModelBase):
     def IsChecked(self): return self._is_checked
     @IsChecked.setter
     def IsChecked(self, val):
+        if self._is_checked == val: return
         self._is_checked = val
         self.OnPropertyChanged("IsChecked")
+        
+        if not self._is_updating:
+            self._is_updating = True
+            
+            # Cascade down: If this node is checked/unchecked by the user, force all enabled children to match.
+            # (If val is None, we don't force children to None, the user can't click to set None anyway in 2-state mode, 
+            # but if they can in 3-state, we set children to False)
+            if val is not None:
+                for child in self.Children:
+                    if child.IsEnabled:
+                        child._set_checked_from_parent(val)
+            elif val is None and len(self.Children) > 0:
+                # If set to indeterminate manually (rare), we clear children
+                for child in self.Children:
+                    if child.IsEnabled:
+                        child._set_checked_from_parent(False)
+                        
+            # Cascade up: Tell parent to re-evaluate its state
+            if self.Parent:
+                self.Parent._evaluate_checked_state()
+                
+            self._is_updating = False
+
         if self.callback: self.callback()
+
+    def _set_checked_from_parent(self, val):
+        """Helper to set checked state from a parent without triggering upward cascade"""
+        if self._is_checked == val: return
+        self._is_checked = val
+        self.OnPropertyChanged("IsChecked")
+        
+        self._is_updating = True
+        for child in self.Children:
+            if child.IsEnabled:
+                child._set_checked_from_parent(val)
+        self._is_updating = False
+        
+        if self.callback: self.callback()
+        
+    def _evaluate_checked_state(self):
+        """Helper to evaluate this node's state based on its children's states"""
+        if not self.Children: return
+        
+        has_checked = False
+        has_unchecked = False
+        has_indeterminate = False
+        
+        # Only evaluate based on enabled children (or all if none are enabled?)
+        enabled_children = [c for c in self.Children if c.IsEnabled]
+        if not enabled_children:
+            enabled_children = self.Children # fallback if all disabled
+            
+        for child in enabled_children:
+            if child.IsChecked is True:
+                has_checked = True
+            elif child.IsChecked is False:
+                has_unchecked = True
+            else:
+                has_indeterminate = True
+                
+        new_val = False
+        if has_checked and not has_unchecked and not has_indeterminate:
+            new_val = True
+        elif has_unchecked and not has_checked and not has_indeterminate:
+            new_val = False
+        elif has_checked or has_indeterminate:
+            new_val = None
+            
+        if self._is_checked != new_val:
+            self._is_checked = new_val
+            self.OnPropertyChanged("IsChecked")
+            if self.Parent:
+                self.Parent._evaluate_checked_state()
+            if self.callback: self.callback()
         
     @property
     def Count(self): return self._count
@@ -312,3 +456,33 @@ class NavTreeNode(ViewModelBase):
         
     @property
     def FontWeight(self): return "Bold" if self.NodeType in ["Root", "Collection"] else "Normal"
+    
+    @property
+    def IsTargetIncluded(self): return self._is_target_included
+    @IsTargetIncluded.setter
+    def IsTargetIncluded(self, val):
+        self._is_target_included = val
+        self.OnPropertyChanged("IsTargetIncluded")
+        self.OnPropertyChanged("TargetOpacity")
+        if self.target_callback: self.target_callback(self)
+        
+    @property
+    def IsVisible(self): return self._is_visible
+    @IsVisible.setter
+    def IsVisible(self, val):
+        if self._is_visible == val: return
+        self._is_visible = val
+        self.OnPropertyChanged("IsVisible")
+        
+    @property
+    def IsEnabled(self): return self._is_enabled
+    @IsEnabled.setter
+    def IsEnabled(self, val):
+        if self._is_enabled == val: return
+        self._is_enabled = val
+        self.OnPropertyChanged("IsEnabled")
+        if not val and self.IsChecked:
+            self.IsChecked = False # auto-uncheck if disabled
+        
+    @property
+    def TargetOpacity(self): return 1.0 if self.IsTargetIncluded else 0.5
