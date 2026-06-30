@@ -25,14 +25,14 @@ from System.Collections.ObjectModel import ObservableCollection
 from System.Windows.Data import CollectionViewSource, PropertyGroupDescription
 from System.Windows.Media import SolidColorBrush, Color as WpfColor, Colors
 import System
-from System.Windows import MessageBox, Visibility, SystemColors
+from System.Windows import MessageBox, Visibility, SystemColors, MessageBoxButton, MessageBoxImage, MessageBoxResult
 from System.Windows.Controls import CheckBox
 from System.Windows.Input import ICommand
 
 from Autodesk.Revit.DB import (
     Transaction, FilteredElementCollector, BuiltInCategory, 
     ElementId, ViewSheet, View, ViewType, BuiltInParameter, ParameterTypeId,
-    Level, ForgeTypeId
+    Level, ForgeTypeId, ViewFamilyType, ViewFamily, ViewDrafting, ViewPlan, Viewport, XYZ, BoundingBoxXYZ
 )
 from pyrevit import revit, forms, script, HOST_APP
 import classification
@@ -142,52 +142,101 @@ def generate_suffixes(rows, cols, naming_scheme="Segment-Based", custom_schemes=
         
     return suffixes
 
-def generate_discipline_sheets(disc_code, levels, active_series, active_modifiers, global_cover, rows, cols, naming_scheme, custom_schemes=None):
+def generate_discipline_sheets(disc_code, levels, active_series, active_modifiers, global_cover, rows, cols, naming_scheme, custom_schemes=None, excluded_targets=None, shuffle_on_exclude=False):
+    if excluded_targets is None: excluded_targets = set()
     targets = []
     suffixes = generate_suffixes(rows, cols, naming_scheme, custom_schemes)
-    
-    if "0" in active_series:
-        if global_cover:
-            if disc_code == "CS":
-                targets.append({"num": "CS-001", "name": "Cover Sheet", "collection": "00. General", "cg": "00. General", "type": "0"})
-                targets.append({"num": "CS-002", "name": "General Notes", "collection": "00. General", "cg": "00. General", "type": "0"})
-        else:
-            targets.append({"num": "{}-001".format(disc_code), "name": "{} Cover Sheet / Index".format(disc_code), "collection": "00. General", "cg": "00. General", "type": "0"})
-    
     for series in active_series:
-        if series == "0": continue
+        # If Global Cover is checked, we only generate the 0-General sheets for the 'CS' discipline.
+        if series == "0" and global_cover and disc_code != "CS":
+            continue
+            
+        disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors", "CS": "Cover Sheet" }
+        target_disc_name = disc_dict.get(disc_code, None)
         
         series_mods = []
+        known_names_and_cgs = set()
         for disc, groups in classification.CLASSIFICATION_DICT.items():
+            # If the current discipline corresponds to a known category (like Architectural),
+            # strictly limit it to only pull from that category (and Custom).
+            # If it's a non-matching discipline (like G or CS), it skips this restriction and pulls from anywhere manually checked.
+            if target_disc_name in classification.CLASSIFICATION_DICT:
+                if disc != target_disc_name and disc != "Custom":
+                    continue
+                    
             for cg, types in groups.items():
+                known_names_and_cgs.add(cg)
                 for item in types:
                     if len(item) >= 2:
                         m_name, m_code = item[0], str(item[1])
-                        if m_name in active_modifiers and m_code.startswith(series):
-                            series_mods.append((m_name, m_code, cg))
+                        known_names_and_cgs.add(m_name)
+                        if (cg in active_modifiers or m_name in active_modifiers) and m_code.startswith(series):
+                            if (m_name, m_code, cg) not in series_mods:
+                                series_mods.append((m_name, m_code, cg))
+                                
+        # Add Custom Modifiers (those not in the known dictionary)
+        for mod in active_modifiers:
+            if mod not in known_names_and_cgs:
+                # Assign a generic code "X99" where X is the series, and put in Custom group
+                if (mod, series + "99", "Custom") not in series_mods:
+                    series_mods.append((mod, series + "99", "Custom"))
         
         if not series_mods:
-            series_mods.append(("{} (Default)".format(SERIES_MAP.get(series, series)), series + "01", "0{}. {}".format(series, SERIES_MAP.get(series, series))))
+            series_mods.append((SERIES_MAP.get(series, series).upper(), series + "01", "0{}. {}".format(series, SERIES_MAP.get(series, series))))
             
         if series == "1":
             for idx, lvl in enumerate(levels):
                 lvl_seq = (idx + 1) * 10
+                actual_mod_seq = 0
                 for mod_idx, (m_name, m_code, cg) in enumerate(series_mods):
-                    mod_seq = lvl_seq + mod_idx
-                    base_num = "{}-{}{:02d}".format(disc_code, series, mod_seq)
+                    baseline_seq = lvl_seq + mod_idx
+                    baseline_num = "{}-{}{:02d}".format(disc_code, series, baseline_seq)
+                    is_excluded = baseline_num in excluded_targets
                     
-                    if len(suffixes) == 1:
-                        targets.append({"num": base_num, "name": "{} {}".format(m_name, lvl), "collection": "01. Plans", "cg": cg, "type": "1"})
+                    if shuffle_on_exclude:
+                        if is_excluded:
+                            actual_num = baseline_num + " [Skipped]"
+                        else:
+                            actual_num = "{}-{}{:02d}".format(disc_code, series, lvl_seq + actual_mod_seq)
+                            actual_mod_seq += 1
                     else:
-                        targets.append({"num": base_num, "name": "{} {} - OVERALL".format(m_name, lvl), "collection": "01. Plans", "cg": cg, "type": "1"})
+                        actual_num = baseline_num
+                        
+                    if len(suffixes) == 1:
+                        targets.append({"num": actual_num, "baseline_num": baseline_num, "name": "{} {}".format(m_name.upper(), lvl.upper()), "collection": "01. Plans", "cg": cg, "type": "1"})
+                    else:
+                        targets.append({"num": actual_num, "baseline_num": baseline_num, "name": "{} {} - OVERALL".format(m_name.upper(), lvl.upper()), "collection": "01. Plans", "cg": cg, "type": "1"})
                         for let, name_part in suffixes:
-                            targets.append({"num": "{}{}".format(base_num, let), "name": "{} {} - {}".format(m_name, lvl, name_part), "collection": "01. Plans", "cg": cg, "type": "1"})
+                            baseline_num_suffixed = "{}{}".format(baseline_num, let)
+                            is_suffixed_excluded = baseline_num_suffixed in excluded_targets
+                            
+                            if shuffle_on_exclude:
+                                if is_suffixed_excluded:
+                                    final_actual = baseline_num_suffixed + " [Skipped]"
+                                else:
+                                    final_actual = "{}{}".format(actual_num.replace(" [Skipped]", ""), let)
+                            else:
+                                final_actual = baseline_num_suffixed
+                                
+                            targets.append({"num": final_actual, "baseline_num": baseline_num_suffixed, "name": "{} {} - {}".format(m_name.upper(), lvl.upper(), name_part.upper()), "collection": "01. Plans", "cg": cg, "type": "1"})
                             
         else:
+            actual_mod_seq = 1
             for mod_idx, (m_name, m_code, cg) in enumerate(series_mods):
-                base_num = "{}-{}{:02d}".format(disc_code, series, mod_idx + 1)
+                baseline_num = "{}-{}{:02d}".format(disc_code, series, mod_idx + 1)
+                is_excluded = baseline_num in excluded_targets
+                
+                if shuffle_on_exclude:
+                    if is_excluded:
+                        actual_num = baseline_num + " [Skipped]"
+                    else:
+                        actual_num = "{}-{}{:02d}".format(disc_code, series, actual_mod_seq)
+                        actual_mod_seq += 1
+                else:
+                    actual_num = baseline_num
+                    
                 coll_name = "0{}. {}".format(series, SERIES_MAP.get(series, series))
-                targets.append({"num": base_num, "name": m_name, "collection": coll_name, "cg": cg, "type": series})
+                targets.append({"num": actual_num, "baseline_num": baseline_num, "name": m_name.upper(), "collection": coll_name, "cg": cg, "type": series})
                 
     return targets
 
@@ -203,7 +252,10 @@ def calculate_smart_score(live_num, live_name, target):
     score += base_score * 0.4 # Weight base score at 40%
     
     # 2. Exact Number Match (Massive Bonus)
-    if live_num.upper() == target["num"].upper():
+    live_num_norm = re.sub(r'[^A-Z0-9]', '', live_num.upper())
+    target_num_norm = re.sub(r'[^A-Z0-9]', '', target["num"].upper())
+    
+    if live_num_norm == target_num_norm:
         score += 1.0
         return score
         
@@ -228,7 +280,7 @@ def calculate_smart_score(live_num, live_name, target):
                     break
                     
     # 4. Partial Number Match Bonus (e.g., A-101 vs A-101A)
-    if live_num.upper()[:4] == target["num"].upper()[:4]:
+    if len(target_num_norm) > 0 and (live_num_norm.startswith(target_num_norm) or target_num_norm.startswith(live_num_norm)):
         score += 0.2
         
     return score
@@ -476,13 +528,9 @@ class ModifierSettingsDialog(forms.WPFWindow):
         self.DialogResult = False
         self.Close()
 
-class ManageSheetsPanel(forms.WPFPanel):
-    panel_title = "Manage Sheets"
-    panel_id = "f4c9c1a5-8e3b-4b1a-a123-0d6b7c8e9f22"
-    panel_source = os.path.join(os.path.dirname(__file__), "ui.xaml")
-
+class ManageSheetsPanel(forms.WPFWindow):
     def __init__(self):
-        forms.WPFPanel.__init__(self)
+        forms.WPFWindow.__init__(self, os.path.join(os.path.dirname(__file__), "ui.xaml"))
         
         self.apply_theme()
         self.last_loaded_doc_hash = None
@@ -498,7 +546,6 @@ class ManageSheetsPanel(forms.WPFPanel):
             pass
             
 
-        self.Btn_Refresh.Click += self.on_refresh_clicked
         self.Btn_RefreshData.Click += self.on_refresh_clicked
         self.Btn_ResetAll.Click += self.on_refresh_clicked
         self.Btn_RunMatch.Click += self.run_fuzzy_match
@@ -518,13 +565,12 @@ class ManageSheetsPanel(forms.WPFPanel):
         self.Btn_SeriesNone.Click += lambda s,e: self.toggle_list(self.SeriesNodes, False)
         self.Btn_ModAll.Click += lambda s,e: self.check_tree(self.ModifierRoot, True)
         self.Btn_ModNone.Click += lambda s,e: self.check_tree(self.ModifierRoot, False)
-        self.Btn_AddModifier.Click += self.on_add_modifier
         
         # Expand/Collapse Handlers
-        self.Btn_ExpandNav.Click += lambda s,e: self.toggle_tree(self.NavRoot, True)
-        self.Btn_CollapseNav.Click += lambda s,e: self.toggle_tree(self.NavRoot, False)
-        self.Btn_ExpandEditor.Click += lambda s,e: self.toggle_editor(True)
-        self.Btn_CollapseEditor.Click += lambda s,e: self.toggle_editor(False)
+        self.Btn_ExpandNav.Click += self.on_expand_nav
+        self.Btn_CollapseNav.Click += self.on_collapse_nav
+        self.Btn_ExpandEditor.Click += self.on_expand_editor
+        self.Btn_CollapseEditor.Click += self.on_collapse_editor
         
         # Real-time Generator binds
         self.Sld_GridRows.ValueChanged += self.trigger_generation
@@ -549,6 +595,9 @@ class ManageSheetsPanel(forms.WPFPanel):
         self.EditorItems = ObservableCollection[object]()
         self.EditorGrid.ItemsSource = self.EditorItems
         
+        from data_model import UnplacedViewNode
+        self.UnplacedViews = ObservableCollection[UnplacedViewNode]()
+        
         self.LevelNodes = ObservableCollection[SelectableNode]()
         self.List_Levels.ItemsSource = self.LevelNodes
         
@@ -563,10 +612,52 @@ class ManageSheetsPanel(forms.WPFPanel):
         # Internal Storage
         self.all_grid_nodes = []
         self.generated_targets = []
+        self.excluded_target_sheets = set()
         
-        # self.load_revit_data() is now called via the Refresh button
+        # Attach event handlers for the toggle switch
+        self.Tgl_ShowExcluded.Checked += self.on_toggle_show_excluded
+        self.Tgl_ShowExcluded.Unchecked += self.on_toggle_show_excluded
+        self.Chk_ShuffleOnExclude.Checked += self.trigger_generation
+        self.Chk_ShuffleOnExclude.Unchecked += self.trigger_generation
+        
+        self.Txt_SearchSchema.TextChanged += self.on_search_schema_text_changed
+        self.Btn_ExpandSchema.Click += self.on_expand_schema
+        self.Btn_CollapseSchema.Click += self.on_collapse_schema
+        
+        self.Btn_ExpandModifiers.Click += self.on_expand_modifiers
+        self.Btn_CollapseModifiers.Click += self.on_collapse_modifiers
+        
+        # Title bar controls
+        if hasattr(self, 'Btn_MinimizeWindow'): self.Btn_MinimizeWindow.Click += self.on_minimize_click
+        if hasattr(self, 'Btn_SaveProjectSettings'): self.Btn_SaveProjectSettings.Click += self.save_to_project
+        if hasattr(self, 'Btn_ClearProjectSettings'): self.Btn_ClearProjectSettings.Click += self.clear_project_settings
+        if hasattr(self, 'Btn_CloseWindow'): self.Btn_CloseWindow.Click += self.on_close_click
+        if hasattr(self, 'TitleBarGrid'): self.TitleBarGrid.MouseLeftButtonDown += self.on_drag_window
+        
+        # Resizing Handles
+        if hasattr(self, 'ResizeRight'): self.ResizeRight.DragDelta += self.on_resize_right
+        if hasattr(self, 'ResizeBottom'): self.ResizeBottom.DragDelta += self.on_resize_bottom
+        if hasattr(self, 'ResizeLeft'): self.ResizeLeft.DragDelta += self.on_resize_left
+        if hasattr(self, 'ResizeTop'): self.ResizeTop.DragDelta += self.on_resize_top
+        if hasattr(self, 'ResizeBottomRight'): self.ResizeBottomRight.DragDelta += self.on_resize_bottom_right
+        if hasattr(self, 'ResizeBottomLeft'): self.ResizeBottomLeft.DragDelta += self.on_resize_bottom_left
+        if hasattr(self, 'ResizeTopRight'): self.ResizeTopRight.DragDelta += self.on_resize_top_right
+        if hasattr(self, 'ResizeTopLeft'): self.ResizeTopLeft.DragDelta += self.on_resize_top_left
+        
+        # Initialize Button States (trees start expanded)
+        self.Btn_CollapseSchema.IsEnabled = True
+        self.Btn_CollapseModifiers.IsEnabled = True
+        self.Btn_CollapseNav.IsEnabled = True
+        if hasattr(self, 'Btn_CollapseEditor'): self.Btn_CollapseEditor.IsEnabled = True
+        
+        self.Btn_ExpandSchema.IsEnabled = False
+        self.Btn_ExpandModifiers.IsEnabled = False
+        self.Btn_ExpandNav.IsEnabled = False
+        if hasattr(self, 'Btn_ExpandEditor'): self.Btn_ExpandEditor.IsEnabled = False
+        
         self.load_settings()
         self.generate_target_schema() # Initial run
+        self.check_and_load_data()
 
     def on_refresh_clicked(self, sender, e):
         try:
@@ -574,6 +665,47 @@ class ManageSheetsPanel(forms.WPFPanel):
         except Exception as ex:
             import traceback
             forms.alert(traceback.format_exc(), title="Error Refreshing Data")
+
+    def on_drag_window(self, sender, e):
+        self.DragMove()
+
+    def on_resize_right(self, sender, e):
+        self.Width = max(800, self.Width + e.HorizontalChange)
+
+    def on_resize_bottom(self, sender, e):
+        self.Height = max(600, self.Height + e.VerticalChange)
+
+    def on_resize_left(self, sender, e):
+        new_width = self.Width - e.HorizontalChange
+        if new_width > 800:
+            self.Width = new_width
+            self.Left += e.HorizontalChange
+
+    def on_resize_top(self, sender, e):
+        new_height = self.Height - e.VerticalChange
+        if new_height > 600:
+            self.Height = new_height
+            self.Top += e.VerticalChange
+
+    def on_resize_bottom_right(self, sender, e):
+        self.on_resize_bottom(sender, e)
+        self.on_resize_right(sender, e)
+
+    def on_resize_bottom_left(self, sender, e):
+        self.on_resize_bottom(sender, e)
+        self.on_resize_left(sender, e)
+
+    def on_resize_top_right(self, sender, e):
+        self.on_resize_top(sender, e)
+        self.on_resize_right(sender, e)
+
+    def on_resize_top_left(self, sender, e):
+        self.on_resize_top(sender, e)
+        self.on_resize_left(sender, e)
+
+    def on_minimize_click(self, sender, e):
+        import System.Windows
+        self.WindowState = System.Windows.WindowState.Minimized
 
     def on_visible_changed(self, sender, e):
         if self.IsVisible:
@@ -611,7 +743,8 @@ class ManageSheetsPanel(forms.WPFPanel):
                 self.AutoRefreshWarningPanel.Visibility = Visibility.Collapsed
                 self.load_revit_data()
         except Exception as e:
-            pass
+            import traceback
+            forms.alert(traceback.format_exc(), title="Error in check_and_load_data")
 
 
     
@@ -644,7 +777,11 @@ class ManageSheetsPanel(forms.WPFPanel):
                 "CardValueBrush": "#FFFFFF",
                 "CardAccentBrush": "#60A5FA",
                 "ErrorBrush": "#7F1D1D",      # Dark Muted Burgundy
-                "ErrorTextBrush": "#FECACA"   # Light pink/red text for contrast
+                "ErrorTextBrush": "#FECACA",  # Light pink/red text for contrast
+                "SuccessBrush": "#064E3B",    # Dark Emerald
+                "SuccessTextBrush": "#6EE7B7",
+                "UpdateBrush": "#78350F",     # Dark Amber/Yellow
+                "UpdateTextBrush": "#FDE047"
             }
             for key, hex_val in colors.items():
                 if self.Resources.Contains(key):
@@ -713,27 +850,36 @@ class ManageSheetsPanel(forms.WPFPanel):
                 self._recursive_check(child, is_checked)
 
     def load_settings(self):
-        self.Sld_GridRows.Value = float(cfg.get_option("grid_rows", 1))
-        self.Sld_GridCols.Value = float(cfg.get_option("grid_cols", 1))
+        uidoc = HOST_APP.uiapp.ActiveUIDocument
+        doc = uidoc.Document if uidoc else None
+        p_setup = project_settings.load_project_setup(doc) or {}
         
-        saved_discs = cfg.get_option("disciplines", ["A", "M", "E", "P"])
+        self.Sld_GridRows.Value = float(p_setup.get("grid_rows", cfg.get_option("grid_rows", 1)))
+        self.Sld_GridCols.Value = float(p_setup.get("grid_cols", cfg.get_option("grid_cols", 1)))
+        
+        saved_discs = p_setup.get("disciplines", cfg.get_option("disciplines", ["A", "M", "E", "P"]))
         aia_order = ['CS', 'G', 'H', 'V', 'B', 'C', 'L', 'S', 'A', 'I', 'Q', 'F', 'P', 'D', 'M', 'E', 'W', 'T', 'R', 'X', 'Z', 'O']
         sorted_disciplines = sorted(DISCIPLINE_CODES.items(), key=lambda x: aia_order.index(x[0]) if x[0] in aia_order else 999)
+        def handle_discipline_change():
+            self.sync_modifier_disciplines()
+            self.generate_target_schema()
+            
         for k, v in sorted_disciplines:
             is_chk = k in saved_discs
-            self.DisciplineNodes.Add(SelectableNode("{} - {}".format(k, v), is_checked=is_chk, callback=self.generate_target_schema))
+            self.DisciplineNodes.Add(SelectableNode("{} - {}".format(k, v), is_checked=is_chk, callback=handle_discipline_change))
             
-        saved_series = cfg.get_option("series", ["0", "1", "2", "3"])
+        saved_series = p_setup.get("series", cfg.get_option("series", ["0", "1", "2", "3"]))
         sorted_series = sorted(SERIES_MAP.items(), key=lambda x: x[0])
+        
+        def handle_series_change():
+            self.sync_modifier_series()
+            self.generate_target_schema()
+            
         for k, v in sorted_series:
             is_chk = k in saved_series
-            self.SeriesNodes.Add(SelectableNode("{} - {}".format(k, v), is_checked=is_chk, callback=self.generate_target_schema))
+            self.SeriesNodes.Add(SelectableNode("{} - {}".format(k, v), is_checked=is_chk, callback=handle_series_change))
             
-        saved_modifiers = cfg.get_option("selected_modifiers", [])
-        custom_modifiers = cfg.get_option("custom_modifiers", [])
-        self.Chk_GlobalCover.IsChecked = cfg.get_option("global_cover", False)
-        
-        # Load Naming Schemes
+        # Load Naming Schemes first so event triggers don't fail
         uidoc = HOST_APP.uiapp.ActiveUIDocument
         doc = uidoc.Document if uidoc else None
         if doc:
@@ -742,9 +888,16 @@ class ManageSheetsPanel(forms.WPFPanel):
             self._loaded_naming_schemes = project_settings.load_naming_schemes(None)
         if not self._loaded_naming_schemes:
             self._loaded_naming_schemes = classification.NAMING_SCHEMES
-            
+
+        saved_modifiers = p_setup.get("selected_modifiers", cfg.get_option("selected_modifiers", []))
+        custom_modifiers = p_setup.get("custom_modifiers", cfg.get_option("custom_modifiers", []))
+        self.Chk_GlobalCover.IsChecked = p_setup.get("global_cover", cfg.get_option("global_cover", False))
+        
+        self.excluded_target_sheets = set(p_setup.get("excluded_target_sheets", cfg.get_option("excluded_target_sheets", [])))
+        self.Chk_ShuffleOnExclude.IsChecked = p_setup.get("shuffle_on_exclude", cfg.get_option("shuffle_on_exclude", False))
+
         self.Cmb_NamingScheme.ItemsSource = self._loaded_naming_schemes.keys()
-        self.Cmb_NamingScheme.SelectedItem = cfg.get_option("naming_scheme", "Segment-Based")
+        self.Cmb_NamingScheme.SelectedItem = p_setup.get("naming_scheme", cfg.get_option("naming_scheme", "Segment-Based"))
         self.Cmb_NamingScheme.LostFocus += self.trigger_generation
         self.Cmb_NamingScheme.SelectionChanged += self.trigger_generation
         
@@ -769,10 +922,27 @@ class ManageSheetsPanel(forms.WPFPanel):
             sorted_groups = sorted(groups.keys(), key=get_code)
             
             for cg in sorted_groups:
-                m_node = NavTreeNode(cg, "Modifier")
-                m_node.callback = self.generate_target_schema
-                m_node.IsChecked = cg in saved_modifiers
-                disc_node.Children.Add(m_node)
+                cg_node = NavTreeNode(cg, "ContentGroup", parent=disc_node)
+                cg_node.IsExpanded = False # Start collapsed
+                cg_node.callback = self.generate_target_schema
+                
+                for sheet_info in groups[cg]:
+                    if sheet_info and len(sheet_info) > 0:
+                        m_name = sheet_info[0]
+                        m_code = str(sheet_info[1]) if len(sheet_info) >= 2 else "9"
+                        m_node = NavTreeNode(m_name, "Modifier", tag=m_code, parent=cg_node)
+                        m_node.callback = self.generate_target_schema
+                        # Bypass the IsChecked setter logic temporarily to avoid mass triggering during load
+                        m_node._is_checked = m_name in saved_modifiers
+                        cg_node.Children.Add(m_node)
+                
+                # Evaluate cg_node state after adding children
+                cg_node._evaluate_checked_state()
+                
+                if cg_node.Children.Count > 0:
+                    disc_node.Children.Add(cg_node)
+            
+            disc_node._evaluate_checked_state()
             
         # Add custom modifiers to a "Custom" group
         if custom_modifiers:
@@ -783,6 +953,46 @@ class ManageSheetsPanel(forms.WPFPanel):
                 m_node.IsChecked = mod in saved_modifiers
                 custom_node.Children.Add(m_node)
             self.ModifierRoot.Add(custom_node)
+            
+        self.sync_modifier_disciplines()
+        self.sync_modifier_series()
+
+    def sync_modifier_disciplines(self):
+        selected_discs = []
+        for n in self.DisciplineNodes:
+            if n.IsChecked:
+                code = n.Name.split(' - ')[0]
+                selected_discs.append(code)
+                
+        disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors", "CS": "Cover Sheet" }
+        selected_disc_names = [disc_dict.get(c, c).upper() for c in selected_discs]
+        
+        for disc_node in self.ModifierRoot:
+            if disc_node.Name == "Custom": continue
+            
+            is_active = disc_node.Name.upper() in selected_disc_names
+            disc_node.IsVisible = is_active
+            
+            if is_active:
+                if disc_node.IsChecked is False:
+                    disc_node.IsChecked = True
+            else:
+                if disc_node.IsChecked is not False:
+                    disc_node.IsChecked = False
+                    
+    def sync_modifier_series(self):
+        active_series = []
+        for n in self.SeriesNodes:
+            if n.IsChecked:
+                code = n.Name.split(' - ')[0]
+                active_series.append(code)
+                
+        for disc_node in self.ModifierRoot:
+            for cg_node in disc_node.Children:
+                for m_node in cg_node.Children:
+                    m_code = str(m_node.Tag)
+                    # Enable if any active series code matches the start of the modifier's code
+                    m_node.IsEnabled = any(m_code.startswith(s) for s in active_series)
 
     def save_settings(self):
         try:
@@ -816,49 +1026,72 @@ class ManageSheetsPanel(forms.WPFPanel):
         selected_modifiers = []
         all_custom = []
         
-        for cg_node in self.ModifierRoot:
-            if cg_node.Name == "Custom":
-                for m_node in cg_node.Children:
+        for disc_node in self.ModifierRoot:
+            if disc_node.Name == "Custom":
+                for m_node in disc_node.Children:
                     if m_node.IsChecked:
                         selected_modifiers.append(m_node.Name)
                     all_custom.append(m_node.Name)
             else:
-                for m_node in cg_node.Children:
-                    if m_node.IsChecked:
-                        selected_modifiers.append(m_node.Name)
+                for cg_node in disc_node.Children:
+                    for m_node in cg_node.Children:
+                        if m_node.IsChecked:
+                            selected_modifiers.append(m_node.Name)
                         
         cfg.selected_modifiers = selected_modifiers
         cfg.custom_modifiers = all_custom
         cfg.global_cover = bool(self.Chk_GlobalCover.IsChecked)
+        cfg.shuffle_on_exclude = bool(self.Chk_ShuffleOnExclude.IsChecked)
+        cfg.excluded_target_sheets = list(self.excluded_target_sheets)
         
         script.save_config()
         
-    def on_add_modifier(self, sender, e):
-        txt = self.Txt_NewModifier.Text.strip()
-        if not txt: return
-        
-        custom_node = None
-        for cg_node in self.ModifierRoot:
-            if cg_node.Name == "Custom":
-                custom_node = cg_node
-            for m_node in cg_node.Children:
-                if m_node.Name.lower() == txt.lower():
-                    m_node.IsChecked = True
-                    self.Txt_NewModifier.Text = ""
-                    self.generate_target_schema()
-                    return
-                    
-        if not custom_node:
-            custom_node = NavTreeNode("Custom", "ContentGroup")
-            self.ModifierRoot.Add(custom_node)
-            
-        m_node = NavTreeNode(txt, "Modifier")
-        m_node.callback = self.generate_target_schema
-        m_node.IsChecked = True
-        custom_node.Children.Add(m_node)
-        self.Txt_NewModifier.Text = ""
+    def save_to_project(self, sender, e):
         self.save_settings()
-        self.generate_target_schema()
+        setup_dict = {
+            "grid_rows": int(self.Sld_GridRows.Value),
+            "grid_cols": int(self.Sld_GridCols.Value),
+            "global_cover": bool(self.Chk_GlobalCover.IsChecked),
+            "naming_scheme": self.Cmb_NamingScheme.SelectedItem if self.Cmb_NamingScheme.SelectedItem else self.Cmb_NamingScheme.Text,
+            "disciplines": [n.Name.split(' - ')[0] for n in self.DisciplineNodes if n.IsChecked],
+            "series": [n.Name.split(' - ')[0] for n in self.SeriesNodes if n.IsChecked],
+            "selected_modifiers": cfg.selected_modifiers,
+            "custom_modifiers": cfg.custom_modifiers,
+            "shuffle_on_exclude": bool(self.Chk_ShuffleOnExclude.IsChecked),
+            "excluded_target_sheets": list(self.excluded_target_sheets)
+        }
+        uidoc = HOST_APP.uiapp.ActiveUIDocument
+        doc = uidoc.Document if uidoc else None
+        if doc:
+            project_settings.save_project_setup(doc, setup_dict)
+            forms.alert("Project settings successfully saved to Revit Extensible Storage.", title="Settings Saved")
+            
+    def clear_project_settings(self, sender, e):
+        import System.Windows.MessageBox as MessageBox
+        import System.Windows.MessageBoxButton as MessageBoxButton
+        import System.Windows.MessageBoxImage as MessageBoxImage
+        
+        result = MessageBox.Show("Are you sure you want to delete the saved schema from the Revit project?", "Clear Schema", MessageBoxButton.YesNo, MessageBoxImage.Warning)
+        if result == System.Windows.MessageBoxResult.Yes:
+            uidoc = HOST_APP.uiapp.ActiveUIDocument
+            doc = uidoc.Document if uidoc else None
+            if doc:
+                if project_settings.clear_project_setup(doc):
+                    forms.alert("Schema deleted successfully. You may want to 'Reset All' to clear the current UI state.")
+                else:
+                    forms.alert("No schema data found in the project to delete.")
+            
+    def on_close_click(self, sender, e):
+        res = MessageBox.Show("Do you want to save the current Project Setup to the Revit model before closing?", "Save Settings", MessageBoxButton.YesNoCancel, MessageBoxImage.Question)
+        if res == MessageBoxResult.Yes:
+            self.save_to_project(None, None)
+            self.Close()
+        elif res == MessageBoxResult.No:
+            self.Close()
+        # if Cancel, do nothing
+
+    def on_add_modifier(self, sender, e):
+        pass # Function removed from UI
         
     def trigger_generation(self, sender, e):
         self.generate_target_schema()
@@ -924,11 +1157,13 @@ class ManageSheetsPanel(forms.WPFPanel):
         active_levels = [lvl.Name for lvl in self.LevelNodes if lvl.IsChecked]
         
         active_modifiers = []
-        for cg_node in self.ModifierRoot:
-            for m_node in cg_node.Children:
-                if m_node.IsChecked:
-                    active_modifiers.append(m_node.Name)
-                    
+        def get_checked(nodes):
+            for n in nodes:
+                if n.IsChecked and n.NodeType == "Modifier":
+                    active_modifiers.append(n.Name)
+                if hasattr(n, "Children"):
+                    get_checked(n.Children)
+        get_checked(self.ModifierRoot)
         global_cover = bool(self.Chk_GlobalCover.IsChecked)
         
         # Read SelectedItem first, fallback to Text, then default.
@@ -941,9 +1176,10 @@ class ManageSheetsPanel(forms.WPFPanel):
         if not naming_scheme:
             naming_scheme = "Segment-Based"
                     
+        shuffle = bool(self.Chk_ShuffleOnExclude.IsChecked)
         self.generated_targets = []
         for d in selected_discs:
-            self.generated_targets.extend(generate_discipline_sheets(d, active_levels, active_series, active_modifiers, global_cover, r, c, naming_scheme, self._loaded_naming_schemes))
+            self.generated_targets.extend(generate_discipline_sheets(d, active_levels, active_series, active_modifiers, global_cover, r, c, naming_scheme, self._loaded_naming_schemes, self.excluded_target_sheets, shuffle))
             
         self.TargetSchemaRoot.Clear()
         t_root = NavTreeNode("AIA Schema", "Root")
@@ -960,6 +1196,7 @@ class ManageSheetsPanel(forms.WPFPanel):
             
             if disc_name not in d_map:
                 dn = NavTreeNode(disc_name, "Discipline", tag=disc_name)
+                dn.target_callback = self.on_target_node_toggled
                 d_map[disc_name] = dn
                 t_root.Children.Add(dn)
                 
@@ -968,24 +1205,181 @@ class ManageSheetsPanel(forms.WPFPanel):
             
             if cg_key not in cg_map:
                 cn = NavTreeNode(cg_name, "ContentGroup", tag=disc_name)
+                cn.target_callback = self.on_target_node_toggled
                 cg_map[cg_key] = cn
                 d_map[disc_name].Children.Add(cn)
                 
-            sn = NavTreeNode("{} - {}".format(t["num"], t["name"]), "Sheet", tag=t["num"])
+            sn = NavTreeNode("{} - {}".format(t["num"], t["name"]), "Sheet", tag=t["baseline_num"])
+            if t["baseline_num"] in self.excluded_target_sheets:
+                sn.IsTargetIncluded = False
+                if not self.Tgl_ShowExcluded.IsChecked:
+                    sn.IsVisible = False
+            sn.target_callback = self.on_target_node_toggled
             cg_map[cg_key].Children.Add(sn)
             
             t_root.Count += 1
             d_map[disc_name].Count += 1
             cg_map[cg_key].Count += 1
-            
         if not self.generated_targets:
             self.Btn_RunMatch.IsEnabled = False
         else:
             self.Btn_RunMatch.IsEnabled = True
-            
         # Auto-expand the target schema tree so user sees the new combinations immediately
         if hasattr(self, 'toggle_tree'):
             self.toggle_tree(self.TargetSchemaRoot, True)
+
+    def on_target_node_toggled(self, node):
+        import System
+        from System.Windows.Input import Keyboard, ModifierKeys
+        
+        # Shift-Select Logic
+        if Keyboard.Modifiers == ModifierKeys.Shift:
+            if hasattr(self, '_last_toggled_schema_node') and self._last_toggled_schema_node:
+                last_node = self._last_toggled_schema_node
+                flat_list = []
+                def _flatten(n):
+                    if n.IsVisible:
+                        flat_list.append(n)
+                        if n.IsExpanded:
+                            for c in n.Children:
+                                _flatten(c)
+                for root in self.TargetSchemaRoot:
+                    _flatten(root)
+                    
+                if last_node in flat_list and node in flat_list:
+                    idx1 = flat_list.index(last_node)
+                    idx2 = flat_list.index(node)
+                    start, end = min(idx1, idx2), max(idx1, idx2)
+                    for i in range(start, end + 1):
+                        n = flat_list[i]
+                        if n != node and n != last_node:
+                            old_cb = n.target_callback
+                            n.target_callback = None
+                            n.IsTargetIncluded = node.IsTargetIncluded
+                            n.target_callback = old_cb
+                            
+                            if n.NodeType == "Sheet":
+                                if not n.IsTargetIncluded:
+                                    self.excluded_target_sheets.add(n.Tag)
+                                    if not self.Tgl_ShowExcluded.IsChecked:
+                                        n.IsVisible = False
+                                else:
+                                    if n.Tag in self.excluded_target_sheets:
+                                        self.excluded_target_sheets.remove(n.Tag)
+                                    n.IsVisible = True
+        
+        self._last_toggled_schema_node = node
+
+        if node.NodeType == "Sheet":
+            if not node.IsTargetIncluded:
+                self.excluded_target_sheets.add(node.Tag)
+                if not self.Tgl_ShowExcluded.IsChecked:
+                    node.IsVisible = False
+            else:
+                if node.Tag in self.excluded_target_sheets:
+                    self.excluded_target_sheets.remove(node.Tag)
+                node.IsVisible = True
+        else:
+            # If a parent is toggled, recursively toggle all its children
+            # Temporarily unhook the callback to prevent recursive flood
+            for child in node.Children:
+                old_cb = child.target_callback
+                child.target_callback = None
+                child.IsTargetIncluded = node.IsTargetIncluded
+                child.target_callback = old_cb
+                self.on_target_node_toggled(child)
+                
+    def on_toggle_show_excluded(self, sender, e):
+        show_excluded = bool(self.Tgl_ShowExcluded.IsChecked)
+        def _update_visibility(node):
+            if not node.IsTargetIncluded:
+                node.IsVisible = show_excluded
+            else:
+                node.IsVisible = True
+            for child in node.Children:
+                _update_visibility(child)
+        for root in self.TargetSchemaRoot:
+            _update_visibility(root)
+            
+    def on_search_schema_text_changed(self, sender, e):
+        search_term = self.Txt_SearchSchema.Text.strip().lower()
+        
+        def filter_node(node):
+            if not search_term:
+                if not node.IsTargetIncluded and not self.Tgl_ShowExcluded.IsChecked:
+                    node.IsVisible = False
+                else:
+                    node.IsVisible = True
+                for child in node.Children:
+                    filter_node(child)
+                return True
+                
+            if not node.Children:
+                match = search_term in node.Name.lower()
+                if match:
+                    if not node.IsTargetIncluded and not self.Tgl_ShowExcluded.IsChecked:
+                        node.IsVisible = False
+                    else:
+                        node.IsVisible = True
+                else:
+                    node.IsVisible = False
+                return match
+                
+            any_child_visible = False
+            for child in node.Children:
+                if filter_node(child):
+                    any_child_visible = True
+                    
+            if search_term in node.Name.lower():
+                any_child_visible = True
+                
+            node.IsVisible = any_child_visible
+            if any_child_visible:
+                node.IsExpanded = True
+            return any_child_visible
+
+        for root_node in self.TargetSchemaRoot:
+            filter_node(root_node)
+
+    def on_expand_schema(self, sender, e):
+        self.toggle_tree(self.TargetSchemaRoot, True)
+        self.Btn_ExpandSchema.IsEnabled = False
+        self.Btn_CollapseSchema.IsEnabled = True
+
+    def on_collapse_schema(self, sender, e):
+        self.toggle_tree(self.TargetSchemaRoot, False)
+        self.Btn_ExpandSchema.IsEnabled = True
+        self.Btn_CollapseSchema.IsEnabled = False
+
+    def on_expand_modifiers(self, sender, e):
+        self.toggle_tree(self.ModifierRoot, True)
+        self.Btn_ExpandModifiers.IsEnabled = False
+        self.Btn_CollapseModifiers.IsEnabled = True
+
+    def on_collapse_modifiers(self, sender, e):
+        self.toggle_tree(self.ModifierRoot, False)
+        self.Btn_ExpandModifiers.IsEnabled = True
+        self.Btn_CollapseModifiers.IsEnabled = False
+        
+    def on_expand_nav(self, sender, e):
+        self.toggle_tree(self.NavRoot, True)
+        self.Btn_ExpandNav.IsEnabled = False
+        self.Btn_CollapseNav.IsEnabled = True
+        
+    def on_collapse_nav(self, sender, e):
+        self.toggle_tree(self.NavRoot, False)
+        self.Btn_ExpandNav.IsEnabled = True
+        self.Btn_CollapseNav.IsEnabled = False
+        
+    def on_expand_editor(self, sender, e):
+        self.toggle_editor(True)
+        self.Btn_ExpandEditor.IsEnabled = False
+        self.Btn_CollapseEditor.IsEnabled = True
+        
+    def on_collapse_editor(self, sender, e):
+        self.toggle_editor(False)
+        self.Btn_ExpandEditor.IsEnabled = True
+        self.Btn_CollapseEditor.IsEnabled = False
 
     def load_revit_data(self):
         uidoc = HOST_APP.uiapp.ActiveUIDocument
@@ -1010,10 +1404,41 @@ class ManageSheetsPanel(forms.WPFPanel):
         self.all_grid_nodes = []
         self.NavRoot.Clear()
         self.EditorItems.Clear()
+        self.UnplacedViews.Clear()
+        
+        # Add default option for new view
+        from data_model import UnplacedViewNode
+        self.UnplacedViews.Add(UnplacedViewNode(ElementId.InvalidElementId, "--- Create New View ---"))
+        
+        # Collect all unplaced views
+        from Autodesk.Revit.DB import View, Viewport
+        all_views = FilteredElementCollector(doc).OfClass(View).ToElements()
+        placed_view_ids = set([v.ViewId.ToString() for v in FilteredElementCollector(doc).OfClass(Viewport).ToElements()])
+        for v in all_views:
+            if not v.IsTemplate and v.CanBePrinted and v.Id.ToString() not in placed_view_ids:
+                self.UnplacedViews.Add(UnplacedViewNode(v.Id, v.Name))
         
         levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
-        for lvl in sorted(levels, key=lambda l: l.Elevation):
-            self.LevelNodes.Add(SelectableNode(lvl.Name, True, self.generate_target_schema))
+        
+        def get_elev(l):
+            try: return l.ProjectElevation
+            except AttributeError: return l.Elevation
+            
+        for idx, lvl in enumerate(sorted(levels, key=get_elev)):
+            elev_val = get_elev(lvl)
+
+            try:
+                from Autodesk.Revit.DB import UnitFormatUtils, SpecTypeId
+                elev_str = UnitFormatUtils.Format(doc.GetUnits(), SpecTypeId.Length, elev_val, False)
+            except ImportError:
+                try:
+                    from Autodesk.Revit.DB import UnitFormatUtils, UnitType
+                    elev_str = UnitFormatUtils.Format(doc.GetUnits(), UnitType.UT_Length, elev_val, False, False)
+                except Exception:
+                    elev_str = str(elev_val)
+
+            display_name = "{:02d} - {} ({})".format(idx + 1, lvl.Name, elev_str)
+            self.LevelNodes.Add(SelectableNode(lvl.Name, True, self.generate_target_schema, display_name=display_name))
 
         selected_ids = uidoc.Selection.GetElementIds()
         scope_ids = [i for i in selected_ids if isinstance(doc.GetElement(i), ViewSheet)]
@@ -1050,7 +1475,7 @@ class ManageSheetsPanel(forms.WPFPanel):
             else:
                 cg_node = cg_map[cg_key]
                 
-            sh_row = SheetViewModel(s.Id, s.SheetNumber, s.Name, c_name, validation_callback=self.run_validation)
+            sh_row = SheetViewModel(s.Id, s.SheetNumber, s.Name, c_name, discipline_name=disc_name, content_group_name=cg_name, validation_callback=self.run_validation)
             self.all_grid_nodes.append(sh_row)
             
             root_node.Count += 1
@@ -1074,14 +1499,14 @@ class ManageSheetsPanel(forms.WPFPanel):
         if node.NodeType == "Root":
             self.Txt_GridTitle.Text = "All Sheets & Views"
             valid_sheets = self.all_grid_nodes
-                
-        elif node.NodeType == "Collection":
-            self.Txt_GridTitle.Text = "Collection: " + node.Name
-            valid_sheets = [s for s in self.all_grid_nodes if s.CollectionName == node.Name]
                     
         elif node.NodeType == "Discipline":
             self.Txt_GridTitle.Text = "Discipline: " + node.Name
-            valid_sheets = [s for s in self.all_grid_nodes if s.DisciplineName == node.Name and s.CollectionName == node.Tag]
+            valid_sheets = [s for s in self.all_grid_nodes if s.DisciplineName == node.Name]
+            
+        elif node.NodeType == "ContentGroup":
+            self.Txt_GridTitle.Text = "Group: " + node.Name
+            valid_sheets = [s for s in self.all_grid_nodes if s.ContentGroupName == node.Name and s.DisciplineName == node.Tag]
             
         self.EditorItems.Clear()
         for s in valid_sheets:
@@ -1103,12 +1528,21 @@ class ManageSheetsPanel(forms.WPFPanel):
             
             # 2. Filter Targets based on Discipline Prefix
             valid_targets = []
-            if live_disc:
-                valid_targets = [t for t in self.generated_targets if t["num"].startswith(live_disc)]
             
-            # Fallback: if no valid targets found with that discipline, scan all (user might have messed up numbers)
+            # Use only non-excluded targets for matching
+            active_targets = [t for t in self.generated_targets if t["baseline_num"] not in self.excluded_target_sheets]
+            
+            if live_disc:
+                valid_targets = []
+                for t in active_targets:
+                    t_match = re.match(r"^([A-Z]+)[- ]?(\d+)", t["num"].upper())
+                    t_disc = t_match.group(1) if t_match else None
+                    if t_disc == live_disc:
+                        valid_targets.append(t)
+            
+            # Fallback: if no valid targets found with that discipline, scan all active
             if not valid_targets:
-                valid_targets = self.generated_targets
+                valid_targets = active_targets
 
             best_match = None
             best_score = 0.0
@@ -1131,9 +1565,10 @@ class ManageSheetsPanel(forms.WPFPanel):
     def add_missing(self, sender, e):
         if not self.generated_targets: return
         existing_numbers = set([r.SheetNumber for r in self.all_grid_nodes])
+        active_targets = [t for t in self.generated_targets if t["baseline_num"] not in self.excluded_target_sheets]
                 
         added = 0
-        for t in self.generated_targets:
+        for t in active_targets:
             if t["num"] not in existing_numbers:
                 new_sh = SheetViewModel(ElementId.InvalidElementId, t["num"], t["name"], t["collection"], is_template=True, validation_callback=self.run_validation)
                 new_sh.IsChecked = True
@@ -1166,6 +1601,21 @@ class ManageSheetsPanel(forms.WPFPanel):
                 for i in items: i.IsNameUnique = False
             else:
                 for i in items: i.IsNameUnique = True
+                
+        # Validate view names against sheet schema
+        for r in self.all_grid_nodes:
+            if r.Action == "PURGE" or not r.SheetName: continue
+            
+            base_name = r.SheetName
+            if base_name.endswith("s") and not base_name.endswith("ss"):
+                base_name = base_name[:-1]
+            
+            for v in r.Views:
+                if not v.IsNewView and v.Name:
+                    if base_name.lower() not in v.Name.lower():
+                        v.ValidationWarning = "View name does not match schema '{}'".format(base_name)
+                    else:
+                        v.ValidationWarning = ""
                 
         self.Btn_Push.IsEnabled = not has_error
 
@@ -1219,10 +1669,60 @@ class ManageSheetsPanel(forms.WPFPanel):
                                             renames += 1
                                         except: pass
                                 elif v._is_new:
-                                    # TODO: Phase 2: Create new view using v.ViewType and v.Scale
-                                    # TODO: Phase 3: Place viewport on sheet
-                                    pass
-                                
+                                    target_sheet_id = s_elem.Id if r.Action != "CREATE" else new_sheet.Id
+                                    view_to_place = None
+                                    
+                                    if v.SourceViewId != ElementId.InvalidElementId:
+                                        # Use existing view
+                                        view_to_place = doc.GetElement(v.SourceViewId)
+                                    else:
+                                        # Create new view
+                                        from Autodesk.Revit.DB import ViewFamily
+                                        vft_map = {
+                                            "FloorPlan": ViewFamily.FloorPlan,
+                                            "CeilingPlan": ViewFamily.CeilingPlan,
+                                            "DraftingView": ViewFamily.Drafting
+                                        }
+                                        
+                                        if v.ViewType in vft_map:
+                                            target_family = vft_map[v.ViewType]
+                                            vfts = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()
+                                            vft_id = None
+                                            for vft in vfts:
+                                                if vft.ViewFamily == target_family:
+                                                    vft_id = vft.Id
+                                                    break
+                                            
+                                            if vft_id:
+                                                if v.ViewType in ["FloorPlan", "CeilingPlan"]:
+                                                    levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
+                                                    if levels:
+                                                        view_to_place = ViewPlan.Create(doc, vft_id, levels[0].Id)
+                                                elif v.ViewType == "DraftingView":
+                                                    view_to_place = ViewDrafting.Create(doc, vft_id)
+                                                    
+                                                if view_to_place:
+                                                    # Map scale strings to integers
+                                                    scale_map = {
+                                                        "1/16\" = 1'-0\"": 192,
+                                                        "1/8\" = 1'-0\"": 96,
+                                                        "1/4\" = 1'-0\"": 48,
+                                                        "1/2\" = 1'-0\"": 24,
+                                                        "1\" = 1'-0\"": 12
+                                                    }
+                                                    if v.Scale in scale_map:
+                                                        view_to_place.Scale = scale_map[v.Scale]
+                                    
+                                    if view_to_place:
+                                        try:
+                                            view_to_place.Name = v.Name
+                                            renames += 1
+                                        except: pass
+                                        
+                                        # Place viewport on sheet
+                                        if Viewport.CanAddViewToSheet(doc, target_sheet_id, view_to_place.Id):
+                                            Viewport.Create(doc, target_sheet_id, view_to_place.Id, XYZ(1.5, 1.0, 0))
+                                        creates += 1
                     t.Commit()
                     MessageBox.Show("Sync Complete!\nRenamed: {}\nCreated: {}\nPurged: {}".format(renames, creates, purges), "Success")
                     self.all_grid_nodes = []

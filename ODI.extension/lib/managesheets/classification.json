@@ -12,6 +12,68 @@
         "9": "3D Views"
     },
     "CLASSIFICATION_DICT": {
+        "Cover Sheet": {
+            "General": [
+                [
+                    "Cover Sheet",
+                    "0"
+                ],
+                [
+                    "Drawing Index",
+                    "0"
+                ],
+                [
+                    "Project Information",
+                    "0"
+                ],
+                [
+                    "Location Map",
+                    "0"
+                ]
+            ]
+        },
+        "General": {
+            "General": [
+                [
+                    "Cover Sheet",
+                    "0"
+                ],
+                [
+                    "Drawing Index",
+                    "0"
+                ],
+                [
+                    "Project Information",
+                    "0"
+                ],
+                [
+                    "General Notes",
+                    "0"
+                ],
+                [
+                    "Code Analysis",
+                    "0"
+                ],
+                [
+                    "Abbreviations",
+                    "0"
+                ],
+                [
+                    "Symbols",
+                    "0"
+                ]
+            ],
+            "Life Safety": [
+                [
+                    "Life Safety Plan",
+                    "1"
+                ],
+                [
+                    "Egress Plan",
+                    "1"
+                ]
+            ]
+        },
         "Architectural": {
             "General": [
                 [
