@@ -66,6 +66,17 @@ def normalize_sheet_name(name):
     name = re.sub(r'\s+', ' ', name).strip().lower()
     return name
 
+def save_config_to_disk(class_dict=None, naming_schemes=None):
+    if class_dict is not None:
+        config["CLASSIFICATION_DICT"] = class_dict
+    if naming_schemes is not None:
+        config["NAMING_SCHEMES"] = naming_schemes
+    try:
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(config, f, indent=4)
+    except Exception:
+        pass
+
 reload_classification()
 
 def classify_sheet(sheet_number, sheet_name=None):

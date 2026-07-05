@@ -116,23 +116,55 @@ class CollectionGroupNode(ViewModelBase):
         self.Name = name
         self.Children = []  # Holds DisciplineGroupNode instances
 
-class UnplacedViewNode(ViewModelBase):
-    def __init__(self, view_id, name):
+class AssignableViewNode(ViewModelBase):
+    def __init__(self, view_id, name, is_placed=False, sheet_number=""):
         ViewModelBase.__init__(self)
         self.Id = view_id
         self.Name = name
+        self.IsPlaced = is_placed
+        self.SheetNumber = sheet_number
+        self.StatusColor = "#9CA3AF" if is_placed else "#3B82F6"
+        self.DisplayName = "{} (on Sheet {})".format(name, sheet_number) if is_placed and sheet_number else name
 
 class ViewViewModel(ViewModelBase):
-    def __init__(self, view_id, name, view_type="FloorPlan", scale="1/8\" = 1'-0\"", is_new=False):
+    def __init__(self, view_id, name, view_type="FloorPlan", scale="1/8\" = 1'-0\"", is_new=False, level_name="", parent_sheet=None):
         ViewModelBase.__init__(self)
         self.ViewId = view_id
         self._name = name
         self._view_type = view_type
         self._scale = scale
         self._is_new = is_new
+        self._assignment_mode = "Existing" if not is_new else "New"
         self._source_view_id = ElementId.InvalidElementId
         self._validation_warning = ""
+        self._level_name = level_name
+        self.ParentSheet = parent_sheet
         
+        from pyrevit.forms import Reactive
+        self.DeleteCommand = RelayCommand(self.delete_view)
+        
+    def delete_view(self, param=None):
+        if self.ParentSheet:
+            self.ParentSheet.Views.Remove(self)
+        
+    @property
+    def AssignmentMode(self): return self._assignment_mode
+    @AssignmentMode.setter
+    def AssignmentMode(self, val):
+        self._assignment_mode = val
+        self._is_new = (val == "New")
+        self.OnPropertyChanged("AssignmentMode")
+        self.OnPropertyChanged("IsNew")
+        self.OnPropertyChanged("IsExisting")
+        
+    @property
+    def IsNew(self): return self._is_new
+    
+    @property
+    def IsExisting(self): return not self._is_new
+
+    @property
+    def LevelName(self): return self._level_name
     @property
     def ValidationWarning(self): return self._validation_warning
     @ValidationWarning.setter
@@ -176,9 +208,12 @@ class ViewViewModel(ViewModelBase):
     def IsCreateNewMode(self): 
         return self._is_new and self._source_view_id == ElementId.InvalidElementId
 class SheetViewModel(ViewModelBase):
-    def __init__(self, element_id, number, name, collection_name, discipline_name="Unknown", content_group_name="Uncategorized", is_template=False, validation_callback=None):
+    def __init__(self, element_id, number, name, collection_name, discipline_name="Unknown", content_group_name="Uncategorized", series_name="Unknown", is_template=False, validation_callback=None, number_changed_callback=None, move_up_callback=None, move_down_callback=None):
         ViewModelBase.__init__(self)
         self.validation_callback = validation_callback
+        self.number_changed_callback = number_changed_callback
+        self.move_up_callback = move_up_callback
+        self.move_down_callback = move_down_callback
         self.ElementId = element_id
         self.IsTemplate = is_template
         self._sheet_number = number
@@ -186,21 +221,36 @@ class SheetViewModel(ViewModelBase):
         self._collection_name = collection_name
         self._discipline_name = discipline_name
         self._content_group_name = content_group_name
+        self.SheetSeries = series_name
         self.OriginalNumber = number
         self.OriginalName = name
+        self.OriginalCollectionName = collection_name
         
         self.Views = ObservableCollection[ViewViewModel]()
         self.AvailableNames = ObservableCollection[str]()
         
         self._is_checked = False
         self._is_name_unique = True
+        self._validation_warning = ""
+        self._validation_brush = "Transparent"
         self._action = "MATCHED" if not is_template else "CREATE"
+        self._is_expanded = False
         
         self.PurgeCommand = RelayCommand(self.mark_purge)
         self.AddViewCommand = RelayCommand(self.add_view)
         self.UndoCommand = RelayCommand(self.undo_changes)
+        self.MoveUpCommand = RelayCommand(self.on_move_up)
+        self.MoveDownCommand = RelayCommand(self.on_move_down)
         
         self.populate_available_names()
+        
+    def on_move_up(self, parameter=None):
+        if self.move_up_callback:
+            self.move_up_callback(self)
+            
+    def on_move_down(self, parameter=None):
+        if self.move_down_callback:
+            self.move_down_callback(self)
         
     def populate_available_names(self):
         import classification
@@ -222,9 +272,14 @@ class SheetViewModel(ViewModelBase):
     @SheetNumber.setter
     def SheetNumber(self, val):
         if val is None: val = ""
+        if self._sheet_number == str(val): return
+        
+        old_val = self._sheet_number
         self._sheet_number = str(val)
         self.OnPropertyChanged("SheetNumber")
         self.update_action()
+        if hasattr(self, 'number_changed_callback') and self.number_changed_callback:
+            self.number_changed_callback(self, old_val, self._sheet_number)
 
     @property
     def SheetName(self): return self._sheet_name
@@ -257,6 +312,27 @@ class SheetViewModel(ViewModelBase):
         self.OnPropertyChanged("IsNameUnique")
 
     @property
+    def ValidationWarning(self): return self._validation_warning
+    @ValidationWarning.setter
+    def ValidationWarning(self, val):
+        self._validation_warning = val
+        self.OnPropertyChanged("ValidationWarning")
+
+    @property
+    def ValidationBrush(self): return self._validation_brush
+    @ValidationBrush.setter
+    def ValidationBrush(self, val):
+        self._validation_brush = val
+        self.OnPropertyChanged("ValidationBrush")
+
+    @property
+    def IsExpanded(self): return self._is_expanded
+    @IsExpanded.setter
+    def IsExpanded(self, val):
+        self._is_expanded = val
+        self.OnPropertyChanged("IsExpanded")
+
+    @property
     def Action(self): return self._action
     @Action.setter
     def Action(self, val):
@@ -281,30 +357,33 @@ class SheetViewModel(ViewModelBase):
         self.Action = "PURGE"
         self.IsChecked = True
         
-    def undo_changes(self, parameter=None):
-        self.SheetNumber = self.OriginalNumber
-        self.SheetName = self.OriginalName
+    @property
+    def ToggleText(self):
+        return "Redo" if getattr(self, '_is_reverted_to_original', False) else "Undo"
         
-        # Remove newly added views
-        new_views = [v for v in self.Views if getattr(v, '_is_new', False)]
-        for nv in new_views:
-            self.Views.Remove(nv)
+    def undo_changes(self, parameter=None): # Keeping name as undo_changes for existing bindings if any, but acting as toggle
+        if not hasattr(self, '_is_reverted_to_original'):
+            self._is_reverted_to_original = False
+            self.ProposedNumber = self.SheetNumber
+            self.ProposedName = self.SheetName
             
-        if self.IsTemplate:
-            self.Action = "CREATE"
-            self.IsChecked = True
+        if self._is_reverted_to_original:
+            self.SheetNumber = getattr(self, 'ProposedNumber', self.SheetNumber)
+            self.SheetName = getattr(self, 'ProposedName', self.SheetName)
+            self._is_reverted_to_original = False
         else:
-            self.Action = "MATCHED"
-            self.IsChecked = False
+            self.ProposedNumber = self.SheetNumber
+            self.ProposedName = self.SheetName
+            self.SheetNumber = self.OriginalNumber
+            self.SheetName = self.OriginalName
+            self._is_reverted_to_original = True
             
+        self.OnPropertyChanged("ToggleText")
         if self.validation_callback: self.validation_callback()
         
     def add_view(self, parameter=None):
-        base_name = self.SheetName
-        if base_name.endswith("s") and not base_name.endswith("ss"):
-            base_name = base_name[:-1]
-        new_name = "{} - View {}".format(base_name, len(self.Views) + 1)
-        self.Views.Add(ViewViewModel(ElementId.InvalidElementId, new_name, is_new=True))
+        new_v = ViewViewModel(ElementId.InvalidElementId, "New View", is_new=True, parent_sheet=self)
+        self.Views.Add(new_v)
 
     def update_action(self):
         if self.IsTemplate: 
@@ -336,6 +415,33 @@ class NavTreeNode(ViewModelBase):
         self._count = 0
         self.target_callback = None
         self._is_updating = False
+        self._grid_overrides = None
+        self._is_segmentable = False
+        self._is_active_context = False
+        
+        # Grid Configuration command
+        self.ConfigureGridsCommand = RelayCommand(self.on_configure_grids)
+        
+    @property
+    def GridOverrides(self):
+        return self._grid_overrides
+    @GridOverrides.setter
+    def GridOverrides(self, val):
+        self._grid_overrides = val
+        self.OnPropertyChanged("GridOverrides")
+        self.OnPropertyChanged("HasGridOverrides")
+        
+    @property
+    def HasGridOverrides(self):
+        return self._grid_overrides is not None
+        
+    def on_configure_grids(self):
+        if hasattr(self, "grid_config_callback") and self.grid_config_callback:
+            self.grid_config_callback(self)
+            
+    @property
+    def HasGridConfig(self):
+        return self.NodeType == "Modifier"
         
     @property
     def IsExpanded(self): return self._is_expanded
@@ -455,7 +561,10 @@ class NavTreeNode(ViewModelBase):
         return " ({})".format(self.Count)
         
     @property
-    def FontWeight(self): return "Bold" if self.NodeType in ["Root", "Collection"] else "Normal"
+    def FontWeight(self):
+        if self.NodeType == "Root": return "Bold"
+        if self.NodeType == "Collection": return "Bold" if self.IsActiveContext else "Normal"
+        return "Normal"
     
     @property
     def IsTargetIncluded(self): return self._is_target_included

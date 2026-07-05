@@ -9,6 +9,7 @@
   - *The Controller/Model:* Use `script.py` to handle Revit API interactions, UI event wiring, and data processing.
 - **Reactive State Flow:** Implement the `INotifyPropertyChanged` interface in ViewModel classes. Ensure `OnPropertyChanged` events fire when data changes to automatically update bound XAML elements without direct UI manipulation.
 - **Hierarchical Modeling:** Structure data hierarchically (e.g., `MeasurementNode` -> `CategoryNode` -> `FamilyTypeNode` -> `InstanceItem`) to map perfectly to TreeView controls.
+- **Sheet Collection Grouping (Permanent Rule):** Antigravity Agent MUST ALWAYS group or organize Revit Sheets by their 'Sheet Collection' property as the primary top-level hierarchy in UI structures, TreeViews, and validation logic. Revit enforces unique Sheet Numbers per Sheet Collection rather than globally, so the UI must respect this hierarchy natively.
 
 ## 2. UI/UX Design System & Layout
 - **Custom Native Feel:** Build borderless windows (`WindowStyle="None"`) with custom, draggable title bars to create a tailored aesthetic.

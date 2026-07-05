@@ -135,6 +135,33 @@ def save_classification_dict(doc, class_dict):
     from pyrevit.revit.events import execute_in_revit_context
     execute_in_revit_context(_save)
 
+def save_classification_dict_sync(doc, class_dict):
+    """Saves custom classification dict to Extensible Storage synchronously in the current thread."""
+    schema = get_or_create_classification_schema()
+    
+    collector = FilteredElementCollector(doc).OfClass(DataStorage)
+    target_ds = None
+    for ds in collector:
+        entity = ds.GetEntity(schema)
+        if entity.IsValid():
+            target_ds = ds
+            break
+            
+    json_str = json.dumps(class_dict)
+    
+    with Transaction(doc, "Save Manage Sheets Classification") as t:
+        t.Start()
+        if not target_ds:
+            new_ds = DataStorage.Create(doc)
+            entity = Entity(schema)
+            entity.Set[System.String]("ClassificationJson", json_str)
+            new_ds.SetEntity(entity)
+        else:
+            entity = Entity(schema)
+            entity.Set[System.String]("ClassificationJson", json_str)
+            target_ds.SetEntity(entity)
+        t.Commit()
+
 def get_or_create_project_setup_schema():
     schema = Schema.Lookup(PROJECT_SETUP_SCHEMA_GUID)
     if not schema:
@@ -195,6 +222,33 @@ def save_project_setup(doc, setup_dict):
             
     from pyrevit.revit.events import execute_in_revit_context
     execute_in_revit_context(_save)
+
+def save_project_setup_sync(doc, setup_dict):
+    """Saves project setup dict to Extensible Storage synchronously in the current thread."""
+    schema = get_or_create_project_setup_schema()
+    
+    collector = FilteredElementCollector(doc).OfClass(DataStorage)
+    target_ds = None
+    for ds in collector:
+        entity = ds.GetEntity(schema)
+        if entity.IsValid():
+            target_ds = ds
+            break
+            
+    json_str = json.dumps(setup_dict)
+    
+    with Transaction(doc, "Save Manage Sheets Project Setup") as t:
+        t.Start()
+        if not target_ds:
+            new_ds = DataStorage.Create(doc)
+            entity = Entity(schema)
+            entity.Set[System.String]("SetupJson", json_str)
+            new_ds.SetEntity(entity)
+        else:
+            entity = Entity(schema)
+            entity.Set[System.String]("SetupJson", json_str)
+            target_ds.SetEntity(entity)
+        t.Commit()
 
 def clear_project_setup(doc):
     """Deletes project setup dict from Extensible Storage."""
