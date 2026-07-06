@@ -2665,36 +2665,36 @@ class ManageSheetsPanel(forms.WPFWindow):
                         for r in valid_nodes:
                             if not r.IsChecked: continue
                             if r.Action == "UPDATE" or r.Action == "MATCHED":
-                                    s_elem = doc.GetElement(r.ElementId)
-                                    if s_elem:
-                                        if r.SheetNumber != r.OriginalNumber or (hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]): 
-                                            s_elem.SheetNumber = r.SheetNumber
-                                        if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
-                                        assign_sheet_to_collection(doc, s_elem, r.CollectionName)
-                                        c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
-                                        disc_name = c_res.get("discipline", "Unknown")
-                                        cg_name = c_res.get("contentGroup", "Uncategorized")
-                                        set_sheet_parameter(s_elem, "Discipline", disc_name)
-                                        set_sheet_parameter(s_elem, "Content Group", cg_name)
-                                        set_sheet_parameter(s_elem, "Sheet Series", r.SheetSeries)
-                                        renames += 1
-                                elif r.Action == "CREATE":
-                                    tb_id = ElementId(tb_id_val)
-                                    
-                                    new_sheet = ViewSheet.Create(doc, tb_id)
-                                    new_sheet.SheetNumber = r.SheetNumber
-                                    new_sheet.Name = r.SheetName
-                                    assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
+                                s_elem = doc.GetElement(r.ElementId)
+                                if s_elem:
+                                    if r.SheetNumber != r.OriginalNumber or (hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]): 
+                                        s_elem.SheetNumber = r.SheetNumber
+                                    if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
+                                    assign_sheet_to_collection(doc, s_elem, r.CollectionName)
                                     c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
                                     disc_name = c_res.get("discipline", "Unknown")
                                     cg_name = c_res.get("contentGroup", "Uncategorized")
-                                    set_sheet_parameter(new_sheet, "Discipline", disc_name)
-                                    set_sheet_parameter(new_sheet, "Content Group", cg_name)
-                                    set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
-                                    creates += 1
-                                elif r.Action == "PURGE":
-                                    doc.Delete(r.ElementId)
-                                    purges += 1
+                                    set_sheet_parameter(s_elem, "Discipline", disc_name)
+                                    set_sheet_parameter(s_elem, "Content Group", cg_name)
+                                    set_sheet_parameter(s_elem, "Sheet Series", r.SheetSeries)
+                                    renames += 1
+                            elif r.Action == "CREATE":
+                                tb_id = ElementId(tb_id_val)
+                                
+                                new_sheet = ViewSheet.Create(doc, tb_id)
+                                new_sheet.SheetNumber = r.SheetNumber
+                                new_sheet.Name = r.SheetName
+                                assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
+                                c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                disc_name = c_res.get("discipline", "Unknown")
+                                cg_name = c_res.get("contentGroup", "Uncategorized")
+                                set_sheet_parameter(new_sheet, "Discipline", disc_name)
+                                set_sheet_parameter(new_sheet, "Content Group", cg_name)
+                                set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
+                                creates += 1
+                            elif r.Action == "PURGE":
+                                doc.Delete(r.ElementId)
+                                purges += 1
                                     
                             if r.Action != "PURGE" and r.IsChecked:
                                 target_sheet_id = r.ElementId if r.Action != "CREATE" else new_sheet.Id
