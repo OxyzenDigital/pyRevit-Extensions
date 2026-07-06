@@ -2682,14 +2682,18 @@ class ManageSheetsPanel(forms.WPFWindow):
                     # Phase 1: Park numbers (Rename Number collision avoidance)
                     with Transaction(doc, "Phase 1 - Park") as t1:
                         t1.Start()
-                        for r in valid_nodes:
-                            if not r.IsChecked: continue
-                            if hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]:
-                                s_elem = doc.GetElement(r.ElementId)
-                                if s_elem:
-                                    val = s_elem.Id.IntegerValue if hasattr(s_elem.Id, "IntegerValue") else s_elem.Id.Value
-                                    s_elem.SheetNumber = "ZZ_TEMP_" + str(val)
-                        t1.Commit()
+                        try:
+                            for r in valid_nodes:
+                                if not r.IsChecked: continue
+                                if hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]:
+                                    s_elem = doc.GetElement(r.ElementId)
+                                    if s_elem:
+                                        val = s_elem.Id.IntegerValue if hasattr(s_elem.Id, "IntegerValue") else s_elem.Id.Value
+                                        s_elem.SheetNumber = "ZZ_TEMP_" + str(val)
+                            t1.Commit()
+                        except:
+                            if t1.HasStarted() and not t1.HasEnded(): t1.RollBack()
+                            raise
                         
                     # Phase 2: Finalize
                     log_created = []
@@ -2698,7 +2702,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     
                     with Transaction(doc, "Phase 2 - Finalize") as t2:
                         t2.Start()
-                        
+                        try:
                         for r in valid_nodes:
                             if not r.IsChecked: continue
                             if r.Action == "UPDATE" or r.Action == "MATCHED":
@@ -2838,8 +2842,11 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                 if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
                                                     try: dn_param.Set(str(v.ViewNumber))
                                                     except: pass
-                                            creates += 1
-                        t2.Commit()
+                            creates += 1
+                            t2.Commit()
+                        except:
+                            if t2.HasStarted() and not t2.HasEnded(): t2.RollBack()
+                            raise
                         
                     tg.Assimilate()
                     from pyrevit import script
@@ -2870,7 +2877,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     self.Close()
                     
                 except Exception as ex:
-                    tg.RollBack()
+                    if tg.HasStarted() and not tg.HasEnded(): tg.RollBack()
                     import traceback
                     err_msg = traceback.format_exc()
                     
