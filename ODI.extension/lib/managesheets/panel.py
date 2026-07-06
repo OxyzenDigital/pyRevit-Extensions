@@ -966,18 +966,10 @@ class ManageSheetsPanel(forms.WPFWindow):
             if self.last_loaded_doc_hash == doc_id:
                 return # Already loaded this doc
                 
-            # Count sheets
-            from Autodesk.Revit.DB import FilteredElementCollector, ViewSheet
+            # Auto-load unconditionally
             from System.Windows import Visibility
-            sheet_count = FilteredElementCollector(doc).OfClass(ViewSheet).ToElementIds().Count
-            
-            if sheet_count > 150:
-                # Pause auto-load, show warning
-                self.AutoRefreshWarningPanel.Visibility = Visibility.Visible
-            else:
-                # Auto-load
-                self.AutoRefreshWarningPanel.Visibility = Visibility.Collapsed
-                self.load_revit_data()
+            self.AutoRefreshWarningPanel.Visibility = Visibility.Collapsed
+            self.load_revit_data()
         except Exception as e:
             import traceback
             forms.alert(traceback.format_exc(), title="Error in check_and_load_data")
@@ -2383,6 +2375,7 @@ class ManageSheetsPanel(forms.WPFWindow):
 
     def run_validation(self):
         all_numbers = {}
+        has_valid_work = False
         
         # Determine the active collection from NavTree
         active_collection = "PERMIT SET"
@@ -2529,8 +2522,18 @@ class ManageSheetsPanel(forms.WPFWindow):
                         v.ValidationWarning += " Name duplicated in this grid."
                     
                     all_grid_view_names.add(v_name_lower)
+            
+            # Check if this row is completely valid
+            r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
+            for v in r.Views:
+                if getattr(v, 'ValidationWarning', ""):
+                    r_has_error = True
+                    break
+                    
+            if r.IsChecked and r.Action in ["CREATE", "UPDATE", "PURGE"] and not r_has_error:
+                has_valid_work = True
                 
-        self.Btn_Push.IsEnabled = (not has_error) and has_work
+        self.Btn_Push.IsEnabled = has_valid_work
         self.update_grid_title()
 
     def sync_to_revit(self, sender, e):
@@ -2558,6 +2561,22 @@ class ManageSheetsPanel(forms.WPFWindow):
                 out.print_md("You are attempting to create new sheets, but **no TitleBlock** is selected.")
                 out.print_md("Please select a valid TitleBlock from the dropdown in the bottom right corner, or load a TitleBlock family into your project first.")
                 
+                self.Btn_Push.IsEnabled = True
+                return
+            
+            # --- FILTER VALID NODES ---
+            valid_nodes = []
+            for r in self.all_grid_nodes:
+                if not r.IsChecked: continue
+                r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
+                for v in r.Views:
+                    if getattr(v, 'ValidationWarning', ""):
+                        r_has_error = True
+                        break
+                if not r_has_error:
+                    valid_nodes.append(r)
+                    
+            if not valid_nodes:
                 self.Btn_Push.IsEnabled = True
                 return
             
@@ -2630,8 +2649,9 @@ class ManageSheetsPanel(forms.WPFWindow):
                     # Phase 1: Park numbers (Rename Number collision avoidance)
                     with Transaction(doc, "Phase 1 - Park") as t1:
                         t1.Start()
-                        for r in self.all_grid_nodes:
-                            if r.IsChecked and hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]:
+                        for r in valid_nodes:
+                            if not r.IsChecked: continue
+                            if hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]:
                                 s_elem = doc.GetElement(r.ElementId)
                                 if s_elem:
                                     val = s_elem.Id.IntegerValue if hasattr(s_elem.Id, "IntegerValue") else s_elem.Id.Value
@@ -2642,9 +2662,9 @@ class ManageSheetsPanel(forms.WPFWindow):
                     with Transaction(doc, "Phase 2 - Finalize") as t2:
                         t2.Start()
                         
-                        for r in self.all_grid_nodes:
-                            if r.IsChecked:
-                                if r.Action == "UPDATE" or r.Action == "MATCHED":
+                        for r in valid_nodes:
+                            if not r.IsChecked: continue
+                            if r.Action == "UPDATE" or r.Action == "MATCHED":
                                     s_elem = doc.GetElement(r.ElementId)
                                     if s_elem:
                                         if r.SheetNumber != r.OriginalNumber or (hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]): 
