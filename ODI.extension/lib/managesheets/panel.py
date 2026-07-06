@@ -1057,6 +1057,7 @@ class ManageSheetsPanel(forms.WPFWindow):
             
     def toggle_list(self, coll, state):
         for node in coll: node.IsChecked = state
+        self.trigger_generation(None, None)
             
     def toggle_tree(self, coll, state):
         for node in coll:
@@ -1095,7 +1096,7 @@ class ManageSheetsPanel(forms.WPFWindow):
     def check_tree(self, root_collection, is_checked):
         for node in root_collection:
             self._recursive_check(node, is_checked)
-        self.generate_target_schema()
+        self.trigger_generation(None, None)
             
     def _recursive_check(self, node, is_checked):
         node.IsChecked = is_checked
@@ -1806,54 +1807,24 @@ class ManageSheetsPanel(forms.WPFWindow):
         for root_node in self.TargetSchemaRoot:
             filter_node(root_node)
 
-    def update_tree_buttons(self, coll, btn_expand, btn_collapse):
-        def _any_expanded(nodes):
-            for n in nodes:
-                if getattr(n, 'IsExpanded', False): return True
-                if hasattr(n, 'Children') and _any_expanded(n.Children): return True
-            return False
-            
-        def _any_collapsed(nodes):
-            for n in nodes:
-                if not getattr(n, 'IsExpanded', False) and hasattr(n, 'Children') and n.Children.Count > 0: return True
-                if hasattr(n, 'Children') and _any_collapsed(n.Children): return True
-            return False
-            
-        if hasattr(self, btn_expand): getattr(self, btn_expand).IsEnabled = _any_collapsed(coll)
-        if hasattr(self, btn_collapse): getattr(self, btn_collapse).IsEnabled = _any_expanded(coll)
-
-    def on_target_tree_state(self, sender, e):
-        self.update_tree_buttons(self.TargetSchemaRoot, 'Btn_ExpandSchema', 'Btn_CollapseSchema')
-        
-    def on_modifier_tree_state(self, sender, e):
-        self.update_tree_buttons(self.ModifierRoot, 'Btn_ExpandModifiers', 'Btn_CollapseModifiers')
-        
-    def on_nav_tree_state(self, sender, e):
-        self.update_tree_buttons(self.NavRoot, 'Btn_ExpandNav', 'Btn_CollapseNav')
 
     def on_expand_schema(self, sender, e):
         self.toggle_tree(self.TargetSchemaRoot, True)
-        self.on_target_tree_state(None, None)
 
     def on_collapse_schema(self, sender, e):
         self.toggle_tree(self.TargetSchemaRoot, False)
-        self.on_target_tree_state(None, None)
 
     def on_expand_modifiers(self, sender, e):
         self.toggle_tree(self.ModifierRoot, True)
-        self.on_modifier_tree_state(None, None)
 
     def on_collapse_modifiers(self, sender, e):
         self.toggle_tree(self.ModifierRoot, False)
-        self.on_modifier_tree_state(None, None)
         
     def on_expand_nav(self, sender, e):
         self.toggle_tree(self.NavRoot, True)
-        self.on_nav_tree_state(None, None)
         
     def on_collapse_nav(self, sender, e):
         self.toggle_tree(self.NavRoot, False)
-        self.on_nav_tree_state(None, None)
         
     def on_expand_editor(self, sender, e):
         self.toggle_editor(True)
