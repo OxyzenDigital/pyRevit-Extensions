@@ -2186,10 +2186,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     
                     vm.IsChecked = True
                     vm._action = row["status"]
-                    if getattr(self, 'Chk_HideMatched', None) and self.Chk_HideMatched.IsChecked and vm._action == "MATCHED":
-                        pass
-                    else:
-                        self.EditorItems.Add(vm)
+                    self.EditorItems.Add(vm)
                 else:
                     tgt_num = row["target_number"] if is_template else row["existing_number"]
                     key = (active_collection, tgt_num)
@@ -2202,10 +2199,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                             vm._action = "CREATE"
                         else:
                             vm._action = row["status"]
-                        if getattr(self, 'Chk_HideMatched', None) and self.Chk_HideMatched.IsChecked and vm._action == "MATCHED":
-                            pass
-                        else:
-                            self.EditorItems.Add(vm)
+                        self.EditorItems.Add(vm)
                     else:
                         real_id = ElementId(sh_id) if sh_id != -1 else ElementId.InvalidElementId
                         vm = SheetViewModel(real_id, tgt_num, 
@@ -2221,10 +2215,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                             vm._action = "CREATE"
                         else:
                             vm._action = row["status"]
-                        if getattr(self, 'Chk_HideMatched', None) and self.Chk_HideMatched.IsChecked and vm._action == "MATCHED":
-                            pass
-                        else:
-                            self.EditorItems.Add(vm)
+                        self.EditorItems.Add(vm)
                         self.all_grid_nodes.append(vm)
             
             self.update_grid_title()
@@ -2382,9 +2373,33 @@ class ManageSheetsPanel(forms.WPFWindow):
             self._is_auto_sequencing = False
             self.run_validation()
             
+    def apply_filters(self):
+        try:
+            from System.Windows.Data import CollectionViewSource
+            from System import Predicate, Object
+            
+            view = CollectionViewSource.GetDefaultView(self.EditorItems)
+            if not view: return
+            
+            show_invalid = getattr(self, 'Chk_ShowInvalid', None) and self.Chk_ShowInvalid.IsChecked
+            
+            def filter_func(item):
+                if not show_invalid:
+                    return True
+                
+                has_error = getattr(item, 'IsNameUnique', True) == False or bool(getattr(item, 'ValidationWarning', ""))
+                for v in getattr(item, 'Views', []):
+                    if getattr(v, 'ValidationWarning', ""):
+                        has_error = True
+                        break
+                return has_error
+                
+            view.Filter = Predicate[Object](filter_func)
+        except Exception as e:
+            pass
+
     def on_filter_changed(self, sender, e):
-        class DummyArgs: pass
-        self.on_tree_selection_changed(self.NavTree, DummyArgs())
+        self.apply_filters()
 
     def run_validation(self):
         all_numbers = {}
@@ -2592,6 +2607,7 @@ class ManageSheetsPanel(forms.WPFWindow):
             else:
                 self.Txt_Status.Text = "{}  »  No valid pending actions.".format(synopsis)
                 
+        self.apply_filters()
         self.update_grid_title()
 
     def sync_to_revit(self, sender, e):
