@@ -878,19 +878,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         if hasattr(self, 'ResizeTopRight'): self.ResizeTopRight.DragDelta += self.on_resize_top_right
         if hasattr(self, 'ResizeTopLeft'): self.ResizeTopLeft.DragDelta += self.on_resize_top_left
         
-        # Native WPF Event Handlers for accurate Expand/Collapse Button states
-        import System
-        from System.Windows.Controls import TreeViewItem
-        from System.Windows import RoutedEventHandler
-        
-        self.TargetSchemaTree.AddHandler(TreeViewItem.ExpandedEvent, RoutedEventHandler(self.on_target_tree_state))
-        self.TargetSchemaTree.AddHandler(TreeViewItem.CollapsedEvent, RoutedEventHandler(self.on_target_tree_state))
-        
-        self.Tree_Modifiers.AddHandler(TreeViewItem.ExpandedEvent, RoutedEventHandler(self.on_modifier_tree_state))
-        self.Tree_Modifiers.AddHandler(TreeViewItem.CollapsedEvent, RoutedEventHandler(self.on_modifier_tree_state))
-        
-        self.NavTree.AddHandler(TreeViewItem.ExpandedEvent, RoutedEventHandler(self.on_nav_tree_state))
-        self.NavTree.AddHandler(TreeViewItem.CollapsedEvent, RoutedEventHandler(self.on_nav_tree_state))
+
         self.load_settings()
         self.generate_target_schema() # Initial run
         self.check_and_load_data()
