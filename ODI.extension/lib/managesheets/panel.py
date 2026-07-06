@@ -2842,8 +2842,8 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                     if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
                                                         try: dn_param.Set(str(v.ViewNumber))
                                                         except: pass
-                                creates += 1
-                                t2.Commit()
+                                                creates += 1
+                            t2.Commit()
                         except:
                             if t2.HasStarted() and not t2.HasEnded(): t2.RollBack()
                             raise
