@@ -2692,6 +2692,10 @@ class ManageSheetsPanel(forms.WPFWindow):
                         t1.Commit()
                         
                     # Phase 2: Finalize
+                    log_created = []
+                    log_updated = []
+                    log_purged = []
+                    
                     with Transaction(doc, "Phase 2 - Finalize") as t2:
                         t2.Start()
                         
@@ -2710,6 +2714,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                     set_sheet_parameter(s_elem, "Discipline", disc_name)
                                     set_sheet_parameter(s_elem, "Content Group", cg_name)
                                     set_sheet_parameter(s_elem, "Sheet Series", r.SheetSeries)
+                                    log_updated.append("{} - {}".format(r.SheetNumber, r.SheetName))
                                     renames += 1
                             elif r.Action == "CREATE":
                                 tb_id = ElementId(tb_id_val)
@@ -2724,9 +2729,11 @@ class ManageSheetsPanel(forms.WPFWindow):
                                 set_sheet_parameter(new_sheet, "Discipline", disc_name)
                                 set_sheet_parameter(new_sheet, "Content Group", cg_name)
                                 set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
+                                log_created.append("{} - {}".format(r.SheetNumber, r.SheetName))
                                 creates += 1
                             elif r.Action == "PURGE":
                                 doc.Delete(r.ElementId)
+                                log_purged.append("{} - {}".format(r.SheetNumber, r.SheetName))
                                 purges += 1
                                     
                             if r.Action != "PURGE" and r.IsChecked:
@@ -2838,9 +2845,20 @@ class ManageSheetsPanel(forms.WPFWindow):
                     from pyrevit import script
                     out = script.get_output()
                     out.print_md("# Manage Sheets: Sync Complete 🚀")
-                    out.print_md("### Processed/Renamed: {}".format(renames))
-                    out.print_md("### Created: {}".format(creates))
-                    out.print_md("### Purged: {}".format(purges))
+                    out.print_md("---")
+                    
+                    if log_created:
+                        out.print_md("## ✨ Created Sheets ({})".format(len(log_created)))
+                        for item in log_created: out.print_md("- {}".format(item))
+                    if log_updated:
+                        out.print_md("## 📝 Updated/Renamed Sheets ({})".format(len(log_updated)))
+                        for item in log_updated: out.print_md("- {}".format(item))
+                    if log_purged:
+                        out.print_md("## 🗑️ Purged Sheets ({})".format(len(log_purged)))
+                        for item in log_purged: out.print_md("- {}".format(item))
+                        
+                    out.print_md("---")
+                    out.print_md("**Total Operations:** {}".format(len(log_created) + len(log_updated) + len(log_purged)))
                     
                     if error_log:
                         out.print_md("---")
