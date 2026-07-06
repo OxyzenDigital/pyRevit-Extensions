@@ -786,14 +786,14 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.MainTabControl.SelectionChanged += self.on_tab_changed
         
         # Setup Lists Select All
-        self.Btn_DiscAll.Click += lambda s,e: self.toggle_list(self.DisciplineNodes, True)
-        self.Btn_DiscNone.Click += lambda s,e: self.toggle_list(self.DisciplineNodes, False)
-        self.Btn_LevelAll.Click += lambda s,e: self.toggle_list(self.LevelNodes, True)
-        self.Btn_LevelNone.Click += lambda s,e: self.toggle_list(self.LevelNodes, False)
-        self.Btn_SeriesAll.Click += lambda s,e: self.toggle_list(self.SeriesNodes, True)
-        self.Btn_SeriesNone.Click += lambda s,e: self.toggle_list(self.SeriesNodes, False)
-        self.Btn_ModAll.Click += lambda s,e: self.check_tree(self.ModifierRoot, True)
-        self.Btn_ModNone.Click += lambda s,e: self.check_tree(self.ModifierRoot, False)
+        self.Btn_DiscAll.Click += self.on_disc_all
+        self.Btn_DiscNone.Click += self.on_disc_none
+        self.Btn_LevelAll.Click += self.on_level_all
+        self.Btn_LevelNone.Click += self.on_level_none
+        self.Btn_SeriesAll.Click += self.on_series_all
+        self.Btn_SeriesNone.Click += self.on_series_none
+        self.Btn_ModAll.Click += self.on_mod_all
+        self.Btn_ModNone.Click += self.on_mod_none
         
         # Expand/Collapse Handlers
         self.Btn_ExpandNav.Click += self.on_expand_nav
@@ -1047,6 +1047,22 @@ class ManageSheetsPanel(forms.WPFWindow):
         for node in coll: node.IsChecked = state
         self.trigger_generation(None, None)
             
+    def check_tree(self, coll, state):
+        for node in coll:
+            node.IsChecked = state
+            if hasattr(node, "Children") and node.Children:
+                self.check_tree(node.Children, state)
+        self.trigger_generation(None, None)
+
+    # Hard bound methods to prevent IronPython delegate garbage collection on lambdas
+    def on_disc_all(self, sender, e): self.toggle_list(self.DisciplineNodes, True)
+    def on_disc_none(self, sender, e): self.toggle_list(self.DisciplineNodes, False)
+    def on_level_all(self, sender, e): self.toggle_list(self.LevelNodes, True)
+    def on_level_none(self, sender, e): self.toggle_list(self.LevelNodes, False)
+    def on_series_all(self, sender, e): self.toggle_list(self.SeriesNodes, True)
+    def on_series_none(self, sender, e): self.toggle_list(self.SeriesNodes, False)
+    def on_mod_all(self, sender, e): self.check_tree(self.ModifierRoot, True)
+    def on_mod_none(self, sender, e): self.check_tree(self.ModifierRoot, False)
     def toggle_tree(self, coll, state):
         for node in coll:
             node.IsExpanded = state
@@ -1096,6 +1112,24 @@ class ManageSheetsPanel(forms.WPFWindow):
         uidoc = HOST_APP.uiapp.ActiveUIDocument
         doc = uidoc.Document if uidoc else None
         p_setup = project_settings.load_project_setup(doc) or {}
+        
+        # Setup Target Collection ComboBox
+        existing_collections = set()
+        if doc:
+            from Autodesk.Revit.DB import FilteredElementCollector, ViewSheet
+            sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
+            for s in sheets:
+                if s.IsPlaceholder: continue
+                c_name = get_sheet_collection_name(doc, s)
+                if c_name and c_name != "Undefined":
+                    existing_collections.add(c_name)
+        if "PERMIT SET" not in existing_collections:
+            existing_collections.add("PERMIT SET")
+            
+        self.Cmb_TargetCollection.ItemsSource = sorted(list(existing_collections))
+        self.Cmb_TargetCollection.Text = p_setup.get("target_collection", cfg.get_option("target_collection", "PERMIT SET"))
+        self.Cmb_TargetCollection.LostFocus += self.trigger_generation
+        self.Cmb_TargetCollection.SelectionChanged += self.trigger_generation
         
         self.Sld_GridRows.Value = float(p_setup.get("grid_rows", cfg.get_option("grid_rows", 1)))
         self.Sld_GridCols.Value = float(p_setup.get("grid_cols", cfg.get_option("grid_cols", 1)))
@@ -1360,6 +1394,7 @@ class ManageSheetsPanel(forms.WPFWindow):
     def save_to_project(self, sender, e):
         self.save_settings()
         setup_dict = {
+            "target_collection": self.Cmb_TargetCollection.Text,
             "grid_rows": int(self.Sld_GridRows.Value),
             "grid_cols": int(self.Sld_GridCols.Value),
             "global_cover": bool(self.Chk_GlobalCover.IsChecked),
@@ -1399,6 +1434,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         
         self.save_settings()
         setup_dict = {
+            "target_collection": self.Cmb_TargetCollection.Text,
             "grid_rows": int(self.Sld_GridRows.Value),
             "grid_cols": int(self.Sld_GridCols.Value),
             "global_cover": bool(self.Chk_GlobalCover.IsChecked),
@@ -1439,6 +1475,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     setup_dict = json.load(f)
                 
                 # Apply the loaded dict (simulate loading project settings)
+                if "target_collection" in setup_dict: self.Cmb_TargetCollection.Text = setup_dict["target_collection"]
                 if "grid_rows" in setup_dict: self.Sld_GridRows.Value = float(setup_dict["grid_rows"])
                 if "grid_cols" in setup_dict: self.Sld_GridCols.Value = float(setup_dict["grid_cols"])
                 if "global_cover" in setup_dict: self.Chk_GlobalCover.IsChecked = setup_dict["global_cover"]
@@ -2043,7 +2080,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     has_real_collections = True
                     break
         if not has_real_collections:
-            c_name = "PERMIT SET"
+            c_name = self.Cmb_TargetCollection.Text if hasattr(self, 'Cmb_TargetCollection') and self.Cmb_TargetCollection.Text else "PERMIT SET"
             
         if not hasattr(node, "NodeType"): return
         
@@ -2092,6 +2129,10 @@ class ManageSheetsPanel(forms.WPFWindow):
                     valid_sheet_ids.append(s.ElementId.IntegerValue)
                 elif hasattr(s.ElementId, "Value"):
                     valid_sheet_ids.append(s.ElementId.Value)
+                    
+            # Inject the active collection context into the generated targets
+            for t in generated_targets:
+                t["collection"] = active_collection
                     
             try:
                 plan = reconciliation.run_pipeline(doc, generated_targets, existing_sheet_ids=valid_sheet_ids)
@@ -2365,7 +2406,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         has_valid_work = False
         
         # Determine the active collection from NavTree
-        active_collection = "PERMIT SET"
+        active_collection = self.Cmb_TargetCollection.Text if hasattr(self, 'Cmb_TargetCollection') and self.Cmb_TargetCollection.Text else "PERMIT SET"
         if hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
             node = self.NavTree.SelectedItem
             if hasattr(node, "NodeType") and node.NodeType == "Collection":
@@ -2669,6 +2710,10 @@ class ManageSheetsPanel(forms.WPFWindow):
                     r.IsChecked = False
             # ------------------------------------------------
             
+            log_created = []
+            log_updated = []
+            log_purged = []
+            log_view_renamed = []
             renames, creates, purges = 0, 0, 0
             
             with TransactionGroup(doc, "AIA Reconciliation") as tg:
@@ -2696,16 +2741,12 @@ class ManageSheetsPanel(forms.WPFWindow):
                             raise
                         
                     # Phase 2: Finalize
-                    log_created = []
-                    log_updated = []
-                    log_purged = []
-                    
                     with Transaction(doc, "Phase 2 - Finalize") as t2:
                         t2.Start()
                         try:
                             for r in valid_nodes:
                                 if not r.IsChecked: continue
-                                if r.Action == "UPDATE" or r.Action == "MATCHED":
+                                if r.Action in ["UPDATE", "MATCHED", "RENAME_NAME", "RENAME_NUM", "RENAME_BOTH"]:
                                     s_elem = doc.GetElement(r.ElementId)
                                     if s_elem:
                                         if r.SheetNumber != r.OriginalNumber or (hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]): 
@@ -2751,32 +2792,33 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                     try:
                                                         v_elem.Name = v.Name
                                                         renames += 1
+                                                        log_view_renamed.append(v.Name)
                                                     except: pass
-                                                    
-                                                from Autodesk.Revit.DB import Viewport, BuiltInParameter
-                                                vps = FilteredElementCollector(doc).OfClass(Viewport).ToElements()
-                                                target_vp = None
-                                                for vp in vps:
-                                                    if vp.ViewId == v.ViewId:
-                                                        target_vp = vp
-                                                        break
-                                                
-                                                if target_vp:
-                                                    if target_vp.SheetId != target_sheet_id:
-                                                        center = target_vp.GetBoxCenter()
-                                                        doc.Delete(target_vp.Id)
-                                                        if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
-                                                            new_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
-                                                            dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
-                                                            if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                                try: dn_param.Set(str(v.ViewNumber))
-                                                                except: pass
-                                                    else:
-                                                        dn_param = target_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                            
+                                            from Autodesk.Revit.DB import Viewport, BuiltInParameter
+                                            vps = FilteredElementCollector(doc).OfClass(Viewport).ToElements()
+                                            target_vp = None
+                                            for vp in vps:
+                                                if vp.ViewId == v.ViewId:
+                                                    target_vp = vp
+                                                    break
+                                            
+                                            if target_vp:
+                                                if target_vp.SheetId != target_sheet_id:
+                                                    center = target_vp.GetBoxCenter()
+                                                    doc.Delete(target_vp.Id)
+                                                    if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
+                                                        new_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
+                                                        dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                         if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                            if dn_param.AsString() != str(v.ViewNumber):
-                                                                try: dn_param.Set(str(v.ViewNumber))
-                                                                except: pass
+                                                            try: dn_param.Set(str(v.ViewNumber))
+                                                            except: pass
+                                                else:
+                                                    dn_param = target_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                    if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
+                                                        if dn_param.AsString() != str(v.ViewNumber):
+                                                            try: dn_param.Set(str(v.ViewNumber))
+                                                            except: pass
                                         elif getattr(v, 'IsNew', False):
                                             from Autodesk.Revit.DB import ViewFamilyType, ViewFamily, Level, ViewPlan, ViewDrafting
                                             view_to_place = None
@@ -2833,6 +2875,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                 try:
                                                     view_to_place.Name = v.Name
                                                     renames += 1
+                                                    log_view_renamed.append(v.Name)
                                                 except: pass
                                                 
                                                 if Viewport.CanAddViewToSheet(doc, target_sheet_id, view_to_place.Id):
@@ -2862,7 +2905,13 @@ class ManageSheetsPanel(forms.WPFWindow):
                         for item in log_updated: out.print_md("- {}".format(item))
                     if log_purged:
                         out.print_md("## 🗑️ Purged Sheets ({})".format(len(log_purged)))
-                        for item in log_purged: out.print_md("- {}".format(item))
+                        if len(log_purged) > 0:
+                            out.print_md("### Purged")
+                            for l in log_purged: out.print_md("- " + l)
+                        
+                    if len(log_view_renamed) > 0:
+                        out.print_md("### Views Renamed")
+                        for l in log_view_renamed: out.print_md("- " + l)
                         
                     out.print_md("---")
                     out.print_md("**Total Operations:** {}".format(len(log_created) + len(log_updated) + len(log_purged)))

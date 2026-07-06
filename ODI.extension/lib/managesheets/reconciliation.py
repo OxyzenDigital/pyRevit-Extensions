@@ -341,19 +341,19 @@ def match_sheets(harvested_data, slots):
                 sheets_subset.remove(best_sh)
     
     # Pass 1: Strict Same Collection Matching
-    collections = set(sh.sheet_collection for sh in unmatched_sheets)
-    collections.add("Default")
+    target_collections = set(s.collection for s in slots)
     
-    for coll in collections:
+    for coll in target_collections:
         coll_slots = [s for s in unmatched_slots if s.collection == coll]
         coll_sheets = [sh for sh in unmatched_sheets if sh.sheet_collection == coll]
         get_matches(coll_slots, coll_sheets)
 
-    # Pass 2: Cross-Collection Migration Matching
-    get_matches(unmatched_slots, unmatched_sheets)
+    # Note: Cross-Collection Migration Matching has been removed to strictly isolate Sheet Collections.
 
-    # Any remaining unmapped slots are MISSING, unmapped sheets are EXTRA
-    extra_sheets = [sh for sh in harvested_data.sheets if sh.element_id not in [s.sheet_element_id for s in slots if s.sheet_element_id != ElementId.InvalidElementId]]
+    # Any remaining unmapped slots are MISSING, unmapped sheets (within target collections) are EXTRA
+    extra_sheets = [sh for sh in harvested_data.sheets 
+                    if sh.sheet_collection in target_collections 
+                    and sh.element_id not in [s.sheet_element_id for s in slots if s.sheet_element_id != ElementId.InvalidElementId]]
     
     return slots, extra_sheets
 

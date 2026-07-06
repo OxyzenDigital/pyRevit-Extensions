@@ -495,14 +495,21 @@
                                             <Grid.RowDefinitions>
                                                 <RowDefinition Height="Auto"/>
                                                 <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
                                             </Grid.RowDefinitions>
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="*"/>
                                             </Grid.ColumnDefinitions>
 
-                                            <!-- Row 0: Scheme & Cover -->
+                                            <!-- Row 0: Target Sheet Collection -->
                                             <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
+                                                <TextBlock Text="Target Sheet Collection:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
+                                                <ComboBox Name="Cmb_TargetCollection" IsEditable="True" Width="200" VerticalAlignment="Center" ToolTip="Name of the Sheet Collection where generated sheets should be assigned or matched against."/>
+                                            </StackPanel>
+
+                                            <!-- Row 1: Scheme & Cover -->
+                                            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
                                                 <TextBlock Text="Naming Scheme:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
                                                 <ComboBox Name="Cmb_NamingScheme" IsEditable="True" Width="200" VerticalAlignment="Center"/>
                                                 <Button Name="Btn_EditNamingSchemes" Content="⚙ Edit" Width="50" Height="22" Margin="5,0,20,0" ToolTip="Edit Naming Schemes for this project"/>
@@ -510,8 +517,8 @@
                                                 <CheckBox Name="Chk_GlobalCover" Content="Generate single Global Cover/General set (CS)" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}" ToolTip="When checked, generates exactly 3 global CS-000 series sheets instead of duplicating them per discipline."/>
                                             </StackPanel>
 
-                                            <!-- Row 1: Enlargement Grid Size -->
-                                            <StackPanel Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal">
+                                            <!-- Row 2: Enlargement Grid Size -->
+                                            <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal">
                                                 <TextBlock Text="Enlargement Grid:" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="{DynamicResource TextBrush}"/>
                                                 <TextBlock Text="Rows:" VerticalAlignment="Center" Margin="0,0,5,0" Foreground="{DynamicResource TextBrush}"/>
                                                 <Slider Name="Sld_GridRows" Minimum="1" Maximum="10" Value="1" Width="80" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center"/>
