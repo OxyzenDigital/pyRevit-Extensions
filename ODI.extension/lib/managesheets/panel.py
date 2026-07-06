@@ -2534,6 +2534,37 @@ class ManageSheetsPanel(forms.WPFWindow):
                 has_valid_work = True
                 
         self.Btn_Push.IsEnabled = has_valid_work
+        if has_valid_work:
+            self.Txt_Status.Text = "Ready to Push"
+        else:
+            # Determine why it is disabled to provide a helpful clue
+            has_errors = False
+            has_unchecked_work = False
+            total_work_items = 0
+            
+            for r in validation_pool:
+                if r.Action in ["CREATE", "UPDATE", "PURGE"]:
+                    total_work_items += 1
+                    r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
+                    for v in r.Views:
+                        if getattr(v, 'ValidationWarning', ""):
+                            r_has_error = True
+                            break
+                    if r.IsChecked:
+                        if r_has_error:
+                            has_errors = True
+                    else:
+                        has_unchecked_work = True
+                        
+            if total_work_items == 0:
+                self.Txt_Status.Text = "All Sheets Up To Date (100% Matched)"
+            elif has_errors:
+                self.Txt_Status.Text = "Cannot push: Resolve validation errors (red text) first."
+            elif has_unchecked_work:
+                self.Txt_Status.Text = "Check the items you wish to push to Revit."
+            else:
+                self.Txt_Status.Text = "No valid pending actions."
+                
         self.update_grid_title()
 
     def sync_to_revit(self, sender, e):

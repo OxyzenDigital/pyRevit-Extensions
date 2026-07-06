@@ -233,7 +233,7 @@ def match_sheets(harvested_data, slots):
         for s in list(slots_subset):
             for sh in list(sheets_subset):
                 if s.target_number == sh.number and s.target_name == sh.name:
-                    s.status = "MATCH"
+                    s.status = "MATCHED"
                     s.existing_number, s.existing_name, s.sheet_element_id = sh.number, sh.name, sh.element_id
                     slots_subset.remove(s)
                     sheets_subset.remove(sh)
