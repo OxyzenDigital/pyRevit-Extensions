@@ -2703,147 +2703,147 @@ class ManageSheetsPanel(forms.WPFWindow):
                     with Transaction(doc, "Phase 2 - Finalize") as t2:
                         t2.Start()
                         try:
-                        for r in valid_nodes:
-                            if not r.IsChecked: continue
-                            if r.Action == "UPDATE" or r.Action == "MATCHED":
-                                s_elem = doc.GetElement(r.ElementId)
-                                if s_elem:
-                                    if r.SheetNumber != r.OriginalNumber or (hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]): 
-                                        s_elem.SheetNumber = r.SheetNumber
-                                    if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
-                                    assign_sheet_to_collection(doc, s_elem, r.CollectionName)
+                            for r in valid_nodes:
+                                if not r.IsChecked: continue
+                                if r.Action == "UPDATE" or r.Action == "MATCHED":
+                                    s_elem = doc.GetElement(r.ElementId)
+                                    if s_elem:
+                                        if r.SheetNumber != r.OriginalNumber or (hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]): 
+                                            s_elem.SheetNumber = r.SheetNumber
+                                        if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
+                                        assign_sheet_to_collection(doc, s_elem, r.CollectionName)
+                                        c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                        disc_name = c_res.get("discipline", "Unknown")
+                                        cg_name = c_res.get("contentGroup", "Uncategorized")
+                                        set_sheet_parameter(s_elem, "Discipline", disc_name)
+                                        set_sheet_parameter(s_elem, "Content Group", cg_name)
+                                        set_sheet_parameter(s_elem, "Sheet Series", r.SheetSeries)
+                                        log_updated.append("{} - {}".format(r.SheetNumber, r.SheetName))
+                                        renames += 1
+                                elif r.Action == "CREATE":
+                                    tb_id = ElementId(tb_id_val)
+                                    
+                                    new_sheet = ViewSheet.Create(doc, tb_id)
+                                    new_sheet.SheetNumber = r.SheetNumber
+                                    new_sheet.Name = r.SheetName
+                                    assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
                                     c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
                                     disc_name = c_res.get("discipline", "Unknown")
                                     cg_name = c_res.get("contentGroup", "Uncategorized")
-                                    set_sheet_parameter(s_elem, "Discipline", disc_name)
-                                    set_sheet_parameter(s_elem, "Content Group", cg_name)
-                                    set_sheet_parameter(s_elem, "Sheet Series", r.SheetSeries)
-                                    log_updated.append("{} - {}".format(r.SheetNumber, r.SheetName))
-                                    renames += 1
-                            elif r.Action == "CREATE":
-                                tb_id = ElementId(tb_id_val)
-                                
-                                new_sheet = ViewSheet.Create(doc, tb_id)
-                                new_sheet.SheetNumber = r.SheetNumber
-                                new_sheet.Name = r.SheetName
-                                assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
-                                c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
-                                disc_name = c_res.get("discipline", "Unknown")
-                                cg_name = c_res.get("contentGroup", "Uncategorized")
-                                set_sheet_parameter(new_sheet, "Discipline", disc_name)
-                                set_sheet_parameter(new_sheet, "Content Group", cg_name)
-                                set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
-                                log_created.append("{} - {}".format(r.SheetNumber, r.SheetName))
-                                creates += 1
-                            elif r.Action == "PURGE":
-                                doc.Delete(r.ElementId)
-                                log_purged.append("{} - {}".format(r.SheetNumber, r.SheetName))
-                                purges += 1
+                                    set_sheet_parameter(new_sheet, "Discipline", disc_name)
+                                    set_sheet_parameter(new_sheet, "Content Group", cg_name)
+                                    set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
+                                    log_created.append("{} - {}".format(r.SheetNumber, r.SheetName))
+                                    creates += 1
+                                elif r.Action == "PURGE":
+                                    doc.Delete(r.ElementId)
+                                    log_purged.append("{} - {}".format(r.SheetNumber, r.SheetName))
+                                    purges += 1
+                                        
+                                if r.Action != "PURGE" and r.IsChecked:
+                                    target_sheet_id = r.ElementId if r.Action != "CREATE" else new_sheet.Id
                                     
-                            if r.Action != "PURGE" and r.IsChecked:
-                                target_sheet_id = r.ElementId if r.Action != "CREATE" else new_sheet.Id
-                                
-                                for v in getattr(r, 'Views', []):
-                                    if getattr(v, 'ViewId', ElementId.InvalidElementId) != ElementId.InvalidElementId:
-                                        v_elem = doc.GetElement(v.ViewId)
-                                        if v_elem:
-                                            if v_elem.Name != v.Name:
+                                    for v in getattr(r, 'Views', []):
+                                        if getattr(v, 'ViewId', ElementId.InvalidElementId) != ElementId.InvalidElementId:
+                                            v_elem = doc.GetElement(v.ViewId)
+                                            if v_elem:
+                                                if v_elem.Name != v.Name:
+                                                    try:
+                                                        v_elem.Name = v.Name
+                                                        renames += 1
+                                                    except: pass
+                                                    
+                                                from Autodesk.Revit.DB import Viewport, BuiltInParameter
+                                                vps = FilteredElementCollector(doc).OfClass(Viewport).ToElements()
+                                                target_vp = None
+                                                for vp in vps:
+                                                    if vp.ViewId == v.ViewId:
+                                                        target_vp = vp
+                                                        break
+                                                
+                                                if target_vp:
+                                                    if target_vp.SheetId != target_sheet_id:
+                                                        center = target_vp.GetBoxCenter()
+                                                        doc.Delete(target_vp.Id)
+                                                        if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
+                                                            new_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
+                                                            dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                            if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
+                                                                try: dn_param.Set(str(v.ViewNumber))
+                                                                except: pass
+                                                    else:
+                                                        dn_param = target_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                        if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
+                                                            if dn_param.AsString() != str(v.ViewNumber):
+                                                                try: dn_param.Set(str(v.ViewNumber))
+                                                                except: pass
+                                        elif getattr(v, 'IsNew', False):
+                                            from Autodesk.Revit.DB import ViewFamilyType, ViewFamily, Level, ViewPlan, ViewDrafting
+                                            view_to_place = None
+                                            
+                                            if v.PlanType:
+                                                vfts = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()
+                                                vft_target = None
+                                                for vft in vfts:
+                                                    try:
+                                                        v_name = vft.Name
+                                                    except AttributeError:
+                                                        try:
+                                                            from Autodesk.Revit.DB import BuiltInParameter
+                                                            p = vft.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
+                                                            v_name = p.AsString() if p else None
+                                                        except:
+                                                            v_name = None
+                                                            
+                                                    if v_name == v.PlanType:
+                                                        vft_target = vft
+                                                        break
+                                                
+                                                if not vft_target and vfts:
+                                                    vft_target = vfts[0]
+                                                    
+                                                if vft_target:
+                                                    vft_id = vft_target.Id
+                                                    vft_family = vft_target.ViewFamily
+                                                    
+                                                    if vft_family in [ViewFamily.FloorPlan, ViewFamily.CeilingPlan, ViewFamily.StructuralPlan, ViewFamily.AreaPlan]:
+                                                        levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
+                                                        target_lvl_id = None
+                                                        if v.LevelName:
+                                                            for lvl in levels:
+                                                                if lvl.Name == v.LevelName:
+                                                                    target_lvl_id = lvl.Id
+                                                                    break
+                                                        if not target_lvl_id and levels:
+                                                            target_lvl_id = levels[0].Id
+                                                            
+                                                        if target_lvl_id:
+                                                            view_to_place = ViewPlan.Create(doc, vft_id, target_lvl_id)
+                                                    elif vft_family == ViewFamily.Drafting:
+                                                        view_to_place = ViewDrafting.Create(doc, vft_id)
+                                                        
+                                                    if view_to_place:
+                                                        scale_map = {
+                                                            "12\" = 1'-0\"": 1, "6\" = 1'-0\"": 2, "3\" = 1'-0\"": 4, "1 1/2\" = 1'-0\"": 8, "1\" = 1'-0\"": 12, "3/4\" = 1'-0\"": 16, "1/2\" = 1'-0\"": 24, "3/8\" = 1'-0\"": 32, "1/4\" = 1'-0\"": 48, "3/16\" = 1'-0\"": 64, "1/8\" = 1'-0\"": 96, "1\" = 10'-0\"": 120, "3/32\" = 1'-0\"": 128, "1/16\" = 1'-0\"": 192, "1\" = 20'-0\"": 240, "3/64\" = 1'-0\"": 256, "1\" = 30'-0\"": 360, "1/32\" = 1'-0\"": 384, "1\" = 40'-0\"": 480, "1\" = 50'-0\"": 600, "1\" = 60'-0\"": 720, "1/64\" = 1'-0\"": 768, "1\" = 80'-0\"": 960, "1\" = 100'-0\"": 1200, "1\" = 160'-0\"": 1920, "1\" = 200'-0\"": 2400, "1\" = 300'-0\"": 3600, "1\" = 400'-0\"": 4800
+                                                        }
+                                                        if v.Scale in scale_map:
+                                                            view_to_place.Scale = scale_map[v.Scale]
+                                            
+                                            if view_to_place:
                                                 try:
-                                                    v_elem.Name = v.Name
+                                                    view_to_place.Name = v.Name
                                                     renames += 1
                                                 except: pass
                                                 
-                                            from Autodesk.Revit.DB import Viewport, BuiltInParameter
-                                            vps = FilteredElementCollector(doc).OfClass(Viewport).ToElements()
-                                            target_vp = None
-                                            for vp in vps:
-                                                if vp.ViewId == v.ViewId:
-                                                    target_vp = vp
-                                                    break
-                                            
-                                            if target_vp:
-                                                if target_vp.SheetId != target_sheet_id:
-                                                    center = target_vp.GetBoxCenter()
-                                                    doc.Delete(target_vp.Id)
-                                                    if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
-                                                        new_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
-                                                        dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
-                                                        if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                            try: dn_param.Set(str(v.ViewNumber))
-                                                            except: pass
-                                                else:
-                                                    dn_param = target_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                if Viewport.CanAddViewToSheet(doc, target_sheet_id, view_to_place.Id):
+                                                    new_vp = Viewport.Create(doc, target_sheet_id, view_to_place.Id, XYZ(1.5, 1.0, 0))
+                                                    from Autodesk.Revit.DB import BuiltInParameter
+                                                    dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                     if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                        if dn_param.AsString() != str(v.ViewNumber):
-                                                            try: dn_param.Set(str(v.ViewNumber))
-                                                            except: pass
-                                    elif getattr(v, 'IsNew', False):
-                                        from Autodesk.Revit.DB import ViewFamilyType, ViewFamily, Level, ViewPlan, ViewDrafting
-                                        view_to_place = None
-                                        
-                                        if v.PlanType:
-                                            vfts = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()
-                                            vft_target = None
-                                            for vft in vfts:
-                                                try:
-                                                    v_name = vft.Name
-                                                except AttributeError:
-                                                    try:
-                                                        from Autodesk.Revit.DB import BuiltInParameter
-                                                        p = vft.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
-                                                        v_name = p.AsString() if p else None
-                                                    except:
-                                                        v_name = None
-                                                        
-                                                if v_name == v.PlanType:
-                                                    vft_target = vft
-                                                    break
-                                            
-                                            if not vft_target and vfts:
-                                                vft_target = vfts[0]
-                                                
-                                            if vft_target:
-                                                vft_id = vft_target.Id
-                                                vft_family = vft_target.ViewFamily
-                                                
-                                                if vft_family in [ViewFamily.FloorPlan, ViewFamily.CeilingPlan, ViewFamily.StructuralPlan, ViewFamily.AreaPlan]:
-                                                    levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
-                                                    target_lvl_id = None
-                                                    if v.LevelName:
-                                                        for lvl in levels:
-                                                            if lvl.Name == v.LevelName:
-                                                                target_lvl_id = lvl.Id
-                                                                break
-                                                    if not target_lvl_id and levels:
-                                                        target_lvl_id = levels[0].Id
-                                                        
-                                                    if target_lvl_id:
-                                                        view_to_place = ViewPlan.Create(doc, vft_id, target_lvl_id)
-                                                elif vft_family == ViewFamily.Drafting:
-                                                    view_to_place = ViewDrafting.Create(doc, vft_id)
-                                                    
-                                                if view_to_place:
-                                                    scale_map = {
-                                                        "12\" = 1'-0\"": 1, "6\" = 1'-0\"": 2, "3\" = 1'-0\"": 4, "1 1/2\" = 1'-0\"": 8, "1\" = 1'-0\"": 12, "3/4\" = 1'-0\"": 16, "1/2\" = 1'-0\"": 24, "3/8\" = 1'-0\"": 32, "1/4\" = 1'-0\"": 48, "3/16\" = 1'-0\"": 64, "1/8\" = 1'-0\"": 96, "1\" = 10'-0\"": 120, "3/32\" = 1'-0\"": 128, "1/16\" = 1'-0\"": 192, "1\" = 20'-0\"": 240, "3/64\" = 1'-0\"": 256, "1\" = 30'-0\"": 360, "1/32\" = 1'-0\"": 384, "1\" = 40'-0\"": 480, "1\" = 50'-0\"": 600, "1\" = 60'-0\"": 720, "1/64\" = 1'-0\"": 768, "1\" = 80'-0\"": 960, "1\" = 100'-0\"": 1200, "1\" = 160'-0\"": 1920, "1\" = 200'-0\"": 2400, "1\" = 300'-0\"": 3600, "1\" = 400'-0\"": 4800
-                                                    }
-                                                    if v.Scale in scale_map:
-                                                        view_to_place.Scale = scale_map[v.Scale]
-                                        
-                                        if view_to_place:
-                                            try:
-                                                view_to_place.Name = v.Name
-                                                renames += 1
-                                            except: pass
-                                            
-                                            if Viewport.CanAddViewToSheet(doc, target_sheet_id, view_to_place.Id):
-                                                new_vp = Viewport.Create(doc, target_sheet_id, view_to_place.Id, XYZ(1.5, 1.0, 0))
-                                                from Autodesk.Revit.DB import BuiltInParameter
-                                                dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
-                                                if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                    try: dn_param.Set(str(v.ViewNumber))
-                                                    except: pass
-                            creates += 1
-                            t2.Commit()
+                                                        try: dn_param.Set(str(v.ViewNumber))
+                                                        except: pass
+                                creates += 1
+                                t2.Commit()
                         except:
                             if t2.HasStarted() and not t2.HasEnded(): t2.RollBack()
                             raise
