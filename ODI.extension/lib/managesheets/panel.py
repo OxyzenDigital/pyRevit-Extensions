@@ -1039,9 +1039,6 @@ class ManageSheetsPanel(forms.WPFWindow):
             self.FooterBorder.Visibility = Visibility.Visible
             try:
                 # Force rebind just in case TabControl unloaded it
-                self.EditorList.ItemsSource = self.EditorItems
-                self.EditorList.Items.Refresh()
-                
                 # Force a schema regeneration in case settings changed in Tab 0
                 self.generate_target_schema()
                 
@@ -1922,6 +1919,27 @@ class ManageSheetsPanel(forms.WPFWindow):
             display_name = "{:02d} - {} ({})".format(idx + 1, lvl.Name, elev_str)
             self.LevelNodes.Add(SelectableNode(lvl.Name, True, self.generate_target_schema, display_name=display_name))
 
+        import data_model
+        data_model.AVAILABLE_LEVELS = [lvl.Name for lvl in sorted(levels, key=get_elev)]
+        vfts = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()
+        
+        from Autodesk.Revit.DB import ViewFamily
+        valid_families = [ViewFamily.FloorPlan, ViewFamily.CeilingPlan, ViewFamily.StructuralPlan]
+        
+        vft_names = []
+        for vft in vfts:
+            if hasattr(vft, 'ViewFamily') and vft.ViewFamily in valid_families:
+                try:
+                    name = vft.Name
+                    if name: vft_names.append(name)
+                except AttributeError:
+                    try:
+                        from Autodesk.Revit.DB import BuiltInParameter
+                        p = vft.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
+                        if p and p.AsString(): vft_names.append(p.AsString())
+                    except: pass
+        data_model.AVAILABLE_VIEW_FAMILY_TYPES = sorted(list(set(vft_names)))
+        
         selected_ids = uidoc.Selection.GetElementIds()
         scope_ids = [i for i in selected_ids if isinstance(doc.GetElement(i), ViewSheet)]
         if not scope_ids: sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
@@ -2112,8 +2130,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                         vm._action = row["status"]
                     self.EditorItems.Add(vm)
             
-            self.EditorList.ItemsSource = self.EditorItems
-            self.EditorList.Items.Refresh()
             self.update_grid_title()
             self.Txt_GridTitle.Text += " | Items: " + str(len(self.EditorItems))
             
@@ -2420,39 +2436,79 @@ class ManageSheetsPanel(forms.WPFWindow):
                                             view_to_place = doc.GetElement(v.SourceViewId)
                                         else:
                                             from Autodesk.Revit.DB import ViewFamily
-                                            vft_map = {
-                                                "FloorPlan": ViewFamily.FloorPlan,
-                                                "CeilingPlan": ViewFamily.CeilingPlan,
-                                                "DraftingView": ViewFamily.Drafting
-                                            }
-                                            
-                                            if v.ViewType in vft_map:
-                                                target_family = vft_map[v.ViewType]
-                                                vfts = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()
-                                                vft_id = None
-                                                for vft in vfts:
-                                                    if vft.ViewFamily == target_family:
-                                                        vft_id = vft.Id
-                                                        break
-                                                
-                                                if vft_id:
-                                                    if v.ViewType in ["FloorPlan", "CeilingPlan"]:
-                                                        levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
-                                                        if levels:
-                                                            view_to_place = ViewPlan.Create(doc, vft_id, levels[0].Id)
-                                                    elif v.ViewType == "DraftingView":
-                                                        view_to_place = ViewDrafting.Create(doc, vft_id)
+                                            vfts = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()
+                                            vft_target = None
+                                            for vft in vfts:
+                                                try:
+                                                    v_name = vft.Name
+                                                except AttributeError:
+                                                    try:
+                                                        from Autodesk.Revit.DB import BuiltInParameter
+                                                        p = vft.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
+                                                        v_name = p.AsString() if p else None
+                                                    except:
+                                                        v_name = None
                                                         
-                                                    if view_to_place:
-                                                        scale_map = {
-                                                            "1/16\" = 1'-0\"": 192,
-                                                            "1/8\" = 1'-0\"": 96,
-                                                            "1/4\" = 1'-0\"": 48,
-                                                            "1/2\" = 1'-0\"": 24,
-                                                            "1\" = 1'-0\"": 12
-                                                        }
-                                                        if v.Scale in scale_map:
-                                                            view_to_place.Scale = scale_map[v.Scale]
+                                                if v_name == v.PlanType:
+                                                    vft_target = vft
+                                                    break
+                                            
+                                            if not vft_target and vfts:
+                                                vft_target = vfts[0]
+                                                
+                                            if vft_target:
+                                                vft_id = vft_target.Id
+                                                vft_family = vft_target.ViewFamily
+                                                
+                                                if vft_family in [ViewFamily.FloorPlan, ViewFamily.CeilingPlan, ViewFamily.StructuralPlan, ViewFamily.AreaPlan]:
+                                                    levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
+                                                    target_lvl_id = None
+                                                    if v.LevelName:
+                                                        for lvl in levels:
+                                                            if lvl.Name == v.LevelName:
+                                                                target_lvl_id = lvl.Id
+                                                                break
+                                                    if not target_lvl_id and levels:
+                                                        target_lvl_id = levels[0].Id
+                                                        
+                                                    if target_lvl_id:
+                                                        view_to_place = ViewPlan.Create(doc, vft_id, target_lvl_id)
+                                                elif vft_family == ViewFamily.Drafting:
+                                                    view_to_place = ViewDrafting.Create(doc, vft_id)
+                                                    
+                                                if view_to_place:
+                                                    scale_map = {
+                                                        "12\" = 1'-0\"": 1,
+                                                        "6\" = 1'-0\"": 2,
+                                                        "3\" = 1'-0\"": 4,
+                                                        "1 1/2\" = 1'-0\"": 8,
+                                                        "1\" = 1'-0\"": 12,
+                                                        "3/4\" = 1'-0\"": 16,
+                                                        "1/2\" = 1'-0\"": 24,
+                                                        "3/8\" = 1'-0\"": 32,
+                                                        "1/4\" = 1'-0\"": 48,
+                                                        "3/16\" = 1'-0\"": 64,
+                                                        "1/8\" = 1'-0\"": 96,
+                                                        "1\" = 10'-0\"": 120,
+                                                        "3/32\" = 1'-0\"": 128,
+                                                        "1/16\" = 1'-0\"": 192,
+                                                        "1\" = 20'-0\"": 240,
+                                                        "3/64\" = 1'-0\"": 256,
+                                                        "1\" = 30'-0\"": 360,
+                                                        "1/32\" = 1'-0\"": 384,
+                                                        "1\" = 40'-0\"": 480,
+                                                        "1\" = 50'-0\"": 600,
+                                                        "1\" = 60'-0\"": 720,
+                                                        "1/64\" = 1'-0\"": 768,
+                                                        "1\" = 80'-0\"": 960,
+                                                        "1\" = 100'-0\"": 1200,
+                                                        "1\" = 160'-0\"": 1920,
+                                                        "1\" = 200'-0\"": 2400,
+                                                        "1\" = 300'-0\"": 3600,
+                                                        "1\" = 400'-0\"": 4800
+                                                    }
+                                                    if v.Scale in scale_map:
+                                                        view_to_place.Scale = scale_map[v.Scale]
                                         
                                         if view_to_place:
                                             try:

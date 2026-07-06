@@ -140,6 +140,49 @@ class ViewViewModel(ViewModelBase):
         self._level_name = level_name
         self.ParentSheet = parent_sheet
         
+        self.AvailableLevels = AVAILABLE_LEVELS
+        self.AvailableViewFamilyTypes = AVAILABLE_VIEW_FAMILY_TYPES
+        
+        # Attempt to infer level if new view
+        if self._is_new and not self._level_name and self.ParentSheet:
+            matched_lvl = None
+            search_strings = [self._name.upper()]
+            if self.ParentSheet.SheetName:
+                search_strings.append(self.ParentSheet.SheetName.upper())
+                
+            for s_str in search_strings:
+                for lvl in self.AvailableLevels:
+                    if lvl.upper() in s_str:
+                        matched_lvl = lvl
+                        break
+                if matched_lvl: break
+                
+            if not matched_lvl and self.ParentSheet.SheetNumber:
+                import re
+                m = re.search(r'\d+', self.ParentSheet.SheetNumber)
+                if m:
+                    num_str = m.group()
+                    for lvl in self.AvailableLevels:
+                        if num_str in lvl:
+                            matched_lvl = lvl
+                            break
+                            
+            if matched_lvl:
+                self._level_name = matched_lvl
+                        
+        if not self._view_type and self.AvailableViewFamilyTypes:
+            self._view_type = self.AvailableViewFamilyTypes[0]
+            
+        self.AvailableScales = [
+            "12\" = 1'-0\"", "6\" = 1'-0\"", "3\" = 1'-0\"", "1 1/2\" = 1'-0\"",
+            "1\" = 1'-0\"", "3/4\" = 1'-0\"", "1/2\" = 1'-0\"", "3/8\" = 1'-0\"",
+            "1/4\" = 1'-0\"", "3/16\" = 1'-0\"", "1/8\" = 1'-0\"", "1\" = 10'-0\"",
+            "3/32\" = 1'-0\"", "1/16\" = 1'-0\"", "1\" = 20'-0\"", "3/64\" = 1'-0\"",
+            "1\" = 30'-0\"", "1/32\" = 1'-0\"", "1\" = 40'-0\"", "1\" = 50'-0\"",
+            "1\" = 60'-0\"", "1/64\" = 1'-0\"", "1\" = 80'-0\"", "1\" = 100'-0\"",
+            "1\" = 160'-0\"", "1\" = 200'-0\"", "1\" = 300'-0\"", "1\" = 400'-0\""
+        ]
+        
         from pyrevit.forms import Reactive
         self.DeleteCommand = RelayCommand(self.delete_view)
         
@@ -185,6 +228,15 @@ class ViewViewModel(ViewModelBase):
     def ViewType(self, val):
         self._view_type = val
         self.OnPropertyChanged("ViewType")
+        self.OnPropertyChanged("PlanType")
+        
+    @property
+    def PlanType(self): return self._view_type
+    @PlanType.setter
+    def PlanType(self, val):
+        self._view_type = val
+        self.OnPropertyChanged("PlanType")
+        self.OnPropertyChanged("ViewType")
 
     @property
     def Scale(self): return self._scale
@@ -192,6 +244,13 @@ class ViewViewModel(ViewModelBase):
     def Scale(self, val):
         self._scale = val
         self.OnPropertyChanged("Scale")
+        
+    @property
+    def LevelName(self): return self._level_name
+    @LevelName.setter
+    def LevelName(self, val):
+        self._level_name = val
+        self.OnPropertyChanged("LevelName")
         
     @property
     def SourceViewId(self): return self._source_view_id
@@ -225,6 +284,9 @@ class SheetViewModel(ViewModelBase):
         self.OriginalNumber = number
         self.OriginalName = name
         self.OriginalCollectionName = collection_name
+        
+        self.NumberDiff = DiffNode(number, action_callback=self.update_action)
+        self.NameDiff = DiffNode(name, action_callback=self.update_action)
         
         self.Views = ObservableCollection[ViewViewModel]()
         self.AvailableNames = ObservableCollection[str]()
@@ -276,6 +338,7 @@ class SheetViewModel(ViewModelBase):
         
         old_val = self._sheet_number
         self._sheet_number = str(val)
+        self.NumberDiff.ProposedValue = self._sheet_number
         self.OnPropertyChanged("SheetNumber")
         self.update_action()
         if hasattr(self, 'number_changed_callback') and self.number_changed_callback:
@@ -287,6 +350,7 @@ class SheetViewModel(ViewModelBase):
     def SheetName(self, val):
         if val is None: val = ""
         self._sheet_name = str(val)
+        self.NameDiff.ProposedValue = self._sheet_name
         self.OnPropertyChanged("SheetName")
         self.update_action()
 
@@ -338,6 +402,28 @@ class SheetViewModel(ViewModelBase):
     def Action(self, val):
         self._action = val
         self.OnPropertyChanged("Action")
+        self.OnPropertyChanged("ActionIcon")
+        self.OnPropertyChanged("ActionBrush")
+        
+    @property
+    def ActionIcon(self):
+        if self._action == "MATCHED": return u"✔"
+        elif self._action in ["CREATE", "MISSING"]: return u"➕"
+        elif "RENAME" in self._action: return u"✎"
+        elif self._action in ["UNRECONCILED", "EXTRA"]: return u"⚠"
+        elif self._action == "PURGE": return u"✖"
+        return u"·"
+        
+    @property
+    def ActionBrush(self):
+        from System.Windows.Media import BrushConverter
+        conv = BrushConverter()
+        if self._action == "MATCHED": return conv.ConvertFromString("#10B981")
+        elif self._action in ["CREATE", "MISSING"]: return conv.ConvertFromString("#3B82F6")
+        elif "RENAME" in self._action: return conv.ConvertFromString("#F59E0B")
+        elif self._action in ["UNRECONCILED", "EXTRA"]: return conv.ConvertFromString("#EF4444")
+        elif self._action == "PURGE": return conv.ConvertFromString("#6B7280")
+        return conv.ConvertFromString("#9CA3AF")
 
     @property
     def DisciplineName(self): return self._discipline_name
