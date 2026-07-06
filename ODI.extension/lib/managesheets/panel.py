@@ -2688,7 +2688,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                 s_elem = doc.GetElement(r.ElementId)
                                 if s_elem:
                                     val = s_elem.Id.IntegerValue if hasattr(s_elem.Id, "IntegerValue") else s_elem.Id.Value
-                                    s_elem.SheetNumber = "ZZ~" + str(val)
+                                    s_elem.SheetNumber = "ZZ_TEMP_" + str(val)
                         t1.Commit()
                         
                     # Phase 2: Finalize
