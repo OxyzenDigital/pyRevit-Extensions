@@ -445,28 +445,6 @@ def generate_plan_json(harvested_data, matched_slots, extra_sheets):
         rows.append(row)
         seq += 1
         
-    for ex in extra_sheets:
-        row = {
-            "seq": seq,
-            "target_number": "",
-            "target_name": "",
-            "status": "UNRECONCILED",
-            "existing_number": ex.number,
-            "existing_name": ex.name,
-            "sheet_element_id": ex.element_id.IntegerValue if hasattr(ex.element_id, "IntegerValue") else ex.element_id.Value,
-            "view_action": "NONE",
-            "view_element_id": -1,
-            "view_recipe": None,
-            "requires_user_decision": False,
-            "match_score": 0.0,
-            "collection": ex.sheet_collection,
-            "discipline": "Unknown",
-            "cg": "Unknown",
-            "series_name": "Unknown"
-        }
-        rows.append(row)
-        seq += 1
-        
     return {
         "schema_version": "1.0",
         "grid_size": harvested_data.grid_size,
