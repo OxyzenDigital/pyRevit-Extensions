@@ -787,6 +787,7 @@
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal">
                                         <Button Name="Btn_ResetAll" Content="⟲ Reset All" Background="Transparent" Foreground="{DynamicResource TextBrush}" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" Margin="5,0,0,0" Padding="5,2"/>
+                                        <CheckBox Name="Chk_HideMatched" Content="Hide matched sheets" VerticalAlignment="Center" Margin="15,0,5,0" Foreground="{DynamicResource TextBrush}" IsChecked="False" Click="on_filter_changed"/>
                                         <CheckBox Name="Chk_AddMissing" Content="+ Add missing sheets" VerticalAlignment="Center" Margin="15,0,5,0" Foreground="{DynamicResource TextBrush}" IsChecked="True"/>
                                     </StackPanel>
                                 </Grid>
@@ -828,8 +829,8 @@
                                                 <CheckBox Grid.Column="0" IsChecked="{Binding IsChecked, Mode=TwoWay}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
                                                 <TextBlock Grid.Column="1" Text="{Binding SheetSeries}" Foreground="{DynamicResource TextLightBrush}" VerticalAlignment="Center"/>
                                                 
-                                                <!-- Sheet Number with Validation Color -->
-                                                <Border Grid.Column="2" Background="{Binding ValidationBrush}" CornerRadius="2" Padding="4,2" Margin="0,0,5,0">
+                                                <!-- Sheet Number -->
+                                                <Border Grid.Column="2" Background="Transparent" CornerRadius="2" Padding="4,2" Margin="0,0,5,0">
                                                     <TextBlock VerticalAlignment="Center" TextAlignment="Center">
                                                         <Run Text="{Binding NumberDiff.Prefix}" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold"/>
                                                         <Run Text="{Binding NumberDiff.Old}" Foreground="#EF4444" TextDecorations="Strikethrough"/>
