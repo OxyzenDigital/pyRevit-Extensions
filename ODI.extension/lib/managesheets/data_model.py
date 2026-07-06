@@ -127,18 +127,21 @@ class AssignableViewNode(ViewModelBase):
         self.DisplayName = "{} (on Sheet {})".format(name, sheet_number) if is_placed and sheet_number else name
 
 class ViewViewModel(ViewModelBase):
-    def __init__(self, view_id, name, view_type="FloorPlan", scale="1/8\" = 1'-0\"", is_new=False, level_name="", parent_sheet=None):
+    def __init__(self, view_id, name, view_type="FloorPlan", scale="1/8\" = 1'-0\"", is_new=False, level_name="", parent_sheet=None, view_number=""):
         ViewModelBase.__init__(self)
         self.ViewId = view_id
         self._name = name
         self._view_type = view_type
         self._scale = scale
         self._is_new = is_new
+        self._view_number = view_number
         self._assignment_mode = "Existing" if not is_new else "New"
         self._source_view_id = ElementId.InvalidElementId
         self._validation_warning = ""
         self._level_name = level_name
         self.ParentSheet = parent_sheet
+        self.OriginalName = name
+        self.OriginalViewNumber = str(view_number)
         
         self.AvailableLevels = AVAILABLE_LEVELS
         self.AvailableViewFamilyTypes = AVAILABLE_VIEW_FAMILY_TYPES
@@ -185,11 +188,26 @@ class ViewViewModel(ViewModelBase):
         
         from pyrevit.forms import Reactive
         self.DeleteCommand = RelayCommand(self.delete_view)
+        self.MoveUpCommand = RelayCommand(self.move_up)
+        self.MoveDownCommand = RelayCommand(self.move_down)
         
     def delete_view(self, param=None):
         if self.ParentSheet:
             self.ParentSheet.Views.Remove(self)
+            self.ParentSheet.reassign_view_numbers()
+            
+    def move_up(self, param=None):
+        if self.ParentSheet:
+            self.ParentSheet.move_view_up(self)
+            
+    def move_down(self, param=None):
+        if self.ParentSheet:
+            self.ParentSheet.move_view_down(self)
         
+    def trigger_validation(self):
+        if self.ParentSheet and hasattr(self.ParentSheet, 'validation_callback') and self.ParentSheet.validation_callback:
+            self.ParentSheet.validation_callback()
+
     @property
     def AssignmentMode(self): return self._assignment_mode
     @AssignmentMode.setter
@@ -199,6 +217,7 @@ class ViewViewModel(ViewModelBase):
         self.OnPropertyChanged("AssignmentMode")
         self.OnPropertyChanged("IsNew")
         self.OnPropertyChanged("IsExisting")
+        self.trigger_validation()
         
     @property
     def IsNew(self): return self._is_new
@@ -208,6 +227,11 @@ class ViewViewModel(ViewModelBase):
 
     @property
     def LevelName(self): return self._level_name
+    @LevelName.setter
+    def LevelName(self, val):
+        self._level_name = val
+        self.OnPropertyChanged("LevelName")
+        self.trigger_validation()
     @property
     def ValidationWarning(self): return self._validation_warning
     @ValidationWarning.setter
@@ -221,6 +245,15 @@ class ViewViewModel(ViewModelBase):
     def Name(self, val):
         self._name = val
         self.OnPropertyChanged("Name")
+        self.trigger_validation()
+        
+    @property
+    def ViewNumber(self): return self._view_number
+    @ViewNumber.setter
+    def ViewNumber(self, val):
+        self._view_number = str(val)
+        self.OnPropertyChanged("ViewNumber")
+        self.trigger_validation()
         
     @property
     def ViewType(self): return self._view_type
@@ -229,14 +262,13 @@ class ViewViewModel(ViewModelBase):
         self._view_type = val
         self.OnPropertyChanged("ViewType")
         self.OnPropertyChanged("PlanType")
+        self.trigger_validation()
         
     @property
     def PlanType(self): return self._view_type
     @PlanType.setter
     def PlanType(self, val):
-        self._view_type = val
-        self.OnPropertyChanged("PlanType")
-        self.OnPropertyChanged("ViewType")
+        self.ViewType = val
 
     @property
     def Scale(self): return self._scale
@@ -244,13 +276,7 @@ class ViewViewModel(ViewModelBase):
     def Scale(self, val):
         self._scale = val
         self.OnPropertyChanged("Scale")
-        
-    @property
-    def LevelName(self): return self._level_name
-    @LevelName.setter
-    def LevelName(self, val):
-        self._level_name = val
-        self.OnPropertyChanged("LevelName")
+        self.trigger_validation()
         
     @property
     def SourceViewId(self): return self._source_view_id
@@ -313,6 +339,22 @@ class SheetViewModel(ViewModelBase):
     def on_move_down(self, parameter=None):
         if self.move_down_callback:
             self.move_down_callback(self)
+            
+    def move_view_up(self, view_vm):
+        idx = self.Views.IndexOf(view_vm)
+        if idx > 0:
+            self.Views.Move(idx, idx - 1)
+            self.reassign_view_numbers()
+            
+    def move_view_down(self, view_vm):
+        idx = self.Views.IndexOf(view_vm)
+        if idx >= 0 and idx < self.Views.Count - 1:
+            self.Views.Move(idx, idx + 1)
+            self.reassign_view_numbers()
+            
+    def reassign_view_numbers(self):
+        for i, v in enumerate(self.Views):
+            v.ViewNumber = str(i + 1)
         
     def populate_available_names(self):
         import classification
@@ -360,6 +402,7 @@ class SheetViewModel(ViewModelBase):
     def CollectionName(self, val):
         self._collection_name = val
         self.OnPropertyChanged("CollectionName")
+        if self.validation_callback: self.validation_callback()
 
     @property
     def IsChecked(self): return self._is_checked
@@ -367,6 +410,8 @@ class SheetViewModel(ViewModelBase):
     def IsChecked(self, val):
         self._is_checked = val
         self.OnPropertyChanged("IsChecked")
+        if hasattr(self, 'validation_callback') and self.validation_callback:
+            self.validation_callback()
         
     @property
     def IsNameUnique(self): return self._is_name_unique
@@ -416,14 +461,12 @@ class SheetViewModel(ViewModelBase):
         
     @property
     def ActionBrush(self):
-        from System.Windows.Media import BrushConverter
-        conv = BrushConverter()
-        if self._action == "MATCHED": return conv.ConvertFromString("#10B981")
-        elif self._action in ["CREATE", "MISSING"]: return conv.ConvertFromString("#3B82F6")
-        elif "RENAME" in self._action: return conv.ConvertFromString("#F59E0B")
-        elif self._action in ["UNRECONCILED", "EXTRA"]: return conv.ConvertFromString("#EF4444")
-        elif self._action == "PURGE": return conv.ConvertFromString("#6B7280")
-        return conv.ConvertFromString("#9CA3AF")
+        if self._action == "MATCHED": return "#10B981"
+        elif self._action in ["CREATE", "MISSING"]: return "#3B82F6"
+        elif "RENAME" in self._action: return "#F59E0B"
+        elif self._action in ["UNRECONCILED", "EXTRA"]: return "#EF4444"
+        elif self._action == "PURGE": return "#6B7280"
+        return "#9CA3AF"
 
     @property
     def DisciplineName(self): return self._discipline_name
@@ -431,6 +474,7 @@ class SheetViewModel(ViewModelBase):
     def DisciplineName(self, val):
         self._discipline_name = val
         self.OnPropertyChanged("DisciplineName")
+        if self.validation_callback: self.validation_callback()
 
     @property
     def ContentGroupName(self): return self._content_group_name
@@ -438,6 +482,7 @@ class SheetViewModel(ViewModelBase):
     def ContentGroupName(self, val):
         self._content_group_name = val
         self.OnPropertyChanged("ContentGroupName")
+        if self.validation_callback: self.validation_callback()
 
     def mark_purge(self, parameter=None):
         self.Action = "PURGE"
@@ -467,21 +512,45 @@ class SheetViewModel(ViewModelBase):
         self.OnPropertyChanged("ToggleText")
         if self.validation_callback: self.validation_callback()
         
-    def add_view(self, parameter=None):
+    def add_view(self, param=None):
+        from Autodesk.Revit.DB import ElementId
         new_v = ViewViewModel(ElementId.InvalidElementId, "New View", is_new=True, parent_sheet=self)
         self.Views.Add(new_v)
+        self.reassign_view_numbers()
+        if hasattr(self, 'validation_callback') and self.validation_callback:
+            self.validation_callback()
 
     def update_action(self):
-        if self.IsTemplate: 
-            if self.validation_callback: self.validation_callback()
-            return
-        if self.SheetNumber != self.OriginalNumber or self.SheetName != self.OriginalName:
+        if getattr(self, '_is_purged', False): return
+        
+        has_changes = (self.SheetName != self.OriginalName) or (self.SheetNumber != self.OriginalNumber)
+        # Determine RENAME status
+        if has_changes:
+            if self.SheetName != self.OriginalName and self.SheetNumber != self.OriginalNumber:
+                self.MatchStatus = "RENAME_BOTH"
+            elif self.SheetName != self.OriginalName:
+                self.MatchStatus = "RENAME_NAME"
+            else:
+                self.MatchStatus = "RENAME_NUMBER"
+        else:
+            self.MatchStatus = "MATCHED"
+            
+        # Check if views have changes
+        views_changed = False
+        for v in self.Views:
+            if v.IsNew or getattr(v, 'Name', '') != getattr(v, 'OriginalName', '') or getattr(v, 'ViewNumber', '') != getattr(v, 'OriginalViewNumber', ''):
+                views_changed = True
+                break
+            
+        if self.IsTemplate:
+            self.Action = "CREATE"
+        elif self.MatchStatus != "MATCHED" or views_changed:
             self.Action = "UPDATE"
-            self.IsChecked = True
         else:
             self.Action = "MATCHED"
-            self.IsChecked = False
-        if self.validation_callback: self.validation_callback()
+            
+        if hasattr(self, 'validation_callback') and self.validation_callback:
+            self.validation_callback()
 
 class NavTreeNode(ViewModelBase):
     def __init__(self, name, node_type, tag=None, parent=None):

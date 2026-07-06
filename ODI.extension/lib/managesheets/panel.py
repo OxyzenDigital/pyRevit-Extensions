@@ -2682,11 +2682,37 @@ class ManageSheetsPanel(forms.WPFWindow):
                                 for v in getattr(r, 'Views', []):
                                     if getattr(v, 'ViewId', ElementId.InvalidElementId) != ElementId.InvalidElementId:
                                         v_elem = doc.GetElement(v.ViewId)
-                                        if v_elem and v_elem.Name != v.Name:
-                                            try:
-                                                v_elem.Name = v.Name
-                                                renames += 1
-                                            except: pass
+                                        if v_elem:
+                                            if v_elem.Name != v.Name:
+                                                try:
+                                                    v_elem.Name = v.Name
+                                                    renames += 1
+                                                except: pass
+                                                
+                                            from Autodesk.Revit.DB import Viewport, BuiltInParameter
+                                            vps = FilteredElementCollector(doc).OfClass(Viewport).ToElements()
+                                            target_vp = None
+                                            for vp in vps:
+                                                if vp.ViewId == v.ViewId:
+                                                    target_vp = vp
+                                                    break
+                                            
+                                            if target_vp:
+                                                if target_vp.SheetId != target_sheet_id:
+                                                    center = target_vp.GetBoxCenter()
+                                                    doc.Delete(target_vp.Id)
+                                                    if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
+                                                        new_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
+                                                        dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                        if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
+                                                            try: dn_param.Set(str(v.ViewNumber))
+                                                            except: pass
+                                                else:
+                                                    dn_param = target_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                    if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
+                                                        if dn_param.AsString() != str(v.ViewNumber):
+                                                            try: dn_param.Set(str(v.ViewNumber))
+                                                            except: pass
                                     elif getattr(v, 'IsNew', False):
                                         from Autodesk.Revit.DB import ViewFamilyType, ViewFamily, Level, ViewPlan, ViewDrafting
                                         view_to_place = None
@@ -2746,7 +2772,12 @@ class ManageSheetsPanel(forms.WPFWindow):
                                             except: pass
                                             
                                             if Viewport.CanAddViewToSheet(doc, target_sheet_id, view_to_place.Id):
-                                                Viewport.Create(doc, target_sheet_id, view_to_place.Id, XYZ(1.5, 1.0, 0))
+                                                new_vp = Viewport.Create(doc, target_sheet_id, view_to_place.Id, XYZ(1.5, 1.0, 0))
+                                                from Autodesk.Revit.DB import BuiltInParameter
+                                                dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
+                                                    try: dn_param.Set(str(v.ViewNumber))
+                                                    except: pass
                                             creates += 1
                         t2.Commit()
                         
