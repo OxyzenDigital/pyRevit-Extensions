@@ -3,7 +3,7 @@
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
-        Height="800" Width="1200"
+        Height="1000" Width="1500" MinWidth="1000" MinHeight="600"
         WindowStartupLocation="CenterScreen">
     <Window.Resources>
         <!-- Quantify & Measure Exact Color Schema -->
@@ -660,7 +660,7 @@
                                             <TreeView.ItemTemplate>
                                                 <HierarchicalDataTemplate ItemsSource="{Binding Children}">
                                                     <StackPanel Orientation="Horizontal" Margin="0,2" IsEnabled="{Binding IsEnabled}">
-                                                        <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" Click="on_checkbox_click" IsThreeState="{Binding IsThreeState}" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                                        <CheckBox IsChecked="{Binding IsChecked, Mode=OneWay}" IsEnabled="{Binding IsEnabled}" Click="on_checkbox_click" IsThreeState="{Binding IsThreeState}" VerticalAlignment="Center" Margin="0,0,5,0"/>
                                                         <TextBlock Text="{Binding Name}" FontWeight="{Binding FontWeight}" VerticalAlignment="Center" Foreground="{DynamicResource TextBrush}"/>
                                                         <TextBlock Text="{Binding DisplayCount}" Foreground="{DynamicResource TextLightBrush}" FontSize="10" Margin="5,0,0,0" VerticalAlignment="Center" Visibility="{Binding ShowCount, Converter={StaticResource BoolToVis}}"/>
                                                         <Button ToolTip="Configure Segment Grids for this Modifier" Width="22" Height="22" Margin="5,0,0,0" VerticalAlignment="Center" Background="Transparent" BorderThickness="0" Command="{Binding ConfigureGridsCommand}">
@@ -701,7 +701,7 @@
 
             
 <!-- TAB 2: SHEET REVIEWER -->
-                <TabItem Header="Sheet Reviewer">
+                <TabItem x:Name="Tab_SheetReviewer" Header="Sheet Reviewer">
                     <Grid Background="{DynamicResource ControlBrush}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="380"/>
@@ -723,7 +723,7 @@
                                 
                                 <TreeView Name="NavTree" Grid.Row="1" Background="Transparent" BorderThickness="0" Padding="5" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                                     <TreeView.ItemContainerStyle>
-                                        <Style TargetType="{x:Type TreeViewItem}">
+                                        <Style TargetType="{x:Type TreeViewItem}" BasedOn="{StaticResource BaseTreeItemStyle}">
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsActiveContext}" Value="True">
                                                     <Setter Property="Background" Value="{DynamicResource InactiveSelectionBrush}"/>
@@ -786,12 +786,6 @@
                                         <TextBlock Name="Txt_GridTitle" Text="Select an item in the navigation tree..." FontWeight="SemiBold" VerticalAlignment="Center" Margin="0,0,15,0"/>
                                     </StackPanel>
                                     <StackPanel Grid.Column="1" Orientation="Horizontal">
-                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,15,0">
-                                            <TextBlock Text="✔ Match" Foreground="#10B981" FontSize="11" Margin="5,0"/>
-                                            <TextBlock Text="➕ Create" Foreground="#3B82F6" FontSize="11" Margin="5,0"/>
-                                            <TextBlock Text="✎ Rename" Foreground="#F59E0B" FontSize="11" Margin="5,0"/>
-                                            <TextBlock Text="⚠ Error" Foreground="#EF4444" FontSize="11" Margin="5,0"/>
-                                        </StackPanel>
                                         <Button Name="Btn_ResetAll" Content="⟲ Reset All" Background="Transparent" Foreground="{DynamicResource TextBrush}" BorderThickness="1" BorderBrush="{DynamicResource BorderBrush}" Margin="5,0,0,0" Padding="5,2"/>
                                         <CheckBox Name="Chk_AddMissing" Content="+ Add missing sheets" VerticalAlignment="Center" Margin="15,0,5,0" Foreground="{DynamicResource TextBrush}" IsChecked="True"/>
                                     </StackPanel>
@@ -804,13 +798,13 @@
                                     <ColumnDefinition Width="30"/>
                                     <ColumnDefinition Width="90"/>
                                     <ColumnDefinition Width="100"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="40"/>
+                                    <ColumnDefinition Width="*" MinWidth="200"/>
+                                    <ColumnDefinition Width="60"/>
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Grid.Column="1" Text="SERIES" Foreground="{DynamicResource TextLightBrush}" FontWeight="SemiBold" FontSize="11"/>
                                 <TextBlock Grid.Column="2" Text="NUMBER" Foreground="{DynamicResource TextLightBrush}" FontWeight="SemiBold" FontSize="11"/>
                                 <TextBlock Grid.Column="3" Text="NAME" Foreground="{DynamicResource TextLightBrush}" FontWeight="SemiBold" FontSize="11"/>
-                                <TextBlock Grid.Column="4" Text="STATUS" Foreground="{DynamicResource TextLightBrush}" FontWeight="SemiBold" FontSize="11" HorizontalAlignment="Right" Margin="0,0,15,0"/>
+                                <TextBlock Grid.Column="4" Text="PURGE" Foreground="{DynamicResource TextLightBrush}" FontWeight="SemiBold" FontSize="11" HorizontalAlignment="Right" Margin="0,0,15,0"/>
                             </Grid>
 
                             <!-- DataGrid replacing ListBox and Fake Header -->
@@ -818,7 +812,7 @@
                                 <ItemsControl Name="EditorList" Background="Transparent" BorderThickness="0">
                                     <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="0,0,0,1" Padding="5">
+                                    <Border BorderBrush="{Binding ActionBrush}" BorderThickness="4,0,0,1" Padding="5" Background="{DynamicResource ControlBrush}" Margin="0,0,0,2">
                                         <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                                                 <Expander.Header>
                                                     <Grid HorizontalAlignment="Stretch" Margin="0,0,50,0" Width="{Binding RelativeSource={RelativeSource Mode=FindAncestor, AncestorType={x:Type Expander}}, Path=ActualWidth}">
@@ -827,8 +821,8 @@
                                                     <ColumnDefinition Width="30"/>
                                                     <ColumnDefinition Width="90"/>
                                                     <ColumnDefinition Width="100"/>
-                                                    <ColumnDefinition Width="*"/>
-                                                    <ColumnDefinition Width="40"/>
+                                                    <ColumnDefinition Width="*" MinWidth="200"/>
+                                                    <ColumnDefinition Width="60"/>
                                                 </Grid.ColumnDefinitions>
                                                 
                                                 <CheckBox Grid.Column="0" IsChecked="{Binding IsChecked, Mode=TwoWay}" VerticalAlignment="Center" HorizontalAlignment="Center"/>
@@ -852,22 +846,103 @@
                                                     <Run Text="{Binding NameDiff.Suffix}" Foreground="{DynamicResource TextBrush}"/>
                                                 </TextBlock>
 
-                                                <TextBlock Grid.Column="4" Text="{Binding ActionIcon}" ToolTip="{Binding Action}" Foreground="{Binding ActionBrush}" FontWeight="Bold" FontSize="14" VerticalAlignment="Center" HorizontalAlignment="Right" Margin="0,0,15,0" FontFamily="Segoe UI Symbol"/>
+                                                <Button Grid.Column="4" Content="🗑" Command="{Binding PurgeCommand}" HorizontalAlignment="Right" Background="Transparent" Foreground="#EF4444" BorderThickness="0" FontSize="14" ToolTip="Mark sheet for deletion" Margin="0,0,15,0" FontFamily="Segoe UI Emoji">
+                                                    <Button.Style>
+                                                        <Style TargetType="Button">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsChecked}" Value="False">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="PURGE">
+                                                                    <Setter Property="Background" Value="#EF4444"/>
+                                                                    <Setter Property="Foreground" Value="White"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="MATCHED">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="CREATE">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="MISSING">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="RENAME_NAME">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="RENAME_NUM">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="RENAME_BOTH">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="UNRECONCILED">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding Action}" Value="EXTRA">
+                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Button.Style>
+                                                </Button>
                                             
                                                     </Grid>
                                                 </Expander.Header>
                                                 <StackPanel Margin="30,5,0,0">
                                                     
                                                 <StackPanel Margin="0,5,0,5">
+                                                    
+                                                    <!-- Detailed Status Readout -->
+                                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                                        <TextBlock Text="Action Required: " Foreground="{DynamicResource TextLightBrush}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                        <TextBlock Text="{Binding Action}" FontWeight="Bold" FontSize="12" VerticalAlignment="Center">
+                                                            <TextBlock.Style>
+                                                                <Style TargetType="TextBlock">
+                                                                    <Setter Property="Foreground" Value="{DynamicResource AccentBrush}"/>
+                                                                    <Style.Triggers>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="MATCHED">
+                                                                            <Setter Property="Foreground" Value="#10B981"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="CREATE">
+                                                                            <Setter Property="Foreground" Value="#3B82F6"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="MISSING">
+                                                                            <Setter Property="Foreground" Value="#3B82F6"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="RENAME_NAME">
+                                                                            <Setter Property="Foreground" Value="#F59E0B"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="RENAME_NUM">
+                                                                            <Setter Property="Foreground" Value="#F59E0B"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="RENAME_BOTH">
+                                                                            <Setter Property="Foreground" Value="#F59E0B"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="UNRECONCILED">
+                                                                            <Setter Property="Foreground" Value="#EF4444"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="EXTRA">
+                                                                            <Setter Property="Foreground" Value="#EF4444"/>
+                                                                        </DataTrigger>
+                                                                        <DataTrigger Binding="{Binding Action}" Value="PURGE">
+                                                                            <Setter Property="Foreground" Value="#6B7280"/>
+                                                                        </DataTrigger>
+                                                                    </Style.Triggers>
+                                                                </Style>
+                                                            </TextBlock.Style>
+                                                        </TextBlock>
+                                                    </StackPanel>
+
                                                     <Grid>
                                                         <Grid.ColumnDefinitions>
                                                             <ColumnDefinition Width="100"/>
-                                                            <ColumnDefinition Width="*"/>
+                                                            <ColumnDefinition Width="*" MinWidth="200"/>
                                                             <ColumnDefinition Width="140"/>
                                                         </Grid.ColumnDefinitions>
                                                         
                                                         <!-- Editable Number (Visible only if not MATCHED) -->
-                                                        <TextBox Grid.Column="0" Text="{Binding SheetNumber, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" Padding="4,2" Margin="0,0,5,0">
+                                                        <TextBox Grid.Column="0" Text="{Binding SheetNumber, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" KeyDown="on_textbox_keydown" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}" Padding="4,2" Margin="0,0,5,0">
                                                             <TextBox.Style>
                                                                 <Style TargetType="TextBox">
                                                                     <Setter Property="Visibility" Value="Visible"/>
@@ -881,7 +956,7 @@
                                                         </TextBox>
                                                         
                                                         <!-- Editable Name Combo -->
-                                                        <ComboBox Grid.Column="1" IsEditable="True" Text="{Binding SheetName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" ItemsSource="{Binding AvailableNames}" Margin="0,0,5,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}">
+                                                        <ComboBox Grid.Column="1" IsEditable="True" Text="{Binding SheetName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" KeyDown="on_textbox_keydown" ItemsSource="{Binding AvailableNames}" Margin="0,0,5,0" Background="{DynamicResource ControlBrush}" Foreground="{DynamicResource TextBrush}" BorderBrush="{DynamicResource BorderBrush}">
                                                             <ComboBox.Style>
                                                                 <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
                                                                     <Setter Property="Visibility" Value="Visible"/>
@@ -899,6 +974,7 @@
                                                             <Button Content="&#x25B2;" Command="{Binding MoveUpCommand}" Padding="5,0" Margin="2,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}" ToolTip="Move Row Up" FontFamily="Segoe UI Symbol"/>
                                                             <Button Content="&#x25BC;" Command="{Binding MoveDownCommand}" Padding="5,0" Margin="2,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}" ToolTip="Move Row Down" FontFamily="Segoe UI Symbol"/>
                                                             <Button Content="{Binding ToggleText}" Command="{Binding UndoCommand}" Padding="5,0" Margin="2,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource TextLightBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}"/>
+                                                            <Button Content="Purge" Command="{Binding PurgeCommand}" Padding="5,0" Margin="2,0" Background="Transparent" BorderBrush="#EF4444" BorderThickness="1" Foreground="#EF4444" ToolTip="Mark sheet for deletion"/>
                                                         </StackPanel>
                                                     </Grid>
                                                     
@@ -915,22 +991,33 @@
                                                                             <Grid Margin="0,2">
                                                                                 <Grid.ColumnDefinitions>
                                                                                     <ColumnDefinition Width="80"/>
-                                                                                    <ColumnDefinition Width="*"/>
-                                                                                    <ColumnDefinition Width="120"/>
-                                                                                    <ColumnDefinition Width="200"/>
+                                                                                    <ColumnDefinition Width="40"/>
+                                                                                    <ColumnDefinition Width="*" MinWidth="150"/>
                                                                                     <ColumnDefinition Width="100"/>
-                                                                                    <ColumnDefinition Width="30"/>
+                                                                                    <ColumnDefinition Width="150"/>
+                                                                                    <ColumnDefinition Width="120"/>
+                                                                                    <ColumnDefinition Width="50"/>
+                                                                                    <ColumnDefinition Width="40"/>
                                                                                 </Grid.ColumnDefinitions>
                                                                                 
+                                                                                <!-- 0: Mode -->
                                                                                 <ComboBox Grid.Column="0" IsEditable="True" Text="{Binding AssignmentMode, Mode=TwoWay}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
                                                                                     <ComboBoxItem Content="New" />
                                                                                     <ComboBoxItem Content="Existing" />
                                                                                 </ComboBox>
+
+                                                                                <!-- 1: View Number -->
+                                                                                <TextBox Grid.Column="1" Text="{Binding ViewNumber, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" KeyDown="on_textbox_keydown" ToolTip="Detail Number" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}" TextAlignment="Center"/>
                                                                                 
-                                                                                <TextBox Grid.Column="1" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" ToolTip="{Binding Name}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}"/>
+                                                                                <!-- 2: View Name -->
+                                                                                <TextBox Grid.Column="2" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" KeyDown="on_textbox_keydown" ToolTip="{Binding Name}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}"/>
                                                                                 
-                                                                                <!-- Level (Visible if New) -->
-                                                                                <ComboBox Grid.Column="2" IsEditable="True" Text="{Binding LevelName, Mode=TwoWay}" ItemsSource="{Binding AvailableLevels}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+                                                                                <!-- 3: Scale -->
+                                                                                <ComboBox Grid.Column="3" IsEditable="True" Text="{Binding Scale, Mode=TwoWay}" ItemsSource="{Binding AvailableScales}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+                                                                                </ComboBox>
+
+                                                                                <!-- 4: Plan Type -->
+                                                                                <ComboBox Grid.Column="4" IsEditable="True" Text="{Binding PlanType, Mode=TwoWay}" ItemsSource="{Binding AvailableViewFamilyTypes}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
                                                                                     <ComboBox.Style>
                                                                                         <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
                                                                                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -943,8 +1030,8 @@
                                                                                     </ComboBox.Style>
                                                                                 </ComboBox>
                                                                                 
-                                                                                <!-- Plan Type -->
-                                                                                <ComboBox Grid.Column="3" IsEditable="True" Text="{Binding PlanType, Mode=TwoWay}" ItemsSource="{Binding AvailableViewFamilyTypes}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+                                                                                <!-- 5: Level (Visible if New) -->
+                                                                                <ComboBox Grid.Column="5" IsEditable="True" Text="{Binding LevelName, Mode=TwoWay}" ItemsSource="{Binding AvailableLevels}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
                                                                                     <ComboBox.Style>
                                                                                         <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
                                                                                             <Setter Property="Visibility" Value="Collapsed"/>
@@ -956,12 +1043,15 @@
                                                                                         </Style>
                                                                                     </ComboBox.Style>
                                                                                 </ComboBox>
+
+                                                                                <!-- 6: Move Controls -->
+                                                                                <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Center">
+                                                                                    <Button Content="&#x25B2;" Command="{Binding MoveUpCommand}" Padding="2,0" Margin="1,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}" ToolTip="Move Up" FontFamily="Segoe UI Symbol" FontSize="10"/>
+                                                                                    <Button Content="&#x25BC;" Command="{Binding MoveDownCommand}" Padding="2,0" Margin="1,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}" ToolTip="Move Down" FontFamily="Segoe UI Symbol" FontSize="10"/>
+                                                                                </StackPanel>
                                                                                 
-                                                                                <!-- Scale -->
-                                                                                <ComboBox Grid.Column="4" IsEditable="True" Text="{Binding Scale, Mode=TwoWay}" ItemsSource="{Binding AvailableScales}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
-                                                                                </ComboBox>
-                                                                                
-                                                                                <Button Grid.Column="5" Content="&#xE107;" FontFamily="Segoe UI Symbol" Command="{Binding DeleteCommand}" Background="Transparent" Foreground="{DynamicResource ErrorBrush}" BorderThickness="0" ToolTip="Remove View"/>
+                                                                                <!-- 7: Remove -->
+                                                                                <Button Grid.Column="7" Content="X" FontWeight="Bold" Command="{Binding DeleteCommand}" Background="Transparent" Foreground="#EF4444" BorderThickness="0" ToolTip="Remove View"/>
                                                                             </Grid>
                                                                     </DataTemplate>
                                                                 </ItemsControl.ItemTemplate>
@@ -1003,6 +1093,11 @@
                     </Grid.ColumnDefinitions>
                     
                     <TextBlock Name="Txt_Status" Grid.Column="0" Text="Ready" VerticalAlignment="Center" Foreground="{DynamicResource TextLightBrush}" FontWeight="SemiBold"/>
+                    
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,15,0">
+                        <TextBlock Text="Default TitleBlock:" VerticalAlignment="Center" Foreground="{DynamicResource TextLightBrush}" Margin="0,0,10,0"/>
+                        <ComboBox Name="Combo_TitleBlocks" Width="200" DisplayMemberPath="Name" VerticalAlignment="Center"/>
+                    </StackPanel>
                     
                     <Button Name="Btn_Push" Grid.Column="2" Content="Push To Revit" Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Bold" FontSize="14" Padding="30,8" VerticalAlignment="Center"/>
                 </Grid>

@@ -878,17 +878,19 @@ class ManageSheetsPanel(forms.WPFWindow):
         if hasattr(self, 'ResizeTopRight'): self.ResizeTopRight.DragDelta += self.on_resize_top_right
         if hasattr(self, 'ResizeTopLeft'): self.ResizeTopLeft.DragDelta += self.on_resize_top_left
         
-        # Initialize Button States (trees start expanded)
-        self.Btn_CollapseSchema.IsEnabled = True
-        self.Btn_CollapseModifiers.IsEnabled = True
-        self.Btn_CollapseNav.IsEnabled = True
-        if hasattr(self, 'Btn_CollapseEditor'): self.Btn_CollapseEditor.IsEnabled = True
+        # Native WPF Event Handlers for accurate Expand/Collapse Button states
+        import System
+        from System.Windows.Controls import TreeViewItem
+        from System.Windows import RoutedEventHandler
         
-        self.Btn_ExpandSchema.IsEnabled = False
-        self.Btn_ExpandModifiers.IsEnabled = False
-        self.Btn_ExpandNav.IsEnabled = False
-        if hasattr(self, 'Btn_ExpandEditor'): self.Btn_ExpandEditor.IsEnabled = False
+        self.TargetSchemaTree.AddHandler(TreeViewItem.ExpandedEvent, RoutedEventHandler(self.on_target_tree_state))
+        self.TargetSchemaTree.AddHandler(TreeViewItem.CollapsedEvent, RoutedEventHandler(self.on_target_tree_state))
         
+        self.Tree_Modifiers.AddHandler(TreeViewItem.ExpandedEvent, RoutedEventHandler(self.on_modifier_tree_state))
+        self.Tree_Modifiers.AddHandler(TreeViewItem.CollapsedEvent, RoutedEventHandler(self.on_modifier_tree_state))
+        
+        self.NavTree.AddHandler(TreeViewItem.ExpandedEvent, RoutedEventHandler(self.on_nav_tree_state))
+        self.NavTree.AddHandler(TreeViewItem.CollapsedEvent, RoutedEventHandler(self.on_nav_tree_state))
         self.load_settings()
         self.generate_target_schema() # Initial run
         self.check_and_load_data()
@@ -1071,7 +1073,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                 self.toggle_tree(node.Children, state)
                 
     def toggle_editor(self, state):
-        for node in self.all_grid_nodes:
+        for node in self.EditorItems:
             node.IsExpanded = state
 
 
@@ -1489,8 +1491,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                 )
                 self.generate_target_schema()
                 self.save_settings() # Save loaded config to user config immediately
-                
-                forms.alert("Schema imported successfully.", title="Import Success")
             except Exception as ex:
                 forms.alert("Failed to import schema: {}".format(ex), title="Import Error")
             
@@ -1692,6 +1692,11 @@ class ManageSheetsPanel(forms.WPFWindow):
             pass
         else:
             pass
+            
+        # Only enable Sheet Reviewer tab if a schema is actively generated
+        if hasattr(self, 'Tab_SheetReviewer'):
+            self.Tab_SheetReviewer.IsEnabled = (len(self.generated_targets) > 0)
+            
         # Auto-expand the target schema tree so user sees the new combinations immediately
         if hasattr(self, 'toggle_tree'):
             self.toggle_tree(self.TargetSchemaRoot, True)
@@ -1809,46 +1814,86 @@ class ManageSheetsPanel(forms.WPFWindow):
         for root_node in self.TargetSchemaRoot:
             filter_node(root_node)
 
+    def update_tree_buttons(self, coll, btn_expand, btn_collapse):
+        def _any_expanded(nodes):
+            for n in nodes:
+                if getattr(n, 'IsExpanded', False): return True
+                if hasattr(n, 'Children') and _any_expanded(n.Children): return True
+            return False
+            
+        def _any_collapsed(nodes):
+            for n in nodes:
+                if not getattr(n, 'IsExpanded', False) and hasattr(n, 'Children') and n.Children.Count > 0: return True
+                if hasattr(n, 'Children') and _any_collapsed(n.Children): return True
+            return False
+            
+        if hasattr(self, btn_expand): getattr(self, btn_expand).IsEnabled = _any_collapsed(coll)
+        if hasattr(self, btn_collapse): getattr(self, btn_collapse).IsEnabled = _any_expanded(coll)
+
+    def on_target_tree_state(self, sender, e):
+        self.update_tree_buttons(self.TargetSchemaRoot, 'Btn_ExpandSchema', 'Btn_CollapseSchema')
+        
+    def on_modifier_tree_state(self, sender, e):
+        self.update_tree_buttons(self.ModifierRoot, 'Btn_ExpandModifiers', 'Btn_CollapseModifiers')
+        
+    def on_nav_tree_state(self, sender, e):
+        self.update_tree_buttons(self.NavRoot, 'Btn_ExpandNav', 'Btn_CollapseNav')
+
     def on_expand_schema(self, sender, e):
         self.toggle_tree(self.TargetSchemaRoot, True)
-        self.Btn_ExpandSchema.IsEnabled = False
-        self.Btn_CollapseSchema.IsEnabled = True
+        self.on_target_tree_state(None, None)
 
     def on_collapse_schema(self, sender, e):
         self.toggle_tree(self.TargetSchemaRoot, False)
-        self.Btn_ExpandSchema.IsEnabled = True
-        self.Btn_CollapseSchema.IsEnabled = False
+        self.on_target_tree_state(None, None)
 
     def on_expand_modifiers(self, sender, e):
         self.toggle_tree(self.ModifierRoot, True)
-        self.Btn_ExpandModifiers.IsEnabled = False
-        self.Btn_CollapseModifiers.IsEnabled = True
+        self.on_modifier_tree_state(None, None)
 
     def on_collapse_modifiers(self, sender, e):
         self.toggle_tree(self.ModifierRoot, False)
-        self.Btn_ExpandModifiers.IsEnabled = True
-        self.Btn_CollapseModifiers.IsEnabled = False
+        self.on_modifier_tree_state(None, None)
         
     def on_expand_nav(self, sender, e):
         self.toggle_tree(self.NavRoot, True)
-        self.Btn_ExpandNav.IsEnabled = False
-        self.Btn_CollapseNav.IsEnabled = True
+        self.on_nav_tree_state(None, None)
         
     def on_collapse_nav(self, sender, e):
         self.toggle_tree(self.NavRoot, False)
-        self.Btn_ExpandNav.IsEnabled = True
-        self.Btn_CollapseNav.IsEnabled = False
+        self.on_nav_tree_state(None, None)
         
     def on_expand_editor(self, sender, e):
         self.toggle_editor(True)
-        self.Btn_ExpandEditor.IsEnabled = False
-        self.Btn_CollapseEditor.IsEnabled = True
         
     def on_collapse_editor(self, sender, e):
         self.toggle_editor(False)
-        self.Btn_ExpandEditor.IsEnabled = True
-        self.Btn_CollapseEditor.IsEnabled = False
 
+    def refresh_global_cache(self, doc):
+        self._cached_global_sheets = {}
+        self._cached_global_views = set()
+        
+        from Autodesk.Revit.DB import FilteredElementCollector, ViewSheet, View
+        all_sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
+        for s in all_sheets:
+            if not s.IsTemplate:
+                s_coll = "Default"
+                try:
+                    p = s.LookupParameter(" Sheet Collection")
+                    if p and p.HasValue:
+                        s_coll = p.AsString()
+                except: pass
+                k = (s_coll, s.SheetNumber.strip().lower())
+                if k not in self._cached_global_sheets:
+                    self._cached_global_sheets[k] = []
+                s_id_val = s.Id.IntegerValue if hasattr(s.Id, 'IntegerValue') else s.Id.Value
+                self._cached_global_sheets[k].append(s_id_val)
+                
+        all_views = FilteredElementCollector(doc).OfClass(View).ToElements()
+        for v in all_views:
+            if not v.IsTemplate:
+                self._cached_global_views.add(v.Name.lower())
+                
     def load_revit_data(self):
         uidoc = HOST_APP.uiapp.ActiveUIDocument
         doc = uidoc.Document if uidoc else None
@@ -1863,10 +1908,31 @@ class ManageSheetsPanel(forms.WPFWindow):
         # Cache this document to prevent duplicate loading
         self.last_loaded_doc_hash = doc.PathName + "_" + doc.Title
         
+        self.refresh_global_cache(doc)
+        
+        # Populate TitleBlocks ComboBox
+        class TitleBlockOption:
+            def __init__(self, tb):
+                self.Id = tb.Id
+                try:
+                    self.Name = "{} - {}".format(tb.FamilyName, tb.Name)
+                except:
+                    try:
+                        from Autodesk.Revit.DB import BuiltInParameter
+                        p = tb.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM)
+                        self.Name = p.AsString() if p else "Unknown TitleBlock"
+                    except:
+                        self.Name = "Unknown TitleBlock"
+                        
+        titleblocks = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_TitleBlocks).WhereElementIsElementType().ToElements()
+        tb_options = [TitleBlockOption(t) for t in titleblocks]
+        self.Combo_TitleBlocks.ItemsSource = sorted(tb_options, key=lambda t: t.Name)
+        if tb_options:
+            self.Combo_TitleBlocks.SelectedIndex = 0
+            
         # Hide the warning if manually refreshed
         from System.Windows import Visibility
         self.AutoRefreshWarningPanel.Visibility = Visibility.Collapsed
-
         
         self.LevelNodes.Clear()
         self.all_grid_nodes = []
@@ -1946,6 +2012,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         else: sheets = [doc.GetElement(i) for i in scope_ids]
             
         root_node = NavTreeNode("All Sheets", "Root")
+        root_node.IsExpanded = True
         self.NavRoot.Add(root_node)
         
         col_map = {}
@@ -2016,12 +2083,22 @@ class ManageSheetsPanel(forms.WPFWindow):
         if not node: return
         
         valid_sheets = []
+        
         c_name = "Default"
+        has_real_collections = False
+        if self.NavRoot.Count > 0:
+            for child in self.NavRoot[0].Children:
+                if child.Name not in ["Undefined", "Default"]:
+                    has_real_collections = True
+                    break
+        if not has_real_collections:
+            c_name = "PERMIT SET"
+            
         if not hasattr(node, "NodeType"): return
         
         if node.NodeType == "Root":
-            # If root is selected, pass empty list so ONLY the raw AIA schema is shown (CREATE)
-            valid_sheets = []
+            # Pass all sheets to match against the raw AIA schema so existing sheets in the project are detected
+            valid_sheets = list(self.all_grid_nodes)
             self.Txt_GridTitle.Text = "All Generated Sheets"
         elif node.NodeType == "Collection":
             c_name = node.Tag
@@ -2074,6 +2151,7 @@ class ManageSheetsPanel(forms.WPFWindow):
             
             from Autodesk.Revit.DB import ElementId
             existing_nodes = {}
+            existing_unmatched_nodes = {}
             for n in self.all_grid_nodes:
                 if n.ElementId and n.ElementId != ElementId.InvalidElementId:
                     try:
@@ -2081,6 +2159,10 @@ class ManageSheetsPanel(forms.WPFWindow):
                         existing_nodes[key] = n
                     except Exception:
                         pass
+                else:
+                    # Cache unmatched/missing nodes by (collection, original_number) to prevent duplicates
+                    key = (n.OriginalCollectionName, n.OriginalNumber)
+                    existing_unmatched_nodes[key] = n
                         
             self.EditorItems.Clear()
             
@@ -2114,24 +2196,39 @@ class ManageSheetsPanel(forms.WPFWindow):
                     vm._action = row["status"]
                     self.EditorItems.Add(vm)
                 else:
-                    real_id = ElementId(sh_id) if sh_id != -1 else ElementId.InvalidElementId
-                    vm = SheetViewModel(real_id, row["target_number"] if is_template else row["existing_number"], 
-                                        row["target_name"] if is_template else row["existing_name"], 
-                                        active_collection, row["discipline"], row["cg"], 
-                                        series_name=row.get("series_name", "Unknown"),
-                                        is_template=is_template, validation_callback=self.run_validation, 
-                                        number_changed_callback=self.on_sheet_number_changed,
-                                        move_up_callback=self.move_item_up, move_down_callback=self.move_item_down)
-                    vm.OriginalCollectionName = active_collection
-                    vm.IsChecked = True
-                    if row["status"] in ["CREATE", "MISSING"]:
-                        vm._action = "CREATE"
+                    tgt_num = row["target_number"] if is_template else row["existing_number"]
+                    key = (active_collection, tgt_num)
+                    
+                    if key in existing_unmatched_nodes:
+                        vm = existing_unmatched_nodes[key]
+                        # Ensure UI state matches latest generation
+                        vm.IsChecked = True
+                        if row["status"] in ["CREATE", "MISSING"]:
+                            vm._action = "CREATE"
+                        else:
+                            vm._action = row["status"]
+                        self.EditorItems.Add(vm)
                     else:
-                        vm._action = row["status"]
-                    self.EditorItems.Add(vm)
+                        real_id = ElementId(sh_id) if sh_id != -1 else ElementId.InvalidElementId
+                        vm = SheetViewModel(real_id, tgt_num, 
+                                            row["target_name"] if is_template else row["existing_name"], 
+                                            active_collection, row["discipline"], row["cg"], 
+                                            series_name=row.get("series_name", "Unknown"),
+                                            is_template=is_template, validation_callback=self.run_validation, 
+                                            number_changed_callback=self.on_sheet_number_changed,
+                                            move_up_callback=self.move_item_up, move_down_callback=self.move_item_down)
+                        vm.OriginalCollectionName = active_collection
+                        vm.IsChecked = True
+                        if row["status"] in ["CREATE", "MISSING"]:
+                            vm._action = "CREATE"
+                        else:
+                            vm._action = row["status"]
+                        self.EditorItems.Add(vm)
+                        self.all_grid_nodes.append(vm)
             
             self.update_grid_title()
             self.Txt_GridTitle.Text += " | Items: " + str(len(self.EditorItems))
+            self.run_validation()
             
         except Exception as big_e:
             forms.alert("CRITICAL CRASH IN SCHEMA MATCH:\n" + str(big_e))
@@ -2287,13 +2384,25 @@ class ManageSheetsPanel(forms.WPFWindow):
     def run_validation(self):
         all_numbers = {}
         
+        # Determine the active collection from NavTree
+        active_collection = "PERMIT SET"
+        if hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
+            node = self.NavTree.SelectedItem
+            if hasattr(node, "NodeType") and node.NodeType == "Collection":
+                active_collection = node.Name
+                
         # Combine all real Revit sheets + any active CREATE templates currently in the grid
         validation_pool = set(self.all_grid_nodes)
         for item in self.EditorItems:
             validation_pool.add(item)
             
         for r in validation_pool:
-            if r.Action == "PURGE": continue
+            if r.Action == "PURGE" or not r.IsChecked: continue
+            
+            # Enforce Collection Name for newly created sheets
+            if r.Action == "CREATE" and r.CollectionName != active_collection:
+                r.CollectionName = active_collection
+                
             r.IsNameUnique = True
             r.ValidationWarning = ""
             r.ValidationBrush = "Transparent"
@@ -2308,52 +2417,205 @@ class ManageSheetsPanel(forms.WPFWindow):
                 all_numbers[key] = []
             all_numbers[key].append(r)
             
+        # Check existing sheet numbers globally in the project
+        import re
+        uidoc = HOST_APP.uiapp.ActiveUIDocument
+        doc = uidoc.Document if uidoc else None
+        
+        global_sheet_keys = getattr(self, '_cached_global_sheets', {})
+            
         palette = ["#FCA5A5", "#FCD34D", "#86EFAC", "#93C5FD", "#F9A8D4", "#FDBA74", "#6EE7B7", "#67E8F9"]
         color_idx = 0
         has_error = False
         
         for key, items in all_numbers.items():
+            is_clash = False
+            conflicts = []
+            
+            # Internal UI Clash
             if len(items) > 1:
+                is_clash = True
+                for other in items:
+                    name = other.SheetName or "Unnamed"
+                    conflicts.append(name + " (in grid)")
+            
+            # Global Document Clash
+            if key in global_sheet_keys:
+                # Check if the global sheet is NOT one of the items we are actively renaming
+                active_ids = []
+                for i in items:
+                    if hasattr(i, 'ElementId') and i.ElementId != ElementId.InvalidElementId:
+                        i_id = i.ElementId
+                        i_val = i_id.IntegerValue if hasattr(i_id, 'IntegerValue') else i_id.Value
+                        active_ids.append(i_val)
+                        
+                for global_id in global_sheet_keys[key]:
+                    if global_id not in active_ids:
+                        is_clash = True
+                        conflicts.append("Existing Project Sheet (ID: {})".format(global_id))
+            
+            if is_clash:
                 has_error = True
                 brush = palette[color_idx % len(palette)]
                 color_idx += 1
                 for i in items:
                     i.IsNameUnique = False
                     i.ValidationBrush = brush
-                    # Generate conflict message showing what it collides with
-                    conflicts = []
-                    for other in items:
-                        if other != i:
-                            name = other.SheetName or "Unnamed"
-                            conflicts.append(name)
+                    actual_conflicts = [c for c in conflicts if c != (i.SheetName or "Unnamed") + " (in grid)"]
                     i.ValidationWarning = "Sheet Number '{}' is not unique within Collection '{}'! Conflicts with:\n- {}".format(
-                        i.SheetNumber, key[0], "\n- ".join(conflicts))
+                        i.SheetNumber, key[0], "\n- ".join(actual_conflicts))
+                        
+        # Setup for global view name validation
+        
+        existing_view_names = getattr(self, '_cached_global_views', set())
+
+        illegal_chars = r'[\\:\{\}\[\]\|;\<\>\?\~]'
+        all_grid_view_names = set()
                 
-        # Validate view names against sheet schema
-        for r in self.all_grid_nodes:
-            if r.Action == "PURGE" or not r.SheetName: continue
+        # Validate view names, numbers, and illegal characters
+        has_work = False
+        for r in validation_pool:
+            if r.IsChecked and r.Action in ["CREATE", "UPDATE", "PURGE"]:
+                has_work = True
+                
+            if r.Action == "PURGE" or not r.IsChecked: continue
             
-            base_name = r.SheetName
-            if base_name.endswith("s") and not base_name.endswith("ss"):
-                base_name = base_name[:-1]
+            # 1. Illegal characters in Sheet
+            if r.SheetName and re.search(illegal_chars, r.SheetName):
+                has_error = True
+                r.ValidationWarning += "\nSheet Name contains illegal characters!"
+                r.ValidationBrush = "#EF4444"
+                
+            if r.SheetNumber and re.search(illegal_chars, r.SheetNumber):
+                has_error = True
+                r.ValidationWarning += "\nSheet Number contains illegal characters!"
+                r.ValidationBrush = "#EF4444"
+            
+            sheet_view_numbers = set()
             
             for v in r.Views:
-                if not v.IsNewView and v.Name:
-                    if base_name.lower() not in v.Name.lower():
-                        v.ValidationWarning = "View name does not match schema '{}'".format(base_name)
-                    else:
-                        v.ValidationWarning = ""
+                v.ValidationWarning = ""
                 
-        self.Btn_Push.IsEnabled = not has_error
+                # Check 2: Illegal characters in View Name
+                if v.Name and re.search(illegal_chars, v.Name):
+                    has_error = True
+                    v.ValidationWarning = "View name contains illegal characters."
+                    
+                # Check 3: Missing PlanType or Level for New Views
+                if v.IsNew:
+                    if not v.PlanType:
+                        has_error = True
+                        v.ValidationWarning += " Missing Plan Type."
+                    if not v.LevelName:
+                        has_error = True
+                        v.ValidationWarning += " Missing Level."
+                        
+                # Check 4: Duplicate View Numbers on the SAME sheet
+                v_num = str(getattr(v, 'ViewNumber', '')).strip().lower()
+                if v_num:
+                    if v_num in sheet_view_numbers:
+                        has_error = True
+                        v.ValidationWarning += " Duplicate View Number on sheet."
+                    sheet_view_numbers.add(v_num)
+                        
+                # Check 5: Duplicate View Names GLOBALLY
+                v_name_lower = v.Name.lower() if v.Name else ""
+                if v_name_lower:
+                    if v.IsNew and v_name_lower in existing_view_names:
+                        has_error = True
+                        v.ValidationWarning += " Name already exists in project."
+                    elif v_name_lower in all_grid_view_names:
+                        has_error = True
+                        v.ValidationWarning += " Name duplicated in this grid."
+                    
+                    all_grid_view_names.add(v_name_lower)
+                
+        self.Btn_Push.IsEnabled = (not has_error) and has_work
         self.update_grid_title()
 
     def sync_to_revit(self, sender, e):
+        self.Btn_Push.IsEnabled = False
+        
+        tb_item = self.Combo_TitleBlocks.SelectedItem
+        tb_id_val = None
+        if tb_item:
+            try:
+                tb_id_val = tb_item.Id.IntegerValue if hasattr(tb_item.Id, "IntegerValue") else tb_item.Id.Value
+            except: pass
+            
         def _sync_action():
             uidoc = HOST_APP.uiapp.ActiveUIDocument
             doc = uidoc.Document if uidoc else None
             if not doc: return
             
-            from Autodesk.Revit.DB import TransactionGroup
+            from Autodesk.Revit.DB import TransactionGroup, FilteredElementCollector, ViewSheet, View, ElementId, Transaction, BuiltInCategory, Viewport, XYZ
+            
+            needs_tb = any(r.IsChecked and r.Action == "CREATE" for r in self.all_grid_nodes)
+            if needs_tb and not tb_id_val:
+                from pyrevit import script
+                out = script.get_output()
+                out.print_md("# Manage Sheets: Sync Aborted 🛑")
+                out.print_md("You are attempting to create new sheets, but **no TitleBlock** is selected.")
+                out.print_md("Please select a valid TitleBlock from the dropdown in the bottom right corner, or load a TitleBlock family into your project first.")
+                
+                self.Btn_Push.IsEnabled = True
+                return
+            
+            # --- DEEP PREFLIGHT: Live Model Collision Check ---
+            live_sheet_keys = {}
+            all_live_sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
+            for s in all_live_sheets:
+                if not s.IsTemplate:
+                    s_coll = "Default"
+                    try:
+                        p = s.LookupParameter(" Sheet Collection")
+                        if p and p.HasValue:
+                            s_coll = p.AsString()
+                    except: pass
+                    k = (s_coll, s.SheetNumber.strip().lower())
+                    if k not in live_sheet_keys: live_sheet_keys[k] = []
+                    s_id_val = s.Id.IntegerValue if hasattr(s.Id, 'IntegerValue') else s.Id.Value
+                    live_sheet_keys[k].append(s_id_val)
+                    
+            live_view_names = set()
+            all_live_views = FilteredElementCollector(doc).OfClass(View).ToElements()
+            for v in all_live_views:
+                if not v.IsTemplate:
+                    live_view_names.add(v.Name.lower())
+                    
+            error_log = []
+            
+            # Skip any nodes that clash with the live model
+            for r in self.all_grid_nodes:
+                if not r.IsChecked or r.Action == "PURGE": continue
+                
+                coll = getattr(r, "CollectionName", "Default")
+                num = (r.SheetNumber or "").strip().lower()
+                key = (coll, num)
+                
+                is_clash = False
+                
+                if key in live_sheet_keys:
+                    r_id_val = -1
+                    if hasattr(r, 'ElementId') and r.ElementId != ElementId.InvalidElementId:
+                        r_id_val = r.ElementId.IntegerValue if hasattr(r.ElementId, 'IntegerValue') else r.ElementId.Value
+                    
+                    for live_id in live_sheet_keys[key]:
+                        if live_id != r_id_val:
+                            is_clash = True
+                            error_log.append("Skipped Sheet '{}': Number already taken by another user.".format(r.SheetNumber))
+                            break
+                            
+                if not is_clash:
+                    for v in getattr(r, 'Views', []):
+                        if getattr(v, 'IsNew', False) and getattr(v, 'Name', '') and v.Name.lower() in live_view_names:
+                            is_clash = True
+                            error_log.append("Skipped Sheet '{}': View name '{}' already taken by another user.".format(r.SheetNumber, v.Name))
+                            break
+                            
+                if is_clash:
+                    r.IsChecked = False
+            # ------------------------------------------------
             
             renames, creates, purges = 0, 0, 0
             
@@ -2397,45 +2659,39 @@ class ManageSheetsPanel(forms.WPFWindow):
                                         set_sheet_parameter(s_elem, "Sheet Series", r.SheetSeries)
                                         renames += 1
                                 elif r.Action == "CREATE":
-                                    titleblocks = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_TitleBlocks).WhereElementIsElementType().ToElements()
-                                    if titleblocks:
-                                        new_sheet = ViewSheet.Create(doc, titleblocks[0].Id)
-                                        new_sheet.SheetNumber = r.SheetNumber
-                                        new_sheet.Name = r.SheetName
-                                        assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
-                                        c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
-                                        disc_name = c_res.get("discipline", "Unknown")
-                                        cg_name = c_res.get("contentGroup", "Uncategorized")
-                                        set_sheet_parameter(new_sheet, "Discipline", disc_name)
-                                        set_sheet_parameter(new_sheet, "Content Group", cg_name)
-                                        set_sheet_parameter(new_sheet, "Sheet Series", r.SheetSeries)
-                                        creates += 1
+                                    tb_id = ElementId(tb_id_val)
+                                    
+                                    new_sheet = ViewSheet.Create(doc, tb_id)
+                                    new_sheet.SheetNumber = r.SheetNumber
+                                    new_sheet.Name = r.SheetName
+                                    assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
+                                    c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                    disc_name = c_res.get("discipline", "Unknown")
+                                    cg_name = c_res.get("contentGroup", "Uncategorized")
+                                    set_sheet_parameter(new_sheet, "Discipline", disc_name)
+                                    set_sheet_parameter(new_sheet, "Content Group", cg_name)
+                                    set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
+                                    creates += 1
                                 elif r.Action == "PURGE":
                                     doc.Delete(r.ElementId)
                                     purges += 1
-                                elif r.Action == "UNRECONCILED":
-                                    s_elem = doc.GetElement(r.ElementId)
-                                    if s_elem:
-                                        assign_sheet_to_collection(doc, s_elem, "Unreconciled")
-                                        renames += 1
-                                
+                                    
                             if r.Action != "PURGE" and r.IsChecked:
-                                for v in r.Views:
-                                    if v.ViewId != ElementId.InvalidElementId:
+                                target_sheet_id = r.ElementId if r.Action != "CREATE" else new_sheet.Id
+                                
+                                for v in getattr(r, 'Views', []):
+                                    if getattr(v, 'ViewId', ElementId.InvalidElementId) != ElementId.InvalidElementId:
                                         v_elem = doc.GetElement(v.ViewId)
                                         if v_elem and v_elem.Name != v.Name:
                                             try:
                                                 v_elem.Name = v.Name
                                                 renames += 1
                                             except: pass
-                                    elif v._is_new:
-                                        target_sheet_id = s_elem.Id if r.Action != "CREATE" else new_sheet.Id
+                                    elif getattr(v, 'IsNew', False):
+                                        from Autodesk.Revit.DB import ViewFamilyType, ViewFamily, Level, ViewPlan, ViewDrafting
                                         view_to_place = None
                                         
-                                        if hasattr(v, 'SourceViewId') and v.SourceViewId != ElementId.InvalidElementId:
-                                            view_to_place = doc.GetElement(v.SourceViewId)
-                                        else:
-                                            from Autodesk.Revit.DB import ViewFamily
+                                        if v.PlanType:
                                             vfts = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()
                                             vft_target = None
                                             for vft in vfts:
@@ -2478,34 +2734,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                     
                                                 if view_to_place:
                                                     scale_map = {
-                                                        "12\" = 1'-0\"": 1,
-                                                        "6\" = 1'-0\"": 2,
-                                                        "3\" = 1'-0\"": 4,
-                                                        "1 1/2\" = 1'-0\"": 8,
-                                                        "1\" = 1'-0\"": 12,
-                                                        "3/4\" = 1'-0\"": 16,
-                                                        "1/2\" = 1'-0\"": 24,
-                                                        "3/8\" = 1'-0\"": 32,
-                                                        "1/4\" = 1'-0\"": 48,
-                                                        "3/16\" = 1'-0\"": 64,
-                                                        "1/8\" = 1'-0\"": 96,
-                                                        "1\" = 10'-0\"": 120,
-                                                        "3/32\" = 1'-0\"": 128,
-                                                        "1/16\" = 1'-0\"": 192,
-                                                        "1\" = 20'-0\"": 240,
-                                                        "3/64\" = 1'-0\"": 256,
-                                                        "1\" = 30'-0\"": 360,
-                                                        "1/32\" = 1'-0\"": 384,
-                                                        "1\" = 40'-0\"": 480,
-                                                        "1\" = 50'-0\"": 600,
-                                                        "1\" = 60'-0\"": 720,
-                                                        "1/64\" = 1'-0\"": 768,
-                                                        "1\" = 80'-0\"": 960,
-                                                        "1\" = 100'-0\"": 1200,
-                                                        "1\" = 160'-0\"": 1920,
-                                                        "1\" = 200'-0\"": 2400,
-                                                        "1\" = 300'-0\"": 3600,
-                                                        "1\" = 400'-0\"": 4800
+                                                        "12\" = 1'-0\"": 1, "6\" = 1'-0\"": 2, "3\" = 1'-0\"": 4, "1 1/2\" = 1'-0\"": 8, "1\" = 1'-0\"": 12, "3/4\" = 1'-0\"": 16, "1/2\" = 1'-0\"": 24, "3/8\" = 1'-0\"": 32, "1/4\" = 1'-0\"": 48, "3/16\" = 1'-0\"": 64, "1/8\" = 1'-0\"": 96, "1\" = 10'-0\"": 120, "3/32\" = 1'-0\"": 128, "1/16\" = 1'-0\"": 192, "1\" = 20'-0\"": 240, "3/64\" = 1'-0\"": 256, "1\" = 30'-0\"": 360, "1/32\" = 1'-0\"": 384, "1\" = 40'-0\"": 480, "1\" = 50'-0\"": 600, "1\" = 60'-0\"": 720, "1/64\" = 1'-0\"": 768, "1\" = 80'-0\"": 960, "1\" = 100'-0\"": 1200, "1\" = 160'-0\"": 1920, "1\" = 200'-0\"": 2400, "1\" = 300'-0\"": 3600, "1\" = 400'-0\"": 4800
                                                     }
                                                     if v.Scale in scale_map:
                                                         view_to_place.Scale = scale_map[v.Scale]
@@ -2522,16 +2751,48 @@ class ManageSheetsPanel(forms.WPFWindow):
                         t2.Commit()
                         
                     tg.Assimilate()
-                    MessageBox.Show("Sync Complete!\nProcessed/Renamed: {}\nCreated: {}".format(renames, creates), "Success")
-                    self.all_grid_nodes = []
-                    self.EditorItems.Clear()
-                    self.NavRoot.Clear()
-                    self.load_revit_data()
+                    from pyrevit import script
+                    out = script.get_output()
+                    out.print_md("# Manage Sheets: Sync Complete 🚀")
+                    out.print_md("### Processed/Renamed: {}".format(renames))
+                    out.print_md("### Created: {}".format(creates))
+                    out.print_md("### Purged: {}".format(purges))
+                    
+                    if error_log:
+                        out.print_md("---")
+                        out.print_md("## ⚠️ Collisions Detected")
+                        out.print_md("The following items were skipped due to late-stage live model collisions:")
+                        for err in error_log:
+                            out.print_md("- {}".format(err))
+                            
+                    self.Close()
+                    
                 except Exception as ex:
                     tg.RollBack()
                     import traceback
                     err_msg = traceback.format_exc()
-                    MessageBox.Show("Sync Failed! All changes have been safely rolled back.\n\nError details:\n" + err_msg, "Sync Error")
+                    
+                    from pyrevit import script
+                    out = script.get_output()
+                    out.print_md("# Manage Sheets: Sync Failed ❌")
+                    out.print_md("All changes have been safely rolled back.")
+                    out.print_md("```\n{}\n```".format(err_msg))
+                    
+                    self.Btn_Push.IsEnabled = True
         
-        from pyrevit.revit.events import execute_in_revit_context
-        execute_in_revit_context("Manage Sheets Sync", _sync_action)
+        _sync_action()
+
+    def on_textbox_keydown(self, sender, e):
+        from System.Windows.Input import Key, TraversalRequest, FocusNavigationDirection
+        if e.Key == Key.Enter:
+            from System.Windows.Controls import TextBox, ComboBox
+            if isinstance(sender, TextBox):
+                binding = sender.GetBindingExpression(TextBox.TextProperty)
+                if binding: binding.UpdateSource()
+            elif isinstance(sender, ComboBox):
+                binding = sender.GetBindingExpression(ComboBox.TextProperty)
+                if binding: binding.UpdateSource()
+                
+            req = TraversalRequest(FocusNavigationDirection.Next)
+            req.Wrapped = True
+            sender.MoveFocus(req)
