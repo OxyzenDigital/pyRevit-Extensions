@@ -2534,36 +2534,50 @@ class ManageSheetsPanel(forms.WPFWindow):
                 has_valid_work = True
                 
         self.Btn_Push.IsEnabled = has_valid_work
+        
+        # Determine status and generate a synopsis
+        has_errors = False
+        has_unchecked_work = False
+        total_work_items = 0
+        
+        matched_count = 0
+        create_count = 0
+        update_count = 0
+        
+        for r in validation_pool:
+            if r.Action == "MATCHED":
+                matched_count += 1
+            elif r.Action in ["CREATE", "MISSING"]:
+                create_count += 1
+            elif r.Action in ["UPDATE", "RENAME_NAME", "RENAME_NUM", "RENAME_BOTH"]:
+                update_count += 1
+                
+            if r.Action in ["CREATE", "UPDATE", "PURGE"]:
+                total_work_items += 1
+                r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
+                for v in r.Views:
+                    if getattr(v, 'ValidationWarning', ""):
+                        r_has_error = True
+                        break
+                if r.IsChecked:
+                    if r_has_error:
+                        has_errors = True
+                else:
+                    has_unchecked_work = True
+                    
+        synopsis = "Synopsis: {} Matched | {} New | {} Updating".format(matched_count, create_count, update_count)
+        
         if has_valid_work:
-            self.Txt_Status.Text = "Ready to Push"
+            self.Txt_Status.Text = "{}  »  Ready to Push".format(synopsis)
         else:
-            # Determine why it is disabled to provide a helpful clue
-            has_errors = False
-            has_unchecked_work = False
-            total_work_items = 0
-            
-            for r in validation_pool:
-                if r.Action in ["CREATE", "UPDATE", "PURGE"]:
-                    total_work_items += 1
-                    r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
-                    for v in r.Views:
-                        if getattr(v, 'ValidationWarning', ""):
-                            r_has_error = True
-                            break
-                    if r.IsChecked:
-                        if r_has_error:
-                            has_errors = True
-                    else:
-                        has_unchecked_work = True
-                        
             if total_work_items == 0:
-                self.Txt_Status.Text = "All Sheets Up To Date (100% Matched)"
+                self.Txt_Status.Text = "{}  »  All Sheets Up To Date (100% Matched)".format(synopsis)
             elif has_errors:
-                self.Txt_Status.Text = "Cannot push: Resolve validation errors (red text) first."
+                self.Txt_Status.Text = "{}  »  Cannot push: Resolve validation errors (red text) first.".format(synopsis)
             elif has_unchecked_work:
-                self.Txt_Status.Text = "Check the items you wish to push to Revit."
+                self.Txt_Status.Text = "{}  »  Check the items you wish to push to Revit.".format(synopsis)
             else:
-                self.Txt_Status.Text = "No valid pending actions."
+                self.Txt_Status.Text = "{}  »  No valid pending actions.".format(synopsis)
                 
         self.update_grid_title()
 
