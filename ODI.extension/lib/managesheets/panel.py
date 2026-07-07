@@ -1525,7 +1525,12 @@ class ManageSheetsPanel(forms.WPFWindow):
         pass # Function removed from UI
         
     def trigger_generation(self, sender, e):
-        self.generate_target_schema()
+        if getattr(self, "_is_generating", False): return
+        self._is_generating = True
+        try:
+            self.generate_target_schema()
+        finally:
+            self._is_generating = False
         
     def on_checkbox_click(self, sender, e):
         # Workaround for WPF TabControl recycling CheckBoxes and forcing them to False
