@@ -322,6 +322,7 @@ class ViewViewModel(ViewModelBase):
 class SheetViewModel(ViewModelBase):
     def __init__(self, element_id, number, name, collection_name, discipline_name="Unknown", content_group_name="Uncategorized", series_name="Unknown", is_template=False, validation_callback=None, number_changed_callback=None, move_up_callback=None, move_down_callback=None):
         ViewModelBase.__init__(self)
+        self.IsDirty = False
         self.validation_callback = validation_callback
         self.number_changed_callback = number_changed_callback
         self.move_up_callback = move_up_callback
@@ -408,6 +409,7 @@ class SheetViewModel(ViewModelBase):
         old_val = self._sheet_number
         self._sheet_number = str(val)
         self.NumberDiff.ProposedValue = self._sheet_number
+        self.IsDirty = True
         self.OnPropertyChanged("SheetNumber")
         self.update_action()
         if hasattr(self, 'number_changed_callback') and self.number_changed_callback:
@@ -420,6 +422,7 @@ class SheetViewModel(ViewModelBase):
         if val is None: val = ""
         self._sheet_name = str(val)
         self.NameDiff.ProposedValue = self._sheet_name
+        self.IsDirty = True
         self.OnPropertyChanged("SheetName")
         self.update_action()
 
@@ -428,6 +431,7 @@ class SheetViewModel(ViewModelBase):
     @CollectionName.setter
     def CollectionName(self, val):
         self._collection_name = val
+        self.IsDirty = True
         self.OnPropertyChanged("CollectionName")
         if self.validation_callback: self.validation_callback()
 
@@ -436,6 +440,7 @@ class SheetViewModel(ViewModelBase):
     @IsChecked.setter
     def IsChecked(self, val):
         self._is_checked = val
+        self.IsDirty = True
         self.OnPropertyChanged("IsChecked")
         if hasattr(self, 'validation_callback') and self.validation_callback:
             self.validation_callback()

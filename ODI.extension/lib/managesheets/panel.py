@@ -836,8 +836,6 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.TargetSchemaTree.ItemsSource = self.TargetSchemaRoot
         
         self.EditorItems = self.main_vm.EditorItems
-        self.EditorList.ItemsSource = self.EditorItems
-        
         self.ViewTypes = ObservableCollection[str](["FloorPlan", "CeilingPlan", "Elevation", "Section", "Detail", "DraftingView", "3D", "Legend"])
         self.Scales = ObservableCollection[str](["1/16\" = 1'-0\"", "1/8\" = 1'-0\"", "1/4\" = 1'-0\"", "1/2\" = 1'-0\"", "1\" = 1'-0\"", "3/4\" = 1'-0\"", "1 1/2\" = 1'-0\"", "3\" = 1'-0\"", "NTS", "As indicated"])
         
@@ -2044,31 +2042,11 @@ class ManageSheetsPanel(forms.WPFWindow):
             else:
                 col_node = col_map[c_name]
                 
-            # 2. Discipline Level
-            d_key = (c_name, disc_name)
-            if d_key not in disc_map:
-                disc_node = NavTreeNode(disc_name, "Discipline", tag=d_key)
-                disc_map[d_key] = disc_node
-                col_node.Children.Add(disc_node)
-            else:
-                disc_node = disc_map[d_key]
-                
-            # 3. Content Group Level
-            cg_key = (c_name, disc_name, cg_name)
-            if cg_key not in cg_map:
-                cg_node = NavTreeNode(cg_name, "ContentGroup", tag=cg_key)
-                cg_map[cg_key] = cg_node
-                disc_node.Children.Add(cg_node)
-            else:
-                cg_node = cg_map[cg_key]
-                
             sh_row = SheetViewModel(s.Id, s.SheetNumber, s.Name, c_name, discipline_name=disc_name, content_group_name=cg_name, validation_callback=self.run_validation, number_changed_callback=self.on_sheet_number_changed)
             self.all_grid_nodes.append(sh_row)
             
             root_node.Count += 1
             col_node.Count += 1
-            disc_node.Count += 1
-            cg_node.Count += 1
             
             views = 0
             for v_id in s.GetAllPlacedViews():
@@ -2118,14 +2096,16 @@ class ManageSheetsPanel(forms.WPFWindow):
             
         # Alert user about data loss if they are switching away from a previously selected node
         if last_node is not None and getattr(e, "__class__", None).__name__ != "DummyArgs":
-            from pyrevit import forms
-            res = forms.alert("The data editor will be refreshed for the new selection.\n\nAny unsaved modifications made to the current sheets will be lost.\n\nDo you want to continue?", title="Refresh Data", yes=True, no=True)
-            if not res:
-                # User cancelled. Revert selection.
-                self._ignore_tree_event = True
-                last_node.IsSelected = True
-                self._ignore_tree_event = False
-                return
+            has_dirty = any(getattr(vm, "IsDirty", False) for vm in self.EditorItems)
+            if has_dirty:
+                from pyrevit import forms
+                res = forms.alert("You have unsaved manual edits in the current view.\n\nSwitching collections will discard them. Do you want to continue?", title="Unsaved Changes", yes=True, no=True)
+                if not res:
+                    # User cancelled. Revert selection.
+                    self._ignore_tree_event = True
+                    last_node.IsSelected = True
+                    self._ignore_tree_event = False
+                    return
                 
         self._last_selected_node = new_node
         self._current_selected_node = new_node
@@ -2133,7 +2113,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         
         valid_sheets = []
         
-        c_name = "Default"
+        c_name = "Undefined"
         has_real_collections = False
         if self.NavRoot.Count > 0:
             for child in self.NavRoot[0].Children:
@@ -2145,8 +2125,13 @@ class ManageSheetsPanel(forms.WPFWindow):
             
         if not hasattr(node, "NodeType"): return
         
+        active_discipline = None
+        active_cg = None
+        
         if node.NodeType == "Root":
             # Pass all sheets to match against the raw AIA schema so existing sheets in the project are detected
+            # For the Root node, we must target the intended AIA schema collection from the UI
+            c_name = self.Cmb_TargetCollection.Text if hasattr(self, 'Cmb_TargetCollection') and self.Cmb_TargetCollection.Text else "PERMIT SET"
             valid_sheets = list(self.all_grid_nodes)
             self.Txt_GridTitle.Text = "All Generated Sheets"
         elif node.NodeType == "Collection":
@@ -2155,10 +2140,13 @@ class ManageSheetsPanel(forms.WPFWindow):
             valid_sheets = [s for s in self.all_grid_nodes if getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name]
         elif node.NodeType == "Discipline":
             c_name, d_name = node.Tag
+            active_discipline = d_name
             self.Txt_GridTitle.Text = "Collection: {} | Discipline: {}".format(c_name, d_name)
             valid_sheets = [s for s in self.all_grid_nodes if getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name and s.DisciplineName == d_name]
         elif node.NodeType == "ContentGroup":
             c_name, d_name, cg_name = node.Tag
+            active_discipline = d_name
+            active_cg = cg_name
             self.Txt_GridTitle.Text = "Collection: {} | Group: {}".format(c_name, cg_name)
             valid_sheets = [s for s in self.all_grid_nodes if getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name and s.DisciplineName == d_name and s.ContentGroupName == cg_name]
             
@@ -2173,10 +2161,31 @@ class ManageSheetsPanel(forms.WPFWindow):
             for c_node in root_node.Children:
                 c_node.IsActiveContext = (c_node.Tag == c_name)
                 
-        self.execute_schema_match(valid_sheets, active_collection=c_name)
+        self.execute_schema_match(valid_sheets, active_collection=c_name, active_discipline=active_discipline, active_cg=active_cg)
 
-    def execute_schema_match(self, valid_sheets, active_collection="Default"):
-        generated_targets = getattr(self, "generated_targets", [])
+    def execute_schema_match(self, valid_sheets, active_collection="Undefined", active_discipline=None, active_cg=None):
+        raw_targets = getattr(self, "generated_targets", [])
+        
+        # Filter generated targets based on the active node context
+        generated_targets = []
+        for t in raw_targets:
+            t_copy = t.copy()
+            match = re.match(r"^([A-Z]+)[- ]?(\d+)", t_copy["num"].upper())
+            disc_code = match.group(1) if match else "Other"
+            disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors", "CS": "Cover Sheet" }
+            disc_name = "{} - {}".format(disc_code, disc_dict.get(disc_code, "Discipline")) if disc_code != "Other" else "Uncategorized"
+            cg_name = t_copy.get("cg", "Unknown Content Group")
+            
+            if active_discipline and disc_name != active_discipline:
+                continue
+            if active_cg and cg_name != active_cg:
+                continue
+            
+            t_copy["collection"] = active_collection
+            t_copy["disc_name"] = disc_name
+            t_copy["cg_name"] = cg_name
+            generated_targets.append(t_copy)
+            
         uidoc = HOST_APP.uiapp.ActiveUIDocument
         doc = uidoc.Document if uidoc else None
         if not doc: return
@@ -2190,10 +2199,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                     valid_sheet_ids.append(s.ElementId.IntegerValue)
                 elif hasattr(s.ElementId, "Value"):
                     valid_sheet_ids.append(s.ElementId.Value)
-                    
-            # Inject the active collection context into the generated targets
-            for t in generated_targets:
-                t["collection"] = active_collection
                     
             try:
                 plan = reconciliation.run_pipeline(doc, generated_targets, existing_sheet_ids=valid_sheet_ids)
@@ -2273,6 +2278,9 @@ class ManageSheetsPanel(forms.WPFWindow):
                         else:
                             vm._action = row["status"]
                         self.EditorItems.Add(vm)
+            
+            for vm in self.EditorItems:
+                vm.IsDirty = False
             
             self.update_grid_title()
             self.Txt_GridTitle.Text += " | Items: " + str(len(self.EditorItems))

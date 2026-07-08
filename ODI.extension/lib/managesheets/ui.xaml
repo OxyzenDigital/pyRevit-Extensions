@@ -817,7 +817,7 @@
 
                             <!-- DataGrid replacing ListBox and Fake Header -->
                             <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                                <ItemsControl Name="EditorList" Background="Transparent" BorderThickness="0">
+                                <ItemsControl Name="EditorList" ItemsSource="{Binding EditorItems}" Background="Transparent" BorderThickness="0">
                                     <ItemsControl.ItemTemplate>
                                 <DataTemplate>
                                     <Border BorderBrush="{Binding ActionBrush}" BorderThickness="4,0,0,1" Padding="5" Background="{DynamicResource ControlBrush}" Margin="0,0,0,2">

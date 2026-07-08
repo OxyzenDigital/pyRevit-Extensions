@@ -81,12 +81,17 @@ def harvest_project(doc):
     # 3. Harvest Sheets
     sheet_collector = FilteredElementCollector(doc).OfClass(ViewSheet)
     for sh in sheet_collector:
-        sheet_collection = "Default"
+        sheet_collection = "Undefined"
         try:
-            # Respect Sheet Collection hierarchy natively (AGENTS rule)
-            param = sh.LookupParameter("Sheet Collection")
-            if param and param.HasValue:
-                sheet_collection = param.AsString() or "Default"
+            from Autodesk.Revit.DB import ParameterTypeId
+            if hasattr(ParameterTypeId, "SheetCollection"):
+                param = sh.GetParameter(ParameterTypeId.SheetCollection)
+                if param and param.AsElementId() != ElementId.InvalidElementId:
+                    col_elem = doc.GetElement(param.AsElementId())
+                    if col_elem: sheet_collection = col_elem.Name
+            else:
+                param = sh.LookupParameter(" Sheet Collection")
+                if param and param.HasValue: sheet_collection = param.AsString()
         except:
             pass
             
@@ -185,7 +190,7 @@ def generate_slots(generated_targets):
             ordinal=ordinal,
             suffix=suffix,
             canonical_name=t_name,
-            collection=t.get("collection", "Default"),
+            collection=t.get("collection", "Undefined"),
                 series_name=t.get("series_name", "Unknown"),
             cg=t.get("cg", "Unknown")
         ))
@@ -408,7 +413,7 @@ def apply_plan(doc, plan_rows):
                     # Apply sheet collection if set
                     try:
                         param = new_sheet.LookupParameter("Sheet Collection")
-                        if param and op.get('collection') and op.get('collection') != "Default":
+                        if param and op.get('collection') and op.get('collection') != "Undefined":
                             param.Set(op['collection'])
                     except:
                         pass
@@ -441,6 +446,28 @@ def generate_plan_json(harvested_data, matched_slots, extra_sheets):
             "discipline": s.discipline,
             "cg": s.cg,
             "series_name": s.series_name
+        }
+        rows.append(row)
+        seq += 1
+        
+    for sh in extra_sheets:
+        row = {
+            "seq": seq,
+            "target_number": "",
+            "target_name": "",
+            "status": "EXTRA",
+            "existing_number": sh.number,
+            "existing_name": sh.name,
+            "sheet_element_id": (sh.element_id.IntegerValue if hasattr(sh.element_id, "IntegerValue") else sh.element_id.Value) if sh.element_id != ElementId.InvalidElementId else -1,
+            "view_action": "NONE",
+            "view_element_id": -1,
+            "view_recipe": None,
+            "requires_user_decision": False,
+            "match_score": 0.0,
+            "collection": sh.sheet_collection,
+            "discipline": "Unknown",
+            "cg": "Uncategorized",
+            "series_name": "Unknown"
         }
         rows.append(row)
         seq += 1
