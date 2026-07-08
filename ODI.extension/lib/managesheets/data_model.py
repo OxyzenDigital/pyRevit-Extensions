@@ -599,6 +599,16 @@ class NavTreeNode(ViewModelBase):
         return self.NodeType == "Modifier"
         
     @property
+    def IsActiveContext(self):
+        return self._is_active_context
+        
+    @IsActiveContext.setter
+    def IsActiveContext(self, value):
+        self._is_active_context = value
+        self.OnPropertyChanged("IsActiveContext")
+        self.OnPropertyChanged("FontWeight")
+
+    @property
     def IsExpanded(self): return self._is_expanded
     @IsExpanded.setter
     def IsExpanded(self, val):

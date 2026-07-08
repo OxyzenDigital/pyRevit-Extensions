@@ -748,8 +748,17 @@ class ModifierSettingsDialog(forms.WPFWindow):
         self.Close()
 
 class ManageSheetsPanel(forms.WPFWindow):
+    def on_unhandled_exception(self, sender, e):
+        e.Handled = True
+        try:
+            from pyrevit import forms
+            forms.alert("An unexpected error occurred in Manage Sheets UI:\n\n" + str(e.Exception), title="WPF Error")
+        except:
+            pass
+
     def __init__(self):
         forms.WPFWindow.__init__(self, os.path.join(os.path.dirname(__file__), "ui.xaml"))
+        self.Dispatcher.UnhandledException += self.on_unhandled_exception
         
         self.apply_theme()
         self.last_loaded_doc_hash = None
@@ -2065,15 +2074,37 @@ class ManageSheetsPanel(forms.WPFWindow):
 
             
     def on_tree_selection_changed(self, sender, e):
+        if getattr(self, "_ignore_tree_event", False): return
         if hasattr(e, "OriginalSource") and e.OriginalSource != sender: return
-        node = getattr(self, "_current_selected_node", None)
+        
+        new_node = getattr(self, "_current_selected_node", None)
         if hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
             # Prevent WPF DisconnectedItem crashes
             if hasattr(self.NavTree.SelectedItem, "NodeType"):
-                node = self.NavTree.SelectedItem
-                self._current_selected_node = node
+                new_node = self.NavTree.SelectedItem
+                
+        if not new_node: return
+        
+        last_node = getattr(self, "_last_selected_node", None)
+        
+        # If user clicks the exact same item, no need to refresh
+        if last_node and new_node == last_node:
+            return
             
-        if not node: return
+        # Alert user about data loss if they are switching away from a previously selected node
+        if last_node is not None and getattr(e, "__class__", None).__name__ != "DummyArgs":
+            from pyrevit import forms
+            res = forms.alert("The data editor will be refreshed for the new selection.\n\nAny unsaved modifications made to the current sheets will be lost.\n\nDo you want to continue?", title="Refresh Data", yes=True, no=True)
+            if not res:
+                # User cancelled. Revert selection.
+                self._ignore_tree_event = True
+                last_node.IsSelected = True
+                self._ignore_tree_event = False
+                return
+                
+        self._last_selected_node = new_node
+        self._current_selected_node = new_node
+        node = new_node
         
         valid_sheets = []
         
@@ -2221,7 +2252,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                         else:
                             vm._action = row["status"]
                         self.EditorItems.Add(vm)
-                        self.all_grid_nodes.append(vm)
             
             self.update_grid_title()
             self.Txt_GridTitle.Text += " | Items: " + str(len(self.EditorItems))

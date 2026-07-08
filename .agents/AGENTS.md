@@ -66,3 +66,8 @@
 - **Color Aggregation:** When visualizing elements, intelligently aggregate colors up the TreeView hierarchy. If a parent node contains children with mixed or varying colors, display a neutral indicator (e.g., Black) to honestly reflect the mixed state.
 - **Non-Intrusive Logging:** Use a persistent footer/status bar (`statusLabel`) to display success messages, element counts, or error states without interrupting the user workflow.
 - **Contextual Toggles:** Dynamically update the text and enabled-state of actionable buttons based on user selection (e.g., swapping "Isolate" to "Unisolate", or disabling "Export" when no items are checked).
+
+## 6. Data Integrity & Operation Logic
+- **Revit as the Read-Only Ground Truth:** The tool must test everything against the original resource (the Revit model file). The information gathered from Revit at initialization must be stored as a pristine, read-only baseline in the tool's memory (e.g., `all_grid_nodes`). Never permanently append generated or "fake" template items into this baseline collection.
+- **Editor as the Testing Sandbox:** The editor side of the tool (e.g., `EditorItems`) is the sandbox where items are tested, matched, added, or removed.
+- **Cycle of Operations:** When testing is done, the active collection in the data editor must be validated against the original Revit reference collection. If the data passes the Revit rules, changes are pushed back into Revit. Everything is then released, and the cycle repeats cleanly. Every refresh or tab switch must treat the operation as a new start, drawing fresh from the read-only baseline.
