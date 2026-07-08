@@ -708,7 +708,7 @@
 
             
 <!-- TAB 2: SHEET REVIEWER -->
-                <TabItem x:Name="Tab_SheetReviewer" Header="Sheet Reviewer">
+                <TabItem x:Name="Tab_SheetReviewer" Header="Sheet Reviewer" IsEnabled="{Binding IsReviewerReady}">
                     <Grid Background="{DynamicResource ControlBrush}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="380"/>
@@ -1107,7 +1107,7 @@
                         <ComboBox Name="Combo_TitleBlocks" Width="200" DisplayMemberPath="Name" VerticalAlignment="Center"/>
                     </StackPanel>
                     
-                    <Button Name="Btn_Push" Grid.Column="2" Content="Push To Revit" Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Bold" FontSize="14" Padding="30,8" VerticalAlignment="Center"/>
+                    <Button Name="Btn_Push" IsEnabled="{Binding IsPushEnabled}" Grid.Column="2" Content="Push To Revit" Background="{DynamicResource AccentBrush}" Foreground="White" FontWeight="Bold" FontSize="14" Padding="30,8" VerticalAlignment="Center"/>
                 </Grid>
             </Border>
             

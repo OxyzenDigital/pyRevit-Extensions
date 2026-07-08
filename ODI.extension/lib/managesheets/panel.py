@@ -822,15 +822,20 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.Txt_SearchSeries.TextChanged += self.filter_series
         self.Txt_SearchModifiers.TextChanged += self.filter_modifiers
 
+        # MVVM Reactive State
+        from data_model import ManageSheetsViewModel
+        self.main_vm = ManageSheetsViewModel()
+        self.DataContext = self.main_vm
+
         # Data Models
-        self.NavRoot = ObservableCollection[NavTreeNode]()
+        self.NavRoot = self.main_vm.NavRoot
         self.NavTree.ItemsSource = self.NavRoot
         self.NavTree.SelectedItemChanged += self.on_tree_selection_changed
         
         self.TargetSchemaRoot = ObservableCollection[NavTreeNode]()
         self.TargetSchemaTree.ItemsSource = self.TargetSchemaRoot
         
-        self.EditorItems = ObservableCollection[object]()
+        self.EditorItems = self.main_vm.EditorItems
         self.EditorList.ItemsSource = self.EditorItems
         
         self.ViewTypes = ObservableCollection[str](["FloorPlan", "CeilingPlan", "Elevation", "Section", "Detail", "DraftingView", "3D", "Legend"])
@@ -1727,7 +1732,7 @@ class ManageSheetsPanel(forms.WPFWindow):
             
         # Only enable Sheet Reviewer tab if a schema is actively generated
         if hasattr(self, 'Tab_SheetReviewer'):
-            self.Tab_SheetReviewer.IsEnabled = (len(self.generated_targets) > 0)
+            self.main_vm.IsReviewerReady = (len(self.generated_targets) > 0)
             
         # Auto-expand the target schema tree so user sees the new combinations immediately
         if hasattr(self, 'toggle_tree'):
@@ -2039,11 +2044,31 @@ class ManageSheetsPanel(forms.WPFWindow):
             else:
                 col_node = col_map[c_name]
                 
+            # 2. Discipline Level
+            d_key = (c_name, disc_name)
+            if d_key not in disc_map:
+                disc_node = NavTreeNode(disc_name, "Discipline", tag=d_key)
+                disc_map[d_key] = disc_node
+                col_node.Children.Add(disc_node)
+            else:
+                disc_node = disc_map[d_key]
+                
+            # 3. Content Group Level
+            cg_key = (c_name, disc_name, cg_name)
+            if cg_key not in cg_map:
+                cg_node = NavTreeNode(cg_name, "ContentGroup", tag=cg_key)
+                cg_map[cg_key] = cg_node
+                disc_node.Children.Add(cg_node)
+            else:
+                cg_node = cg_map[cg_key]
+                
             sh_row = SheetViewModel(s.Id, s.SheetNumber, s.Name, c_name, discipline_name=disc_name, content_group_name=cg_name, validation_callback=self.run_validation, number_changed_callback=self.on_sheet_number_changed)
             self.all_grid_nodes.append(sh_row)
             
             root_node.Count += 1
             col_node.Count += 1
+            disc_node.Count += 1
+            cg_node.Count += 1
             
             views = 0
             for v_id in s.GetAllPlacedViews():
@@ -2214,11 +2239,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     
                     vm.move_up_callback = self.move_item_up
                     vm.move_down_callback = self.move_item_down
-                    try:
-                        vm.MoveUpCommand.RaiseCanExecuteChanged()
-                        vm.MoveDownCommand.RaiseCanExecuteChanged()
-                    except:
-                        pass
+
                     
                     vm.IsChecked = True
                     vm._action = row["status"]
@@ -2596,7 +2617,7 @@ class ManageSheetsPanel(forms.WPFWindow):
             if r.IsChecked and r.Action in ["CREATE", "UPDATE", "PURGE"] and not r_has_error:
                 has_valid_work = True
                 
-        self.Btn_Push.IsEnabled = has_valid_work
+        self.main_vm.IsPushEnabled = has_valid_work
         
         # Determine status and generate a synopsis
         has_errors = False
@@ -2646,7 +2667,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.update_grid_title()
 
     def sync_to_revit(self, sender, e):
-        self.Btn_Push.IsEnabled = False
+        self.main_vm.IsPushEnabled = False
         
         tb_item = self.Combo_TitleBlocks.SelectedItem
         tb_id_val = None
@@ -2670,7 +2691,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                 out.print_md("You are attempting to create new sheets, but **no TitleBlock** is selected.")
                 out.print_md("Please select a valid TitleBlock from the dropdown in the bottom right corner, or load a TitleBlock family into your project first.")
                 
-                self.Btn_Push.IsEnabled = True
+                self.main_vm.IsPushEnabled = True
                 return
             
             # --- FILTER VALID NODES ---
@@ -2686,7 +2707,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     valid_nodes.append(r)
                     
             if not valid_nodes:
-                self.Btn_Push.IsEnabled = True
+                self.main_vm.IsPushEnabled = True
                 return
             
             # --- DEEP PREFLIGHT: Live Model Collision Check ---
@@ -2971,7 +2992,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     out.print_md("All changes have been safely rolled back.")
                     out.print_md("```\n{}\n```".format(err_msg))
                     
-                    self.Btn_Push.IsEnabled = True
+                    self.main_vm.IsPushEnabled = True
         
         _sync_action()
 

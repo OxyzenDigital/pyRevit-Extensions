@@ -15,12 +15,31 @@ from Autodesk.Revit.DB import ElementId
 
 # --- Utility Commands ---
 class RelayCommand(ICommand):
-    def __init__(self, action):
+    def __init__(self, action, can_execute=None):
         self.action = action
-    def add_CanExecuteChanged(self, handler): pass
-    def remove_CanExecuteChanged(self, handler): pass
-    def CanExecute(self, parameter): return True
-    def Execute(self, parameter): self.action()
+        self.can_execute = can_execute
+        self._can_execute_handlers = []
+        
+    def add_CanExecuteChanged(self, handler):
+        self._can_execute_handlers.append(handler)
+        
+    def remove_CanExecuteChanged(self, handler):
+        if handler in self._can_execute_handlers:
+            self._can_execute_handlers.remove(handler)
+            
+    def CanExecute(self, parameter):
+        if self.can_execute:
+            return self.can_execute()
+        return True
+        
+    def Execute(self, parameter):
+        if self.CanExecute(parameter):
+            self.action()
+
+    def RaiseCanExecuteChanged(self):
+        import System
+        for handler in self._can_execute_handlers:
+            handler(self, System.EventArgs.Empty)
 
 def generate_char_diff(original, current):
     if not original or not current or original == current:
@@ -95,7 +114,15 @@ class SelectableNode(ViewModelBase):
         self.Name = name
         self.DisplayName = display_name if display_name else name
         self._is_checked = is_checked
+        self._is_enabled = True
         self.callback = callback
+        
+    @property
+    def IsEnabled(self): return self._is_enabled
+    @IsEnabled.setter
+    def IsEnabled(self, val):
+        self._is_enabled = val
+        self.OnPropertyChanged("IsEnabled")
     @property
     def IsChecked(self): return self._is_checked
     @IsChecked.setter
@@ -760,3 +787,33 @@ class NavTreeNode(ViewModelBase):
         
     @property
     def TargetOpacity(self): return 1.0 if self.IsTargetIncluded else 0.5
+
+class ManageSheetsViewModel(ViewModelBase):
+    def __init__(self):
+        ViewModelBase.__init__(self)
+        self._editor_items = ObservableCollection[object]()
+        self._nav_root = ObservableCollection[NavTreeNode]()
+        
+        self._is_push_enabled = False
+        self._is_reviewer_ready = False
+        self._has_valid_work = False
+
+    @property
+    def EditorItems(self): return self._editor_items
+    
+    @property
+    def NavRoot(self): return self._nav_root
+
+    @property
+    def IsPushEnabled(self): return self._is_push_enabled
+    @IsPushEnabled.setter
+    def IsPushEnabled(self, value):
+        self._is_push_enabled = value
+        self.OnPropertyChanged("IsPushEnabled")
+        
+    @property
+    def IsReviewerReady(self): return self._is_reviewer_ready
+    @IsReviewerReady.setter
+    def IsReviewerReady(self, value):
+        self._is_reviewer_ready = value
+        self.OnPropertyChanged("IsReviewerReady")
