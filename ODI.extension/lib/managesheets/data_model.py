@@ -258,7 +258,21 @@ class ViewViewModel(ViewModelBase):
     def LevelName(self, val):
         self._level_name = val
         self.OnPropertyChanged("LevelName")
+        self.check_semantic_mismatch()
         self.trigger_validation()
+        
+    def check_semantic_mismatch(self):
+        if not self.ParentSheet or not self.ParentSheet.SheetName:
+            if self.ValidationWarning == "Warning: View Level does not match Sheet Intent":
+                self.ValidationWarning = ""
+            return
+        
+        sheet_intent = self.ParentSheet.SheetName.lower()
+        if self._level_name and self._level_name.lower() not in sheet_intent and "level" in sheet_intent:
+            self.ValidationWarning = "Warning: View Level does not match Sheet Intent"
+        elif self.ValidationWarning == "Warning: View Level does not match Sheet Intent":
+            self.ValidationWarning = ""
+
     @property
     def ValidationWarning(self): return self._validation_warning
     @ValidationWarning.setter
@@ -289,7 +303,12 @@ class ViewViewModel(ViewModelBase):
         self._view_type = val
         self.OnPropertyChanged("ViewType")
         self.OnPropertyChanged("PlanType")
+        self.OnPropertyChanged("IsDetailNumberEditable")
         self.trigger_validation()
+
+    @property
+    def IsDetailNumberEditable(self):
+        return self._view_type not in ["Legend", "Schedule", "PanelSchedule"]
         
     @property
     def PlanType(self): return self._view_type
@@ -358,7 +377,29 @@ class SheetViewModel(ViewModelBase):
         self.MoveUpCommand = RelayCommand(self.on_move_up)
         self.MoveDownCommand = RelayCommand(self.on_move_down)
         
+        self.FormatUpperCommand = RelayCommand(lambda: self.format_view_casing("UPPER"))
+        self.FormatLowerCommand = RelayCommand(lambda: self.format_view_casing("lower"))
+        self.FormatTitleCommand = RelayCommand(lambda: self.format_view_casing("Title"))
+        self.SyncNamesCommand = RelayCommand(self.sync_view_names)
+        
         self.populate_available_names()
+        
+    def format_view_casing(self, case_type):
+        for v in self.Views:
+            if case_type == "UPPER":
+                v.Name = v.Name.upper()
+            elif case_type == "lower":
+                v.Name = v.Name.lower()
+            elif case_type == "Title":
+                v.Name = v.Name.title()
+                
+    def sync_view_names(self):
+        intent = self.SheetName
+        if intent.endswith("s") and not intent.endswith("ss"):
+            intent = intent[:-1]
+        for v in self.Views:
+            if intent.lower() not in v.Name.lower():
+                v.Name = v.Name + " - " + intent
         
     def on_move_up(self, parameter=None):
         if self.move_up_callback:
@@ -381,8 +422,11 @@ class SheetViewModel(ViewModelBase):
             self.reassign_view_numbers()
             
     def reassign_view_numbers(self):
-        for i, v in enumerate(self.Views):
-            v.ViewNumber = str(i + 1)
+        num = 1
+        for v in self.Views:
+            if v.IsDetailNumberEditable:
+                v.ViewNumber = str(num)
+                num += 1
         
     def populate_available_names(self):
         import classification
@@ -580,6 +624,19 @@ class SheetViewModel(ViewModelBase):
             self.Action = "UPDATE"
         else:
             self.Action = "MATCHED"
+            
+        # View validation
+        nums = set()
+        for v in self.Views:
+            if v.ViewNumber and v.IsDetailNumberEditable:
+                if v.ViewNumber in nums:
+                    if not v.ValidationWarning:
+                        v.ValidationWarning = "Duplicate Detail Number"
+                else:
+                    nums.add(v.ViewNumber)
+                    if v.ValidationWarning == "Duplicate Detail Number":
+                        v.ValidationWarning = ""
+            v.check_semantic_mismatch()
             
         if hasattr(self, 'validation_callback') and self.validation_callback:
             self.validation_callback()

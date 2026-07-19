@@ -991,76 +991,128 @@
                                                         <StackPanel>
                                                             <Grid Margin="0,0,0,5">
                                                                 <TextBlock Text="Views on Sheet" Foreground="{DynamicResource TextBrush}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                                                <Button Content="+ Add View" Command="{Binding AddViewCommand}" HorizontalAlignment="Right" Background="Transparent" Foreground="{DynamicResource AccentBrush}" BorderThickness="0" Cursor="Hand"/>
+                                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                                                                    <Button Content="UPPER" Command="{Binding FormatUpperCommand}" Background="Transparent" Foreground="{DynamicResource TextLightBrush}" BorderThickness="0" Cursor="Hand" Margin="0,0,5,0" ToolTip="Format view names to UPPERCASE"/>
+                                                                    <Button Content="lower" Command="{Binding FormatLowerCommand}" Background="Transparent" Foreground="{DynamicResource TextLightBrush}" BorderThickness="0" Cursor="Hand" Margin="0,0,5,0" ToolTip="Format view names to lowercase"/>
+                                                                    <Button Content="Title" Command="{Binding FormatTitleCommand}" Background="Transparent" Foreground="{DynamicResource TextLightBrush}" BorderThickness="0" Cursor="Hand" Margin="0,0,5,0" ToolTip="Format view names to Title Case"/>
+                                                                    <Button Content="Sync Names" Command="{Binding SyncNamesCommand}" Background="Transparent" Foreground="{DynamicResource TextLightBrush}" BorderThickness="0" Cursor="Hand" Margin="0,0,10,0" ToolTip="Append Sheet intent to view names"/>
+                                                                    <Button Content="+ Add View" Command="{Binding AddViewCommand}" Background="Transparent" Foreground="{DynamicResource AccentBrush}" BorderThickness="0" Cursor="Hand"/>
+                                                                </StackPanel>
                                                             </Grid>
                                                             <ItemsControl ItemsSource="{Binding Views}">
                                                                 <ItemsControl.ItemTemplate>
                                                                     <DataTemplate>
-                                                                            <Grid Margin="0,2">
-                                                                                <Grid.ColumnDefinitions>
-                                                                                    <ColumnDefinition Width="80"/>
-                                                                                    <ColumnDefinition Width="40"/>
-                                                                                    <ColumnDefinition Width="*" MinWidth="150"/>
-                                                                                    <ColumnDefinition Width="100"/>
-                                                                                    <ColumnDefinition Width="150"/>
-                                                                                    <ColumnDefinition Width="120"/>
-                                                                                    <ColumnDefinition Width="50"/>
-                                                                                    <ColumnDefinition Width="40"/>
-                                                                                </Grid.ColumnDefinitions>
+                                                                        <Border Margin="0,2">
+                                                                            <Border.Style>
+                                                                                <Style TargetType="Border">
+                                                                                    <Setter Property="BorderThickness" Value="0,0,0,2"/>
+                                                                                    <Setter Property="BorderBrush" Value="#EF4444"/>
+                                                                                    <Setter Property="Padding" Value="0,0,0,4"/>
+                                                                                    <Style.Triggers>
+                                                                                        <DataTrigger Binding="{Binding ValidationWarning}" Value="">
+                                                                                            <Setter Property="BorderThickness" Value="0"/>
+                                                                                            <Setter Property="Padding" Value="0"/>
+                                                                                        </DataTrigger>
+                                                                                    </Style.Triggers>
+                                                                                </Style>
+                                                                            </Border.Style>
+                                                                            <Grid>
+                                                                                <Grid.RowDefinitions>
+                                                                                    <RowDefinition Height="Auto"/>
+                                                                                    <RowDefinition Height="Auto"/>
+                                                                                </Grid.RowDefinitions>
                                                                                 
-                                                                                <!-- 0: Mode -->
-                                                                                <ComboBox Grid.Column="0" IsEditable="True" Text="{Binding AssignmentMode, Mode=TwoWay}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
-                                                                                    <ComboBoxItem Content="New" />
-                                                                                    <ComboBoxItem Content="Existing" />
-                                                                                </ComboBox>
-
-                                                                                <!-- 1: View Number -->
-                                                                                <TextBox Grid.Column="1" Text="{Binding ViewNumber, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" KeyDown="on_textbox_keydown" ToolTip="Detail Number" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}" TextAlignment="Center"/>
-                                                                                
-                                                                                <!-- 2: View Name -->
-                                                                                <TextBox Grid.Column="2" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=LostFocus}" KeyDown="on_textbox_keydown" ToolTip="{Binding Name}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}"/>
-                                                                                
-                                                                                <!-- 3: Scale -->
-                                                                                <ComboBox Grid.Column="3" IsEditable="True" Text="{Binding Scale, Mode=TwoWay}" ItemsSource="{Binding AvailableScales}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
-                                                                                </ComboBox>
-
-                                                                                <!-- 4: Plan Type -->
-                                                                                <ComboBox Grid.Column="4" IsEditable="True" Text="{Binding PlanType, Mode=TwoWay}" ItemsSource="{Binding AvailableViewFamilyTypes}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
-                                                                                    <ComboBox.Style>
-                                                                                        <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
-                                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                <Grid Grid.Row="0">
+                                                                                    <Grid.Style>
+                                                                                        <Style TargetType="Grid">
+                                                                                            <Setter Property="Opacity" Value="0.5"/>
                                                                                             <Style.Triggers>
-                                                                                                <DataTrigger Binding="{Binding IsNew}" Value="True">
-                                                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                                                <DataTrigger Binding="{Binding ValidationWarning}" Value="">
+                                                                                                    <Setter Property="Opacity" Value="1.0"/>
                                                                                                 </DataTrigger>
                                                                                             </Style.Triggers>
                                                                                         </Style>
-                                                                                    </ComboBox.Style>
-                                                                                </ComboBox>
+                                                                                    </Grid.Style>
+                                                                                    <Grid.ColumnDefinitions>
+                                                                                        <ColumnDefinition Width="80"/>
+                                                                                        <ColumnDefinition Width="40"/>
+                                                                                        <ColumnDefinition Width="*" MinWidth="150"/>
+                                                                                        <ColumnDefinition Width="100"/>
+                                                                                        <ColumnDefinition Width="150"/>
+                                                                                        <ColumnDefinition Width="120"/>
+                                                                                        <ColumnDefinition Width="50"/>
+                                                                                        <ColumnDefinition Width="40"/>
+                                                                                    </Grid.ColumnDefinitions>
+                                                                                    
+                                                                                    <!-- 0: Mode -->
+                                                                                    <ComboBox Grid.Column="0" IsEditable="True" Text="{Binding AssignmentMode, Mode=TwoWay}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+                                                                                        <ComboBoxItem Content="New" />
+                                                                                        <ComboBoxItem Content="Existing" />
+                                                                                    </ComboBox>
+    
+                                                                                    <!-- 1: View Number -->
+                                                                                    <TextBox Grid.Column="1" Text="{Binding ViewNumber, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding IsDetailNumberEditable}" KeyDown="on_textbox_keydown" ToolTip="Detail Number" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}" TextAlignment="Center"/>
+                                                                                    
+                                                                                    <!-- 2: View Name -->
+                                                                                    <TextBox Grid.Column="2" Text="{Binding Name, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" KeyDown="on_textbox_keydown" ToolTip="{Binding Name}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}"/>
+                                                                                    
+                                                                                    <!-- 3: Scale -->
+                                                                                    <ComboBox Grid.Column="3" IsEditable="True" Text="{Binding Scale, Mode=TwoWay}" ItemsSource="{Binding AvailableScales}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+                                                                                    </ComboBox>
+    
+                                                                                    <!-- 4: Plan Type -->
+                                                                                    <ComboBox Grid.Column="4" IsEditable="True" Text="{Binding PlanType, Mode=TwoWay}" ItemsSource="{Binding AvailableViewFamilyTypes}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+                                                                                        <ComboBox.Style>
+                                                                                            <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                                <Style.Triggers>
+                                                                                                    <DataTrigger Binding="{Binding IsNew}" Value="True">
+                                                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                                                    </DataTrigger>
+                                                                                                </Style.Triggers>
+                                                                                            </Style>
+                                                                                        </ComboBox.Style>
+                                                                                    </ComboBox>
+                                                                                    
+                                                                                    <!-- 5: Level (Visible if New) -->
+                                                                                    <ComboBox Grid.Column="5" IsEditable="True" Text="{Binding LevelName, Mode=TwoWay}" ItemsSource="{Binding AvailableLevels}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
+                                                                                        <ComboBox.Style>
+                                                                                            <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
+                                                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                                <Style.Triggers>
+                                                                                                    <DataTrigger Binding="{Binding IsNew}" Value="True">
+                                                                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                                                                    </DataTrigger>
+                                                                                                </Style.Triggers>
+                                                                                            </Style>
+                                                                                        </ComboBox.Style>
+                                                                                    </ComboBox>
+    
+                                                                                    <!-- 6: Move Controls -->
+                                                                                    <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Center">
+                                                                                        <Button Content="&#x25B2;" Command="{Binding MoveUpCommand}" Padding="2,0" Margin="1,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}" ToolTip="Move Up" FontFamily="Segoe UI Symbol" FontSize="10"/>
+                                                                                        <Button Content="&#x25BC;" Command="{Binding MoveDownCommand}" Padding="2,0" Margin="1,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}" ToolTip="Move Down" FontFamily="Segoe UI Symbol" FontSize="10"/>
+                                                                                    </StackPanel>
+                                                                                    
+                                                                                    <!-- 7: Remove -->
+                                                                                    <Button Grid.Column="7" Content="X" FontWeight="Bold" Command="{Binding DeleteCommand}" Background="Transparent" Foreground="#EF4444" BorderThickness="0" ToolTip="Remove View"/>
+                                                                                </Grid>
                                                                                 
-                                                                                <!-- 5: Level (Visible if New) -->
-                                                                                <ComboBox Grid.Column="5" IsEditable="True" Text="{Binding LevelName, Mode=TwoWay}" ItemsSource="{Binding AvailableLevels}" Margin="0,0,5,0" Background="{DynamicResource WindowBrush}" Foreground="{DynamicResource TextBrush}">
-                                                                                    <ComboBox.Style>
-                                                                                        <Style TargetType="ComboBox" BasedOn="{StaticResource {x:Type ComboBox}}">
-                                                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                                                <!-- Validation Warning -->
+                                                                                <TextBlock Grid.Row="1" Text="{Binding ValidationWarning}" Foreground="#EF4444" FontStyle="Italic" FontSize="11" Margin="85,2,0,0">
+                                                                                    <TextBlock.Style>
+                                                                                        <Style TargetType="TextBlock">
+                                                                                            <Setter Property="Visibility" Value="Visible"/>
                                                                                             <Style.Triggers>
-                                                                                                <DataTrigger Binding="{Binding IsNew}" Value="True">
-                                                                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                                                                <DataTrigger Binding="{Binding ValidationWarning}" Value="">
+                                                                                                    <Setter Property="Visibility" Value="Collapsed"/>
                                                                                                 </DataTrigger>
                                                                                             </Style.Triggers>
                                                                                         </Style>
-                                                                                    </ComboBox.Style>
-                                                                                </ComboBox>
-
-                                                                                <!-- 6: Move Controls -->
-                                                                                <StackPanel Grid.Column="6" Orientation="Horizontal" HorizontalAlignment="Center">
-                                                                                    <Button Content="&#x25B2;" Command="{Binding MoveUpCommand}" Padding="2,0" Margin="1,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}" ToolTip="Move Up" FontFamily="Segoe UI Symbol" FontSize="10"/>
-                                                                                    <Button Content="&#x25BC;" Command="{Binding MoveDownCommand}" Padding="2,0" Margin="1,0" Background="{DynamicResource ButtonBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Foreground="{DynamicResource TextBrush}" ToolTip="Move Down" FontFamily="Segoe UI Symbol" FontSize="10"/>
-                                                                                </StackPanel>
-                                                                                
-                                                                                <!-- 7: Remove -->
-                                                                                <Button Grid.Column="7" Content="X" FontWeight="Bold" Command="{Binding DeleteCommand}" Background="Transparent" Foreground="#EF4444" BorderThickness="0" ToolTip="Remove View"/>
+                                                                                    </TextBlock.Style>
+                                                                                </TextBlock>
                                                                             </Grid>
+                                                                        </Border>
                                                                     </DataTemplate>
                                                                 </ItemsControl.ItemTemplate>
                                                             </ItemsControl>

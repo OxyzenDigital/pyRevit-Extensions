@@ -2051,13 +2051,22 @@ class ManageSheetsPanel(forms.WPFWindow):
             views = 0
             for v_id in s.GetAllPlacedViews():
                 v = doc.GetElement(v_id)
-                if not v or v.ViewType in [ViewType.Schedule, ViewType.Legend, ViewType.PanelSchedule]: continue
+                if not v: continue
                 
                 lvl_name = ""
                 if hasattr(v, "GenLevel") and v.GenLevel:
                     lvl_name = v.GenLevel.Name
                     
-                v_row = ViewViewModel(v.Id, v.Name, str(v.ViewType), level_name=lvl_name)
+                v_number = ""
+                param_num = v.get_Parameter(BuiltInParameter.VIEWER_DETAIL_NUMBER)
+                if param_num: v_number = param_num.AsString() or ""
+                
+                v_name = v.Name
+                param_title = v.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION)
+                if param_title and param_title.AsString():
+                    v_name = param_title.AsString()
+                    
+                v_row = ViewViewModel(v.Id, v_name, str(v.ViewType), level_name=lvl_name, view_number=v_number)
                 sh_row.Views.Add(v_row)
                 views += 1
         self.run_validation()
@@ -2636,15 +2645,15 @@ class ManageSheetsPanel(forms.WPFWindow):
         create_count = 0
         update_count = 0
         
-        for r in validation_pool:
+        for r in self.EditorItems:
             if r.Action == "MATCHED":
                 matched_count += 1
             elif r.Action in ["CREATE", "MISSING"]:
                 create_count += 1
-            elif r.Action in ["UPDATE", "RENAME_NAME", "RENAME_NUM", "RENAME_BOTH"]:
+            elif r.Action in ["UPDATE", "RENAME_NAME", "RENAME_NUM", "RENAME_NUMBER", "RENAME_BOTH"]:
                 update_count += 1
                 
-            if r.Action in ["CREATE", "UPDATE", "PURGE"]:
+            if r.Action in ["CREATE", "UPDATE", "PURGE", "RENAME_NUM", "RENAME_NUMBER", "RENAME_BOTH"]:
                 total_work_items += 1
                 r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
                 for v in r.Views:
@@ -2691,7 +2700,11 @@ class ManageSheetsPanel(forms.WPFWindow):
             
             from Autodesk.Revit.DB import TransactionGroup, FilteredElementCollector, ViewSheet, View, ElementId, Transaction, BuiltInCategory, Viewport, XYZ
             
-            needs_tb = any(r.IsChecked and r.Action == "CREATE" for r in self.all_grid_nodes)
+            validation_pool = set(self.all_grid_nodes)
+            for item in self.EditorItems:
+                validation_pool.add(item)
+                
+            needs_tb = any(r.IsChecked and r.Action == "CREATE" for r in validation_pool)
             if needs_tb and not tb_id_val:
                 from pyrevit import script
                 out = script.get_output()
@@ -2702,9 +2715,22 @@ class ManageSheetsPanel(forms.WPFWindow):
                 self.main_vm.IsPushEnabled = True
                 return
             
+            # --- CROSS-COLLECTION DUPLICATE VALIDATION ---
+            collection_numbers = {}
+            for r in validation_pool:
+                if not r.IsChecked or r.Action == "PURGE": continue
+                coll = getattr(r, "CollectionName", "Default") or "Default"
+                num = (r.SheetNumber or "").strip().lower()
+                key = (coll, num)
+                if key in collection_numbers:
+                    r.ValidationWarning = "Duplicate Sheet Number in Collection"
+                    collection_numbers[key].ValidationWarning = "Duplicate Sheet Number in Collection"
+                else:
+                    collection_numbers[key] = r
+            
             # --- FILTER VALID NODES ---
             valid_nodes = []
-            for r in self.all_grid_nodes:
+            for r in validation_pool:
                 if not r.IsChecked: continue
                 r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
                 for v in r.Views:
@@ -2725,7 +2751,9 @@ class ManageSheetsPanel(forms.WPFWindow):
                 if not s.IsTemplate:
                     s_coll = "Default"
                     try:
-                        p = s.LookupParameter(" Sheet Collection")
+                        p = s.LookupParameter("Sheet Collection")
+                        if not p:
+                            p = s.LookupParameter(" Sheet Collection")
                         if p and p.HasValue:
                             s_coll = p.AsString()
                     except: pass
@@ -2742,23 +2770,28 @@ class ManageSheetsPanel(forms.WPFWindow):
                     
             error_log = []
             
+            active_renaming_ids = set()
+            for n in valid_nodes:
+                if hasattr(n, 'ElementId') and n.ElementId != ElementId.InvalidElementId:
+                    val = n.ElementId.IntegerValue if hasattr(n.ElementId, 'IntegerValue') else n.ElementId.Value
+                    active_renaming_ids.add(val)
+                    
             # Skip any nodes that clash with the live model
-            for r in self.all_grid_nodes:
+            for r in validation_pool:
                 if not r.IsChecked or r.Action == "PURGE": continue
-                
-                coll = getattr(r, "CollectionName", "Default")
-                num = (r.SheetNumber or "").strip().lower()
-                key = (coll, num)
-                
                 is_clash = False
                 
+                # Sheet Number collision
+                c_name = getattr(r, 'CollectionName', 'Default') or 'Default'
+                key = (c_name, (r.SheetNumber or "").strip().lower())
+                
                 if key in live_sheet_keys:
-                    r_id_val = -1
+                    r_id_val = None
                     if hasattr(r, 'ElementId') and r.ElementId != ElementId.InvalidElementId:
                         r_id_val = r.ElementId.IntegerValue if hasattr(r.ElementId, 'IntegerValue') else r.ElementId.Value
                     
                     for live_id in live_sheet_keys[key]:
-                        if live_id != r_id_val:
+                        if live_id != r_id_val and live_id not in active_renaming_ids:
                             is_clash = True
                             error_log.append("Skipped Sheet '{}': Number already taken by another user.".format(r.SheetNumber))
                             break
@@ -2788,33 +2821,91 @@ class ManageSheetsPanel(forms.WPFWindow):
                     ensure_sheet_parameter(doc, "Sheet Series")
                     ensure_sheet_parameter(doc, " Sheet Collection")
                     
-                    # Phase 1: Park numbers (Rename Number collision avoidance)
-                    with Transaction(doc, "Phase 1 - Park") as t1:
-                        t1.Start()
-                        try:
-                            for r in valid_nodes:
-                                if not r.IsChecked: continue
-                                if hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]:
-                                    s_elem = doc.GetElement(r.ElementId)
-                                    if s_elem:
-                                        val = s_elem.Id.IntegerValue if hasattr(s_elem.Id, "IntegerValue") else s_elem.Id.Value
-                                        s_elem.SheetNumber = "ZZ_TEMP_" + str(val)
-                            t1.Commit()
-                        except:
-                            if t1.HasStarted() and not t1.HasEnded(): t1.RollBack()
-                            raise
+                    # Phase 1: Topological Sequencing
+                    renumber_nodes = []
+                    current_number_to_node = {}
+                    
+                    for r in valid_nodes:
+                        if not r.IsChecked: continue
+                        if hasattr(r, 'OriginalNumber') and r.OriginalNumber:
+                            c_name = getattr(r, 'OriginalCollectionName', 'Default') or 'Default'
+                            current_number_to_node[(c_name, r.OriginalNumber)] = r
+                            
+                        match_stat = getattr(r, 'MatchStatus', None) or r.Action
+                        if r.Action in ["UPDATE", "MATCHED", "RENAME_NAME", "RENAME_NUMBER", "RENAME_BOTH"] or match_stat in ["RENAME_NUMBER", "RENAME_BOTH"]:
+                            if hasattr(r, 'ElementId') and r.ElementId != ElementId.InvalidElementId:
+                                if r.SheetNumber != r.OriginalNumber:
+                                    renumber_nodes.append(r)
+                                
+                    node_by_id = {}
+                    adj = {}
+                    in_degree = {}
+                    
+                    for r in renumber_nodes:
+                        r_key = r.ElementId.IntegerValue if hasattr(r.ElementId, 'IntegerValue') else r.ElementId.Value
+                        node_by_id[r_key] = r
+                        adj[r_key] = []
+                        in_degree[r_key] = 0
                         
+                    for r in renumber_nodes:
+                        target_num = r.SheetNumber
+                        c_name = getattr(r, 'CollectionName', 'Default') or 'Default'
+                        blocking_node = current_number_to_node.get((c_name, target_num))
+                        
+                        r_key = r.ElementId.IntegerValue if hasattr(r.ElementId, 'IntegerValue') else r.ElementId.Value
+                        
+                        if blocking_node and blocking_node.ElementId != r.ElementId:
+                            blocking_key = blocking_node.ElementId.IntegerValue if hasattr(blocking_node.ElementId, 'IntegerValue') else blocking_node.ElementId.Value
+                            if blocking_key in node_by_id:
+                                adj[blocking_key].append(r_key)
+                                in_degree[r_key] += 1
+                                
+                    queue = [node_id for node_id in in_degree if in_degree[node_id] == 0]
+                    ordered_sequence = []
+                    
+                    while queue:
+                        curr_id = queue.pop(0)
+                        ordered_sequence.append(node_by_id[curr_id])
+                        for neighbor_id in adj[curr_id]:
+                            in_degree[neighbor_id] -= 1
+                            if in_degree[neighbor_id] == 0:
+                                queue.append(neighbor_id)
+                                
+                    cycle_nodes = []
+                    if len(ordered_sequence) < len(renumber_nodes):
+                        for node_id in in_degree:
+                            if in_degree[node_id] > 0:
+                                cycle_nodes.append(node_by_id[node_id])
+                                
                     # Phase 2: Finalize
                     with Transaction(doc, "Phase 2 - Finalize") as t2:
                         t2.Start()
                         try:
+                            # 1. Break Cycles
+                            for r in cycle_nodes:
+                                s_elem = doc.GetElement(r.ElementId)
+                                if s_elem and s_elem.SheetNumber != r.SheetNumber:
+                                    s_elem.SheetNumber = r.SheetNumber + "_TEMP"
+                                    
+                            # 2. Execute Linear Sequence
+                            for r in ordered_sequence:
+                                s_elem = doc.GetElement(r.ElementId)
+                                if s_elem:
+                                    s_elem.SheetNumber = r.SheetNumber
+                                    
+                            # 3. Resolve Parked Cycles
+                            for r in cycle_nodes:
+                                s_elem = doc.GetElement(r.ElementId)
+                                if s_elem:
+                                    s_elem.SheetNumber = r.SheetNumber
+
                             for r in valid_nodes:
                                 if not r.IsChecked: continue
-                                if r.Action in ["UPDATE", "MATCHED", "RENAME_NAME", "RENAME_NUM", "RENAME_BOTH"]:
+                                new_sheet = None
+                                match_stat = getattr(r, 'MatchStatus', None) or r.Action
+                                if r.Action in ["UPDATE", "MATCHED", "RENAME_NAME", "RENAME_NUMBER", "RENAME_BOTH"] or match_stat in ["RENAME_NUMBER", "RENAME_BOTH"]:
                                     s_elem = doc.GetElement(r.ElementId)
                                     if s_elem:
-                                        if r.SheetNumber != r.OriginalNumber or (hasattr(r, 'MatchStatus') and r.MatchStatus in ["RENAME_NUMBER", "RENAME_BOTH"]): 
-                                            s_elem.SheetNumber = r.SheetNumber
                                         if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
                                         assign_sheet_to_collection(doc, s_elem, r.CollectionName)
                                         c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
@@ -2827,7 +2918,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                                         renames += 1
                                 elif r.Action == "CREATE":
                                     tb_id = ElementId(tb_id_val)
-                                    
                                     new_sheet = ViewSheet.Create(doc, tb_id)
                                     new_sheet.SheetNumber = r.SheetNumber
                                     new_sheet.Name = r.SheetName
@@ -2841,25 +2931,53 @@ class ManageSheetsPanel(forms.WPFWindow):
                                     log_created.append("{} - {}".format(r.SheetNumber, r.SheetName))
                                     creates += 1
                                 elif r.Action == "PURGE":
-                                    doc.Delete(r.ElementId)
-                                    log_purged.append("{} - {}".format(r.SheetNumber, r.SheetName))
+                                    s_elem = doc.GetElement(r.ElementId)
+                                    if s_elem:
+                                        assign_sheet_to_collection(doc, s_elem, "PURGE")
+                                    log_purged.append("{} - {} (Quarantined)".format(r.SheetNumber, r.SheetName))
                                     purges += 1
                                         
                                 if r.Action != "PURGE" and r.IsChecked:
                                     target_sheet_id = r.ElementId if r.Action != "CREATE" else new_sheet.Id
                                     
                                     for v in getattr(r, 'Views', []):
+                                        # Determine Shorthand
+                                        shorthand = ""
+                                        if r.CollectionName and r.CollectionName != "Undefined":
+                                            words = r.CollectionName.split()
+                                            if len(words) > 1:
+                                                shorthand = "".join(w[0] for w in words if w).upper()
+                                            else:
+                                                shorthand = r.CollectionName[:3].upper()
+                                                
+                                        view_number_str = v.ViewNumber or "00"
+                                        unique_name_parts = [v.Name]
+                                        if shorthand: unique_name_parts.append(shorthand)
+                                        unique_name_parts.append(view_number_str)
+                                        if r.SheetNumber: unique_name_parts.append(r.SheetNumber)
+                                        
+                                        unique_backend_name = " - ".join(unique_name_parts)
+                                        
+                                        from Autodesk.Revit.DB import BuiltInParameter
                                         if getattr(v, 'ViewId', ElementId.InvalidElementId) != ElementId.InvalidElementId:
                                             v_elem = doc.GetElement(v.ViewId)
                                             if v_elem:
-                                                if v_elem.Name != v.Name:
+                                                # Set Title on Sheet (Desired Name)
+                                                title_param = v_elem.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION)
+                                                if title_param and not title_param.IsReadOnly:
+                                                    if title_param.AsString() != v.Name:
+                                                        try: title_param.Set(v.Name)
+                                                        except: pass
+                                                        
+                                                # Set Backend Unique Name
+                                                if v_elem.Name != unique_backend_name:
                                                     try:
-                                                        v_elem.Name = v.Name
+                                                        v_elem.Name = unique_backend_name
                                                         renames += 1
                                                         log_view_renamed.append(v.Name)
                                                     except: pass
                                             
-                                            from Autodesk.Revit.DB import Viewport, BuiltInParameter
+                                            from Autodesk.Revit.DB import Viewport
                                             vps = FilteredElementCollector(doc).OfClass(Viewport).ToElements()
                                             target_vp = None
                                             for vp in vps:
@@ -2936,8 +3054,15 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                             view_to_place.Scale = scale_map[v.Scale]
                                             
                                             if view_to_place:
+                                                # Set Title on Sheet (Desired Name)
+                                                title_param = view_to_place.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION)
+                                                if title_param and not title_param.IsReadOnly:
+                                                    try: title_param.Set(v.Name)
+                                                    except: pass
+                                                
+                                                # Set Backend Unique Name
                                                 try:
-                                                    view_to_place.Name = v.Name
+                                                    view_to_place.Name = unique_backend_name
                                                     renames += 1
                                                     log_view_renamed.append(v.Name)
                                                 except: pass

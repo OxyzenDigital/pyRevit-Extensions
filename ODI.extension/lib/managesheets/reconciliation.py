@@ -344,6 +344,60 @@ def match_sheets(harvested_data, slots):
                 s.existing_number, s.existing_name, s.sheet_element_id = best_sh.number, best_sh.name, best_sh.element_id
                 slots_subset.remove(s)
                 sheets_subset.remove(best_sh)
+
+        # Pass E: Semantic View-Centric Match
+        for s in list(slots_subset):
+            best_sh, best_score = None, 0.0
+            norm_slot = normalize_name(s.target_name)
+            
+            target_level_hint = None
+            lvl_match = re.search(r'level (\d+)|(\d+)(st|nd|rd|th) floor', norm_slot)
+            if lvl_match:
+                target_level_hint = lvl_match.group(1) or lvl_match.group(2)
+                
+            is_dim_plan = "dimension" in norm_slot
+            is_demo_plan = "demolition" in norm_slot
+            
+            for sh in list(sheets_subset):
+                sh_val = sh.element_id.IntegerValue if hasattr(sh.element_id, "IntegerValue") else sh.element_id.Value
+                views_on_sheet = sheet_to_views.get(sh_val, [])
+                
+                for v in views_on_sheet:
+                    v_name_norm = normalize_name(v.name)
+                    view_score = token_set_ratio(norm_slot, v_name_norm)
+                    
+                    # 1. Level Match
+                    if target_level_hint and v.level_name:
+                        v_lvl_norm = normalize_name(v.level_name)
+                        v_lvl_match = re.search(r'level (\d+)|(\d+)(st|nd|rd|th) floor', v_lvl_norm)
+                        if v_lvl_match:
+                            v_hint = v_lvl_match.group(1) or v_lvl_match.group(2)
+                            if v_hint == target_level_hint:
+                                view_score += 0.5
+                                
+                    if target_level_hint and not v.level_name:
+                        v_lvl_match = re.search(r'level (\d+)|(\d+)(st|nd|rd|th) floor', v_name_norm)
+                        if v_lvl_match:
+                            v_hint = v_lvl_match.group(1) or v_lvl_match.group(2)
+                            if v_hint == target_level_hint:
+                                view_score += 0.5
+                                
+                    # 2. Intent Match
+                    if is_dim_plan and "dimension" in v_name_norm:
+                        view_score += 0.5
+                    if is_demo_plan and "demolition" in v_name_norm:
+                        view_score += 0.5
+                        
+                    if view_score > best_score:
+                        best_score = view_score
+                        best_sh = sh
+                        
+            if best_score >= 0.70 and best_sh:
+                s.status = "RENAME_BOTH"
+                s.match_score = best_score
+                s.existing_number, s.existing_name, s.sheet_element_id = best_sh.number, best_sh.name, best_sh.element_id
+                slots_subset.remove(s)
+                sheets_subset.remove(best_sh)
     
     # Pass 1: Strict Same Collection Matching
     target_collections = set(s.collection for s in slots)
@@ -362,34 +416,87 @@ def match_sheets(harvested_data, slots):
     
     return slots, extra_sheets
 
+def resolve_renumbering_sequence(plan_rows):
+    """
+    Analyzes the plan_rows to find the safe order to renumber sheets without collisions.
+    Returns:
+      ordered_sequence: list of ops that can be executed safely in order.
+      cycle_ops: list of ops that need a temporary rename to break cycles (swaps).
+    """
+    renumber_ops = [r for r in plan_rows if r['status'] in ("RENAME_NUMBER", "RENAME_BOTH") and r['sheet_element_id'] != -1]
+    
+    current_number_to_op = {}
+    for r in plan_rows:
+        if r.get('existing_number') and r.get('sheet_element_id') != -1:
+            current_number_to_op[r['existing_number']] = r
+            
+    adj = {op['sheet_element_id']: [] for op in renumber_ops}
+    in_degree = {op['sheet_element_id']: 0 for op in renumber_ops}
+    op_by_id = {op['sheet_element_id']: op for op in renumber_ops}
+    
+    for op in renumber_ops:
+        target_num = op['target_number']
+        blocking_op = current_number_to_op.get(target_num)
+        
+        if blocking_op and blocking_op['sheet_element_id'] != op['sheet_element_id']:
+            blocking_id = blocking_op['sheet_element_id']
+            if blocking_id in op_by_id:
+                # blocking_op must move BEFORE op
+                adj[blocking_id].append(op['sheet_element_id'])
+                in_degree[op['sheet_element_id']] += 1
+                
+    queue = [op_id for op_id in in_degree if in_degree[op_id] == 0]
+    ordered_sequence = []
+    
+    while queue:
+        curr_id = queue.pop(0)
+        ordered_sequence.append(op_by_id[curr_id])
+        for neighbor_id in adj[curr_id]:
+            in_degree[neighbor_id] -= 1
+            if in_degree[neighbor_id] == 0:
+                queue.append(neighbor_id)
+                
+    cycle_ops = []
+    if len(ordered_sequence) < len(renumber_ops):
+        for op_id in in_degree:
+            if in_degree[op_id] > 0:
+                cycle_ops.append(op_by_id[op_id])
+                
+    return ordered_sequence, cycle_ops
+
 def apply_plan(doc, plan_rows):
     """
-    Phase 6: Two-Phase Application
-    Executes the physical Revit changes using the "Parking Lot" transaction protocol
-    to guarantee zero collisions. Wrapped in a TransactionGroup.
+    Phase 6: Three-Phase Application
+    1. View Prep (Rename existing, Create new)
+    2. Sheet Sequencing (Topological rename, create new)
+    3. View Placement
     """
     with TransactionGroup(doc, "AIA Reconciliation") as tg:
         tg.Start()
         try:
-            renumber_ops = [r for r in plan_rows if r['status'] in ("RENAME_NUMBER", "RENAME_BOTH") and r['sheet_element_id'] != -1]
-            rename_name_ops = [r for r in plan_rows if r['status'] in ("RENAME_NAME", "MATCH") and r['sheet_element_id'] != -1]
-            
-            # Transaction 1: Park
-            with Transaction(doc, "Phase 1 - park") as t1:
+            # --- PHASE 1: View Generation & Renaming ---
+            with Transaction(doc, "Phase 1 - View Prep") as t1:
                 t1.Start()
-                for op in renumber_ops:
+                # Placeholder for View Prep logic
+                # E.g., rename existing views to [Desired] - [Collection] - [Detail] - [Sheet]
+                # Create missing views based on Plan Type.
+                t1.Commit()
+                
+            # --- PHASE 2: Sequence-Based Sheet Renaming & Creation ---
+            with Transaction(doc, "Phase 2 - Sheet Sequencing") as t2:
+                t2.Start()
+                
+                ordered_sequence, cycle_ops = resolve_renumbering_sequence(plan_rows)
+                
+                # 1. Break Cycles
+                for op in cycle_ops:
                     sheet_id = ElementId(op['sheet_element_id'])
                     sheet = doc.GetElement(sheet_id)
                     if sheet and sheet.SheetNumber != op['target_number']:
-                        # Dummy guaranteed unique string
-                        sheet.SheetNumber = "ZZ~" + str(sheet_id.IntegerValue if hasattr(sheet_id, "IntegerValue") else sheet_id.Value)
-                t1.Commit()
+                        sheet.SheetNumber = op['target_number'] + "_TEMP" 
                 
-            # Transaction 2: Finalize
-            with Transaction(doc, "Phase 2 - finalize") as t2:
-                t2.Start()
-                # Apply target numbers
-                for op in renumber_ops:
+                # 2. Execute Linear Sequence
+                for op in ordered_sequence:
                     sheet_id = ElementId(op['sheet_element_id'])
                     sheet = doc.GetElement(sheet_id)
                     if sheet:
@@ -397,7 +504,17 @@ def apply_plan(doc, plan_rows):
                         if op.get('target_name') and sheet.Name != op['target_name']:
                             sheet.Name = op['target_name']
                             
-                # Apply names for others
+                # 3. Resolve Parked Cycles
+                for op in cycle_ops:
+                    sheet_id = ElementId(op['sheet_element_id'])
+                    sheet = doc.GetElement(sheet_id)
+                    if sheet:
+                        sheet.SheetNumber = op['target_number']
+                        if op.get('target_name') and sheet.Name != op['target_name']:
+                            sheet.Name = op['target_name']
+
+                # Apply names for other sheets
+                rename_name_ops = [r for r in plan_rows if r['status'] in ("RENAME_NAME", "MATCH") and r['sheet_element_id'] != -1]
                 for op in rename_name_ops:
                     sheet_id = ElementId(op['sheet_element_id'])
                     sheet = doc.GetElement(sheet_id)
@@ -410,7 +527,6 @@ def apply_plan(doc, plan_rows):
                     new_sheet = ViewSheet.CreatePlaceholder(doc)
                     new_sheet.SheetNumber = op['target_number']
                     new_sheet.Name = op['target_name']
-                    # Apply sheet collection if set
                     try:
                         param = new_sheet.LookupParameter("Sheet Collection")
                         if param and op.get('collection') and op.get('collection') != "Undefined":
@@ -419,7 +535,14 @@ def apply_plan(doc, plan_rows):
                         pass
                 
                 t2.Commit()
-            
+                
+            # --- PHASE 3: View Placement ---
+            with Transaction(doc, "Phase 3 - View Placement") as t3:
+                t3.Start()
+                # Placeholder for View Placement logic
+                # E.g., placing the prepped views onto the finalized sheets via Viewport.Create()
+                t3.Commit()
+
             tg.Assimilate()
         except Exception as e:
             tg.RollBack()
