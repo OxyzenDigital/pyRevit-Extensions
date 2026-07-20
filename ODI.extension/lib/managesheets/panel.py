@@ -2514,9 +2514,18 @@ class ManageSheetsPanel(forms.WPFWindow):
             if not view: return
             
             view.GroupDescriptions.Clear()
-            view.GroupDescriptions.Add(PropertyGroupDescription("SheetSeries"))
+            
+            node = getattr(self, "_current_selected_node", None)
+            if hasattr(self, "NavTree") and hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
+                node = self.NavTree.SelectedItem
+                
+            if node and hasattr(node, "NodeType") and node.NodeType == "Root":
+                view.GroupDescriptions.Add(PropertyGroupDescription("CollectionAndSeries"))
+            else:
+                view.GroupDescriptions.Add(PropertyGroupDescription("SheetSeries"))
             
             view.SortDescriptions.Clear()
+            view.SortDescriptions.Add(SortDescription("CollectionName", ListSortDirection.Ascending))
             view.SortDescriptions.Add(SortDescription("SheetSeries", ListSortDirection.Ascending))
             view.SortDescriptions.Add(SortDescription("SheetNumber", ListSortDirection.Ascending))
             
@@ -3157,6 +3166,18 @@ class ManageSheetsPanel(forms.WPFWindow):
                                 if r.Action != "PURGE" and r.IsChecked:
                                     target_sheet_id = r.ElementId if r.Action != "CREATE" else new_sheet.Id
                                     
+                                    def park_conflicting_dn(doc_obj, sht_id, target_dn, skip_vp_id=None):
+                                        from Autodesk.Revit.DB import FilteredElementCollector, Viewport, BuiltInParameter
+                                        import uuid
+                                        if not target_dn: return
+                                        vps_on_sheet = FilteredElementCollector(doc_obj).OwnedByView(sht_id).OfClass(Viewport).ToElements()
+                                        for v_on_sht in vps_on_sheet:
+                                            if skip_vp_id and v_on_sht.Id == skip_vp_id: continue
+                                            dn_p = v_on_sht.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                            if dn_p and not dn_p.IsReadOnly and dn_p.AsString() == str(target_dn):
+                                                try: dn_p.Set(str(target_dn) + "_TEMP_" + str(uuid.uuid4())[:4])
+                                                except: pass
+
                                     for v in getattr(r, 'Views', []):
                                         # Determine Shorthand
                                         shorthand = ""
@@ -3209,6 +3230,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                     if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
                                                         debug_log.append("  [API] Viewport.Create(doc, target_sheet_id, v.ViewId={}, center)".format(v.ViewId.IntegerValue if hasattr(v.ViewId, 'IntegerValue') else v.ViewId.Value))
                                                         new_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
+                                                        park_conflicting_dn(doc, target_sheet_id, v.ViewNumber, new_vp.Id)
                                                         dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                         if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
                                                             try: 
@@ -3216,6 +3238,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                                 dn_param.Set(str(v.ViewNumber))
                                                             except: pass
                                                 else:
+                                                    park_conflicting_dn(doc, target_sheet_id, v.ViewNumber, target_vp.Id)
                                                     dn_param = target_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                     if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
                                                         if dn_param.AsString() != str(v.ViewNumber):
@@ -3292,6 +3315,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                 if Viewport.CanAddViewToSheet(doc, target_sheet_id, view_to_place.Id):
                                                     debug_log.append("  [API] Viewport.Create(doc, target_sheet_id, view_to_place.Id={}, default_center)".format(view_to_place.Id.IntegerValue if hasattr(view_to_place.Id, 'IntegerValue') else view_to_place.Id.Value))
                                                     new_vp = Viewport.Create(doc, target_sheet_id, view_to_place.Id, XYZ(1.5, 1.0, 0))
+                                                    park_conflicting_dn(doc, target_sheet_id, v.ViewNumber, new_vp.Id)
                                                     from Autodesk.Revit.DB import BuiltInParameter
                                                     dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                     if dn_param and not dn_param.IsReadOnly and v.ViewNumber:

@@ -409,6 +409,49 @@ def match_sheets(harvested_data, slots):
 
     # Note: Cross-Collection Migration Matching has been removed to strictly isolate Sheet Collections.
 
+    # Pass 2: Auto-Adopt properly formatted but unanticipated sheets
+    for sh in unmatched_sheets:
+        m = re.match(r"^([A-Z]+)[- ]?(\d)(\d\d\d?)(.*)$", sh.number)
+        if m:
+            prefix = m.group(1)
+            series_digit = m.group(2)
+            
+            ref_slot = None
+            # Prioritize matching a slot in the same collection for precise ContentGroup metadata
+            for s in slots:
+                if s.collection == sh.sheet_collection:
+                    sm = re.match(r"^([A-Z]+)[- ]?(\d)", s.target_number)
+                    if sm and sm.group(1) == prefix and sm.group(2) == series_digit:
+                        ref_slot = s
+                        break
+            # Fallback to any collection if needed to borrow discipline/series names
+            if not ref_slot:
+                for s in slots:
+                    sm = re.match(r"^([A-Z]+)[- ]?(\d)", s.target_number)
+                    if sm and sm.group(1) == prefix and sm.group(2) == series_digit:
+                        ref_slot = s
+                        break
+                        
+            if ref_slot:
+                new_slot = SlotRecord(
+                    target_number=sh.number,
+                    target_name=sh.name,
+                    discipline=ref_slot.discipline,
+                    series=ref_slot.series,
+                    ordinal=int(m.group(3)),
+                    suffix=m.group(4),
+                    canonical_name=sh.name,
+                    collection=sh.sheet_collection,
+                    series_name=ref_slot.series_name,
+                    cg=ref_slot.cg
+                )
+                new_slot.status = "MATCHED"
+                new_slot.match_score = 1.0
+                new_slot.existing_number = sh.number
+                new_slot.existing_name = sh.name
+                new_slot.sheet_element_id = sh.element_id
+                slots.append(new_slot)
+
     # Any remaining unmapped slots are MISSING, unmapped sheets (within target collections) are EXTRA
     extra_sheets = [sh for sh in harvested_data.sheets 
                     if sh.sheet_collection in target_collections 

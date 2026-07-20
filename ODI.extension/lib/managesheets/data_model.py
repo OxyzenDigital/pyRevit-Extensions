@@ -484,6 +484,7 @@ class SheetViewModel(ViewModelBase):
         self._collection_name = val
         self.IsDirty = True
         self.OnPropertyChanged("CollectionName")
+        self.OnPropertyChanged("CollectionAndSeries")
         if self.validation_callback: self.validation_callback()
 
     @property
@@ -681,9 +682,10 @@ class SheetViewModel(ViewModelBase):
             series_name_str = series_map.get(series_num, series_num)
             new_series = "0{}. {}".format(series_num, series_name_str)
             
-            if getattr(self, "SheetSeries", None) != new_series:
+            if getattr(self, "SheetSeries", "") != new_series:
                 self.SheetSeries = new_series
                 self.OnPropertyChanged("SheetSeries")
+                self.OnPropertyChanged("CollectionAndSeries")
         except:
             pass
 
@@ -710,7 +712,20 @@ class SheetViewModel(ViewModelBase):
         
     @property
     def OverrideSeriesText(self):
-        return getattr(self, "_override_series_text", None)
+        val = getattr(self, "_override_series_text", None)
+        if val is not None:
+            return val
+            
+        current_series = getattr(self, "SheetSeries", "Unknown")
+        if current_series == "Unknown":
+            return None
+            
+        for opt in self.AvailableSeriesOptions:
+            parts = opt.split('.')
+            if len(parts) > 0 and parts[0].isdigit():
+                if str(int(parts[0])) == str(current_series):
+                    return opt
+        return None
         
     @OverrideSeriesText.setter
     def OverrideSeriesText(self, value):
