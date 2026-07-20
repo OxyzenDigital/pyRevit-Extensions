@@ -206,20 +206,20 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
     if modifier_overrides is None: modifier_overrides = {}
     targets = []
     suffixes = generate_suffixes(rows, cols, naming_scheme, custom_schemes)
+    disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors", "CS": "Cover Sheet" }
+    target_disc_name = disc_dict.get(disc_code, None)
+
+    # 1. Pre-calculate series_mods for all active series to determine universal padding and multiplier
+    all_series_mods = {}
+    max_mods = 0
+    
     for series in active_series:
-        # If Global Cover is checked, we only generate the 0-General sheets for the 'CS' discipline.
         if series == "0" and global_cover and disc_code != "CS":
             continue
             
-        disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors", "CS": "Cover Sheet" }
-        target_disc_name = disc_dict.get(disc_code, None)
-        
         series_mods = []
         known_names_and_cgs = set()
         for disc, groups in classification.CLASSIFICATION_DICT.items():
-            # If the current discipline corresponds to a known category (like Architectural),
-            # strictly limit it to only pull from that category (and Custom).
-            # If it's a non-matching discipline (like G or CS), it skips this restriction and pulls from anywhere manually checked.
             if target_disc_name in classification.CLASSIFICATION_DICT:
                 if disc != target_disc_name and disc != "Custom":
                     continue
@@ -253,20 +253,34 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
         if not series_mods:
             series_mods.append((SERIES_MAP.get(series, series).upper(), series + "01", "0{}. {}".format(series, SERIES_MAP.get(series, series))))
             
+        all_series_mods[series] = series_mods
+        if len(series_mods) > max_mods:
+            max_mods = len(series_mods)
+            
+    # 2. Determine Universal Multiplier and Padding format
+    seq_mult = 100 if max_mods > 10 else 10
+    pad_fmt = "{:03d}" if max_mods > 10 else "{:02d}"
+    
+    # 3. Generate targets using the pre-calculated mods and universal formatting
+    for series in active_series:
+        if series not in all_series_mods:
+            continue
+        series_mods = all_series_mods[series]
+        
         if series == "1":
             for idx, lvl in enumerate(levels):
-                lvl_seq = (idx + 1) * 10
+                lvl_seq = (idx + 1) * seq_mult
                 actual_mod_seq = 0
                 for mod_idx, (m_name, m_code, cg) in enumerate(series_mods):
                     baseline_seq = lvl_seq + mod_idx
-                    baseline_num = "{}-{}{:02d}".format(disc_code, series, baseline_seq)
+                    baseline_num = "{}-{}{}".format(disc_code, series, pad_fmt.format(baseline_seq))
                     is_excluded = baseline_num in excluded_targets
                     
                     if shuffle_on_exclude:
                         if is_excluded:
                             actual_num = baseline_num + " [Skipped]"
                         else:
-                            actual_num = "{}-{}{:02d}".format(disc_code, series, lvl_seq + actual_mod_seq)
+                            actual_num = "{}-{}{}".format(disc_code, series, pad_fmt.format(lvl_seq + actual_mod_seq))
                             actual_mod_seq += 1
                     else:
                         actual_num = baseline_num
@@ -301,14 +315,14 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
         else:
             actual_mod_seq = 1
             for mod_idx, (m_name, m_code, cg) in enumerate(series_mods):
-                baseline_num = "{}-{}{:02d}".format(disc_code, series, mod_idx + 1)
+                baseline_num = "{}-{}{}".format(disc_code, series, pad_fmt.format(mod_idx + 1))
                 is_excluded = baseline_num in excluded_targets
                 
                 if shuffle_on_exclude:
                     if is_excluded:
                         actual_num = baseline_num + " [Skipped]"
                     else:
-                        actual_num = "{}-{}{:02d}".format(disc_code, series, actual_mod_seq)
+                        actual_num = "{}-{}{}".format(disc_code, series, pad_fmt.format(actual_mod_seq))
                         actual_mod_seq += 1
                 else:
                     actual_num = baseline_num
@@ -789,6 +803,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.Btn_RefreshData.Click += self.on_refresh_clicked
         self.Btn_ResetAll.Click += self.on_refresh_clicked
         self.Btn_Push.Click += self.sync_to_revit
+        self.Btn_PrintLog.Click += self.print_debug_log
         self.Btn_EditNamingSchemes.Click += self.on_edit_naming_schemes
         self.Btn_EditModifiers.Click += self.on_edit_modifiers
         
@@ -2042,7 +2057,7 @@ class ManageSheetsPanel(forms.WPFWindow):
             else:
                 col_node = col_map[c_name]
                 
-            sh_row = SheetViewModel(s.Id, s.SheetNumber, s.Name, c_name, discipline_name=disc_name, content_group_name=cg_name, validation_callback=self.run_validation, number_changed_callback=self.on_sheet_number_changed)
+            sh_row = SheetViewModel(s.Id, s.SheetNumber, s.Name, c_name, discipline_name=disc_name, content_group_name=cg_name, validation_callback=self.run_validation, number_changed_callback=self.on_sheet_number_changed, context_callback=self.get_sheet_context)
             self.all_grid_nodes.append(sh_row)
             
             root_node.Count += 1
@@ -2255,8 +2270,8 @@ class ManageSheetsPanel(forms.WPFWindow):
                     vm.move_down_callback = self.move_item_down
 
                     
-                    vm.IsChecked = True
                     vm._action = row["status"]
+                    vm.IsChecked = (vm._action != "UNRECONCILED")
                     self.EditorItems.Add(vm)
                 else:
                     tgt_num = row["target_number"] if is_template else row["existing_number"]
@@ -2279,7 +2294,8 @@ class ManageSheetsPanel(forms.WPFWindow):
                                             series_name=row.get("series_name", "Unknown"),
                                             is_template=is_template, validation_callback=self.run_validation, 
                                             number_changed_callback=self.on_sheet_number_changed,
-                                            move_up_callback=self.move_item_up, move_down_callback=self.move_item_down)
+                                            move_up_callback=self.move_item_up, move_down_callback=self.move_item_down,
+                                            context_callback=self.get_sheet_context)
                         vm.OriginalCollectionName = active_collection
                         vm.IsChecked = True
                         if row["status"] in ["CREATE", "MISSING"]:
@@ -2297,6 +2313,34 @@ class ManageSheetsPanel(forms.WPFWindow):
             
         except Exception as big_e:
             forms.alert("CRITICAL CRASH IN SCHEMA MATCH:\n" + str(big_e))
+            
+    def get_sheet_context(self):
+        append = True
+        if hasattr(self, 'Chk_FillGaps') and getattr(self.Chk_FillGaps, 'IsChecked'):
+            append = False
+            
+        all_sh = list(self.all_grid_nodes)
+        if hasattr(self, 'EditorItems'):
+            for item in self.EditorItems:
+                if item not in all_sh:
+                    all_sh.append(item)
+                    
+        is_100_based = False
+        try:
+            if hasattr(self, '_loaded_naming_schemes') and self._loaded_naming_schemes:
+                for b_name, b_data in self._loaded_naming_schemes.get("disciplines", {}).items():
+                    for s_code, s_data in b_data.get("series", {}).items():
+                        if len(s_data.get("models", [])) > 10:
+                            is_100_based = True
+                            break
+                    if is_100_based: break
+        except: pass
+        
+        return {
+            "all_sheets": all_sh,
+            "append_sequence": append,
+            "is_100_based": is_100_based
+        }
 
     def move_item_up(self, item):
         items_to_move = [item]
@@ -2360,9 +2404,23 @@ class ManageSheetsPanel(forms.WPFWindow):
                 sheet.SheetName = target_slot.SheetName
                 
                 if target_slot.Action == "CREATE":
-                    # Delete target_slot entirely
-                    self.EditorItems.Remove(target_slot)
-                    # Note: CREATE rows are not in all_grid_nodes, so we just remove from EditorItems
+                    # Shift Down: Temporarily release lock to allow recursive cascading
+                    self._is_auto_sequencing = False
+                    
+                    # Compute next number
+                    match_ts = re.search(r'(\d+)$', target_slot.SheetNumber)
+                    if match_ts:
+                        ts_prefix = target_slot.SheetNumber[:match_ts.start()]
+                        ts_num = int(match_ts.group(1))
+                        ts_len = len(match_ts.group(1))
+                        # Setting SheetNumber will recursively trigger on_sheet_number_changed for target_slot!
+                        target_slot.SheetNumber = "{}{:0{}d}".format(ts_prefix, ts_num + 1, ts_len)
+                    else:
+                        # Fallback if no numeric suffix
+                        target_slot.SheetNumber += "-1"
+                        
+                    # Re-acquire lock to finish current sheet update
+                    self._is_auto_sequencing = True
                     sheet.Action = "UPDATE" if sheet.Action != "UNRECONCILED" else "UPDATE"
                 else:
                     # Evict the target_slot (downgrade to UNRECONCILED)
@@ -2448,11 +2506,19 @@ class ManageSheetsPanel(forms.WPFWindow):
             
     def apply_filters(self):
         try:
-            from System.Windows.Data import CollectionViewSource
+            from System.Windows.Data import CollectionViewSource, PropertyGroupDescription
             from System import Predicate, Object
+            from System.ComponentModel import SortDescription, ListSortDirection
             
             view = CollectionViewSource.GetDefaultView(self.EditorItems)
             if not view: return
+            
+            view.GroupDescriptions.Clear()
+            view.GroupDescriptions.Add(PropertyGroupDescription("SheetSeries"))
+            
+            view.SortDescriptions.Clear()
+            view.SortDescriptions.Add(SortDescription("SheetSeries", ListSortDirection.Ascending))
+            view.SortDescriptions.Add(SortDescription("SheetNumber", ListSortDirection.Ascending))
             
             show_invalid = getattr(self, 'Chk_ShowInvalid', None) and self.Chk_ShowInvalid.IsChecked
             
@@ -2522,6 +2588,17 @@ class ManageSheetsPanel(forms.WPFWindow):
         color_idx = 0
         has_error = False
         
+        # Collect all actively modified IDs across the entire grid to prevent false clashes
+        # when swapping numbers or when an existing sheet vacates its number.
+        all_actively_modified_ids = set()
+        for r in validation_pool:
+            if not getattr(r, "IsChecked", False) or getattr(r, "Action", "") == "PURGE":
+                continue
+            if hasattr(r, 'ElementId') and r.ElementId != ElementId.InvalidElementId:
+                r_id = r.ElementId
+                r_val = r_id.IntegerValue if hasattr(r_id, 'IntegerValue') else r_id.Value
+                all_actively_modified_ids.add(r_val)
+
         for key, items in all_numbers.items():
             is_clash = False
             conflicts = []
@@ -2535,16 +2612,8 @@ class ManageSheetsPanel(forms.WPFWindow):
             
             # Global Document Clash
             if key in global_sheet_keys:
-                # Check if the global sheet is NOT one of the items we are actively renaming
-                active_ids = []
-                for i in items:
-                    if hasattr(i, 'ElementId') and i.ElementId != ElementId.InvalidElementId:
-                        i_id = i.ElementId
-                        i_val = i_id.IntegerValue if hasattr(i_id, 'IntegerValue') else i_id.Value
-                        active_ids.append(i_val)
-                        
                 for global_id in global_sheet_keys[key]:
-                    if global_id not in active_ids:
+                    if global_id not in all_actively_modified_ids:
                         is_clash = True
                         conflicts.append("Existing Project Sheet (ID: {})".format(global_id))
             
@@ -2605,7 +2674,8 @@ class ManageSheetsPanel(forms.WPFWindow):
                         v.ValidationWarning += " Missing Level."
                         
                 # Check 4: Duplicate View Numbers on the SAME sheet
-                v_num = str(getattr(v, 'ViewNumber', '')).strip().lower()
+                v_num = getattr(v, 'ViewNumber', '').strip().lower()
+                
                 if v_num:
                     if v_num in sheet_view_numbers:
                         has_error = True
@@ -2614,7 +2684,14 @@ class ManageSheetsPanel(forms.WPFWindow):
                         
                 # Check 5: Duplicate View Names GLOBALLY
                 v_name_lower = v.Name.lower() if v.Name else ""
-                if v_name_lower:
+                
+                # Revit allows Legends and Schedules to be placed on multiple sheets
+                is_legend_or_schedule = False
+                pt = getattr(v, 'PlanType', '').lower()
+                if 'legend' in pt or 'schedule' in pt:
+                    is_legend_or_schedule = True
+                
+                if v_name_lower and v_num and not is_legend_or_schedule:
                     if v.IsNew and v_name_lower in existing_view_names:
                         has_error = True
                         v.ValidationWarning += " Name already exists in project."
@@ -2629,6 +2706,11 @@ class ManageSheetsPanel(forms.WPFWindow):
             for v in r.Views:
                 if getattr(v, 'ValidationWarning', ""):
                     r_has_error = True
+                    r.ValidationBrush = "#FCA5A5"  # Highlight the sheet row in red
+                    if not r.ValidationWarning:
+                        r.ValidationWarning = "View Error: " + v.ValidationWarning
+                    elif "View Error:" not in r.ValidationWarning:
+                        r.ValidationWarning += "\nView Error: " + v.ValidationWarning
                     break
                     
             if r.IsChecked and r.Action in ["CREATE", "UPDATE", "PURGE"] and not r_has_error:
@@ -2683,7 +2765,77 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.apply_filters()
         self.update_grid_title()
 
+    def print_debug_log(self, sender, e):
+        from pyrevit import script
+        from Autodesk.Revit.DB import ElementId
+        out = script.get_output()
+        out.print_md("### Manage Sheets: Debug Log (Ordered by AIA Schema)")
+        
+        validation_pool = set(self.all_grid_nodes)
+        for item in self.EditorItems:
+            validation_pool.add(item)
+            
+        valid_nodes = []
+        for r in validation_pool:
+            if not r.IsChecked or r.Action == "PURGE": continue
+            r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
+            for v in r.Views:
+                if getattr(v, 'ValidationWarning', ""):
+                    r_has_error = True
+                    break
+            if not r_has_error:
+                valid_nodes.append(r)
+                
+        out.print_md("**Total valid checked nodes to sync:** {}".format(len(valid_nodes)))
+        
+        node_map = { r.SheetNumber: r for r in valid_nodes }
+        
+        # Print using AIA Schema order
+        out.print_md("#### AIA Schema Mapping")
+        if hasattr(self, "generated_targets") and self.generated_targets:
+            for t in self.generated_targets:
+                target_num = t.get("num", "")
+                pure_name = t.get("name", "")
+                
+                if target_num in node_map:
+                    r = node_map.pop(target_num)
+                    elem_id_str = "NEW_SHEET_PLACEHOLDER"
+                    if hasattr(r, 'ElementId') and r.ElementId != ElementId.InvalidElementId:
+                        elem_id_str = str(r.ElementId.IntegerValue if hasattr(r.ElementId, 'IntegerValue') else r.ElementId.Value)
+                    
+                    orig_name = getattr(r, 'OriginalName', '')
+                    orig_num = getattr(r, 'OriginalNumber', '')
+                    prop_name = r.SheetName
+                    prop_num = r.SheetNumber
+                    
+                    out.print_md("- **Element ID:** `{}` | **Original:** `{} - {}` --> **Target:** `{} - {}` | **AIA Pure:** `{} - {}`".format(
+                        elem_id_str, orig_num, orig_name, prop_num, prop_name, target_num, pure_name))
+                else:
+                    out.print_md("- **Element ID:** `[Unmatched/Unchecked]` | **Original:** `None` --> **Target:** `None` | **AIA Pure:** `{} - {}`".format(
+                        target_num, pure_name))
+        
+        # Print any remaining ones that didn't match the schema targets exactly
+        if node_map:
+            out.print_md("---\n#### Additional/Custom Sheets (Not in base schema order)")
+            for r in node_map.values():
+                elem_id_str = "NEW_SHEET_PLACEHOLDER"
+                if hasattr(r, 'ElementId') and r.ElementId != ElementId.InvalidElementId:
+                    elem_id_str = str(r.ElementId.IntegerValue if hasattr(r.ElementId, 'IntegerValue') else r.ElementId.Value)
+                
+                orig_name = getattr(r, 'OriginalName', '')
+                orig_num = getattr(r, 'OriginalNumber', '')
+                prop_name = r.SheetName
+                prop_num = r.SheetNumber
+                
+                out.print_md("- **Element ID:** `{}` | **Original:** `{} - {}` --> **Target:** `{} - {}` | **AIA Pure:** `[None]`".format(
+                    elem_id_str, orig_num, orig_name, prop_num, prop_name))
+
     def sync_to_revit(self, sender, e):
+        import tempfile
+        import os
+        debug_log_path = os.path.join(os.path.expanduser('~'), 'Downloads', "pyrevit_sync_debug.log")
+        debug_log = ["=== MANAGE SHEETS SYNC DEBUG LOG ==="]
+        
         self.main_vm.IsPushEnabled = False
         
         tb_item = self.Combo_TitleBlocks.SelectedItem
@@ -2698,7 +2850,31 @@ class ManageSheetsPanel(forms.WPFWindow):
             doc = uidoc.Document if uidoc else None
             if not doc: return
             
-            from Autodesk.Revit.DB import TransactionGroup, FilteredElementCollector, ViewSheet, View, ElementId, Transaction, BuiltInCategory, Viewport, XYZ
+            from Autodesk.Revit.DB import TransactionGroup, FilteredElementCollector, ViewSheet, View, ElementId, Transaction, BuiltInCategory, Viewport, XYZ, StorageType
+            
+            # Collect existing sheets to infer majority parameter values for browser organization
+            all_existing_sheets = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Sheets).WhereElementIsNotElementType().ToElements()
+            
+            param_value_counts = {}
+            for sheet in all_existing_sheets:
+                for param in sheet.Parameters:
+                    if not param.IsReadOnly and param.StorageType == StorageType.String:
+                        p_name = param.Definition.Name
+                        if p_name in ["Sheet Name", "Sheet Number", "Discipline", "Content Group", "Sheet Series", "Appears In Sheet List", "Drawn By", "Checked By", "Designed By", "Approved By", "Sheet Issue Date"]:
+                            continue
+                        p_val = param.AsString()
+                        if p_val:
+                            if p_name not in param_value_counts:
+                                param_value_counts[p_name] = {}
+                            param_value_counts[p_name][p_val] = param_value_counts[p_name].get(p_val, 0) + 1
+            
+            majority_param_values = {}
+            for p_name, counts in param_value_counts.items():
+                if counts:
+                    majority_value = max(counts.items(), key=lambda x: x[1])[0]
+                    majority_param_values[p_name] = majority_value
+                    
+            debug_log.append("[Inference] Majority Parameter Values: {}".format(majority_param_values))
             
             validation_pool = set(self.all_grid_nodes)
             for item in self.EditorItems:
@@ -2739,6 +2915,10 @@ class ManageSheetsPanel(forms.WPFWindow):
                         break
                 if not r_has_error:
                     valid_nodes.append(r)
+                else:
+                    debug_log.append("Node dropped due to error: {} - {}".format(getattr(r, 'OriginalNumber', 'NEW'), r.ValidationWarning))
+                    
+            debug_log.append("Total valid checked nodes: {}".format(len(valid_nodes)))
                     
             if not valid_nodes:
                 self.main_vm.IsPushEnabled = True
@@ -2769,6 +2949,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                     live_view_names.add(v.Name.lower())
                     
             error_log = []
+            auto_park_ids = []
             
             active_renaming_ids = set()
             for n in valid_nodes:
@@ -2792,12 +2973,10 @@ class ManageSheetsPanel(forms.WPFWindow):
                     
                     for live_id in live_sheet_keys[key]:
                         if live_id != r_id_val and live_id not in active_renaming_ids:
-                            is_clash = True
-                            error_log.append("Skipped Sheet '{}': Number already taken by another user.".format(r.SheetNumber))
-                            break
+                            if live_id not in auto_park_ids:
+                                auto_park_ids.append(live_id)
                             
-                if not is_clash:
-                    for v in getattr(r, 'Views', []):
+                for v in getattr(r, 'Views', []):
                         if getattr(v, 'IsNew', False) and getattr(v, 'Name', '') and v.Name.lower() in live_view_names:
                             is_clash = True
                             error_log.append("Skipped Sheet '{}': View name '{}' already taken by another user.".format(r.SheetNumber, v.Name))
@@ -2816,6 +2995,22 @@ class ManageSheetsPanel(forms.WPFWindow):
             with TransactionGroup(doc, "AIA Reconciliation") as tg:
                 tg.Start()
                 try:
+                    if auto_park_ids:
+                        with Transaction(doc, "Auto-Park Unmatched Sheets") as t_park:
+                            t_park.Start()
+                            for pid in auto_park_ids:
+                                p_elem = doc.GetElement(ElementId(pid))
+                                if p_elem:
+                                    old_num = p_elem.SheetNumber
+                                    import System
+                                    new_num = old_num + "_OLD_" + System.Guid.NewGuid().ToString().Substring(0, 4)
+                                    try:
+                                        p_elem.SheetNumber = new_num
+                                        debug_log.append("Auto-parked unmapped blocking sheet: {} -> {}".format(old_num, new_num))
+                                    except Exception as ex: 
+                                        debug_log.append("Failed to auto-park sheet: {} -> {}: {}".format(old_num, new_num, str(ex)))
+                            t_park.Commit()
+                            
                     ensure_sheet_parameter(doc, "Discipline")
                     ensure_sheet_parameter(doc, "Content Group")
                     ensure_sheet_parameter(doc, "Sheet Series")
@@ -2836,6 +3031,9 @@ class ManageSheetsPanel(forms.WPFWindow):
                             if hasattr(r, 'ElementId') and r.ElementId != ElementId.InvalidElementId:
                                 if r.SheetNumber != r.OriginalNumber:
                                     renumber_nodes.append(r)
+                                    debug_log.append("[Phase 1] Added to renumber_nodes: {} -> {} (Action: {}, MatchStatus: {})".format(r.OriginalNumber, r.SheetNumber, r.Action, match_stat))
+                                    
+                    debug_log.append("[Phase 1] Total renumber_nodes: {}".format(len(renumber_nodes)))
                                 
                     node_by_id = {}
                     adj = {}
@@ -2871,12 +3069,11 @@ class ManageSheetsPanel(forms.WPFWindow):
                             if in_degree[neighbor_id] == 0:
                                 queue.append(neighbor_id)
                                 
-                    cycle_nodes = []
-                    if len(ordered_sequence) < len(renumber_nodes):
-                        for node_id in in_degree:
-                            if in_degree[node_id] > 0:
-                                cycle_nodes.append(node_by_id[node_id])
-                                
+                    cycle_nodes = [node_by_id[nid] for nid, deg in in_degree.items() if deg > 0]
+                    
+                    debug_log.append("[Phase 1] Ordered Sequence: {}".format([getattr(r, 'OriginalNumber', '') for r in ordered_sequence]))
+                    debug_log.append("[Phase 1] Cycle Nodes: {}".format([getattr(r, 'OriginalNumber', '') for r in cycle_nodes]))
+                    
                     # Phase 2: Finalize
                     with Transaction(doc, "Phase 2 - Finalize") as t2:
                         t2.Start()
@@ -2885,13 +3082,19 @@ class ManageSheetsPanel(forms.WPFWindow):
                             for r in cycle_nodes:
                                 s_elem = doc.GetElement(r.ElementId)
                                 if s_elem and s_elem.SheetNumber != r.SheetNumber:
-                                    s_elem.SheetNumber = r.SheetNumber + "_TEMP"
+                                    import System
+                                    temp_num = r.SheetNumber + "_TMP_" + System.Guid.NewGuid().ToString().Substring(0, 4)
+                                    s_elem.SheetNumber = temp_num
                                     
                             # 2. Execute Linear Sequence
                             for r in ordered_sequence:
                                 s_elem = doc.GetElement(r.ElementId)
                                 if s_elem:
-                                    s_elem.SheetNumber = r.SheetNumber
+                                    try:
+                                        s_elem.SheetNumber = r.SheetNumber
+                                        debug_log.append("[Phase 2] Renamed {} -> {}".format(r.OriginalNumber, r.SheetNumber))
+                                    except Exception as ex:
+                                        debug_log.append("[Phase 2 ERROR] Failed to rename {} to {}: {}".format(r.OriginalNumber, r.SheetNumber, str(ex)))
                                     
                             # 3. Resolve Parked Cycles
                             for r in cycle_nodes:
@@ -2903,7 +3106,35 @@ class ManageSheetsPanel(forms.WPFWindow):
                                 if not r.IsChecked: continue
                                 new_sheet = None
                                 match_stat = getattr(r, 'MatchStatus', None) or r.Action
-                                if r.Action in ["UPDATE", "MATCHED", "RENAME_NAME", "RENAME_NUMBER", "RENAME_BOTH"] or match_stat in ["RENAME_NUMBER", "RENAME_BOTH"]:
+                                debug_log.append("[Phase 2 Loop 4] Processing: {} -> {} (Action: {}, MatchStat: {})".format(getattr(r, 'OriginalNumber', 'NEW'), r.SheetNumber, r.Action, match_stat))
+                                
+                                if r.Action == "CREATE":
+                                    tb_id = ElementId(tb_id_val)
+                                    debug_log.append("  [API] ViewSheet.Create(doc, tb_id={})".format(tb_id_val))
+                                    new_sheet = ViewSheet.Create(doc, tb_id)
+                                    debug_log.append("  [API] new_sheet.SheetNumber = '{}'".format(r.SheetNumber))
+                                    new_sheet.SheetNumber = r.SheetNumber
+                                    debug_log.append("  [API] new_sheet.Name = '{}'".format(r.SheetName))
+                                    new_sheet.Name = r.SheetName
+                                    assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
+                                    c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
+                                    disc_name = c_res.get("discipline", "Unknown")
+                                    cg_name = c_res.get("contentGroup", "Uncategorized")
+                                    set_sheet_parameter(new_sheet, "Discipline", disc_name)
+                                    set_sheet_parameter(new_sheet, "Content Group", cg_name)
+                                    set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
+                                    
+                                    # Apply inferred majority parameters for browser organization
+                                    for p_name, p_val in majority_param_values.items():
+                                        try:
+                                            param = new_sheet.LookupParameter(p_name)
+                                            if param and not param.IsReadOnly and not param.AsString():
+                                                param.Set(p_val)
+                                        except Exception: pass
+                                        
+                                    log_created.append("{} - {}".format(r.SheetNumber, r.SheetName))
+                                    creates += 1
+                                elif r.Action in ["UPDATE", "MATCHED", "RENAME_NAME", "RENAME_NUMBER", "RENAME_BOTH"] or match_stat in ["RENAME_NUMBER", "RENAME_BOTH"]:
                                     s_elem = doc.GetElement(r.ElementId)
                                     if s_elem:
                                         if r.SheetName != r.OriginalName: s_elem.Name = r.SheetName
@@ -2916,20 +3147,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                                         set_sheet_parameter(s_elem, "Sheet Series", r.SheetSeries)
                                         log_updated.append("{} - {}".format(r.SheetNumber, r.SheetName))
                                         renames += 1
-                                elif r.Action == "CREATE":
-                                    tb_id = ElementId(tb_id_val)
-                                    new_sheet = ViewSheet.Create(doc, tb_id)
-                                    new_sheet.SheetNumber = r.SheetNumber
-                                    new_sheet.Name = r.SheetName
-                                    assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
-                                    c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
-                                    disc_name = c_res.get("discipline", "Unknown")
-                                    cg_name = c_res.get("contentGroup", "Uncategorized")
-                                    set_sheet_parameter(new_sheet, "Discipline", disc_name)
-                                    set_sheet_parameter(new_sheet, "Content Group", cg_name)
-                                    set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
-                                    log_created.append("{} - {}".format(r.SheetNumber, r.SheetName))
-                                    creates += 1
                                 elif r.Action == "PURGE":
                                     s_elem = doc.GetElement(r.ElementId)
                                     if s_elem:
@@ -2970,7 +3187,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                         except: pass
                                                         
                                                 # Set Backend Unique Name
-                                                if v_elem.Name != unique_backend_name:
+                                                if v.ViewNumber and v_elem.Name != unique_backend_name:
                                                     try:
                                                         v_elem.Name = unique_backend_name
                                                         renames += 1
@@ -2990,16 +3207,21 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                     center = target_vp.GetBoxCenter()
                                                     doc.Delete(target_vp.Id)
                                                     if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
+                                                        debug_log.append("  [API] Viewport.Create(doc, target_sheet_id, v.ViewId={}, center)".format(v.ViewId.IntegerValue if hasattr(v.ViewId, 'IntegerValue') else v.ViewId.Value))
                                                         new_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
                                                         dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                         if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                            try: dn_param.Set(str(v.ViewNumber))
+                                                            try: 
+                                                                debug_log.append("  [API] new_vp.DetailNumber.Set('{}')".format(v.ViewNumber))
+                                                                dn_param.Set(str(v.ViewNumber))
                                                             except: pass
                                                 else:
                                                     dn_param = target_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                     if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
                                                         if dn_param.AsString() != str(v.ViewNumber):
-                                                            try: dn_param.Set(str(v.ViewNumber))
+                                                            try: 
+                                                                debug_log.append("  [API] target_vp.DetailNumber.Set('{}')".format(v.ViewNumber))
+                                                                dn_param.Set(str(v.ViewNumber))
                                                             except: pass
                                         elif getattr(v, 'IsNew', False):
                                             from Autodesk.Revit.DB import ViewFamilyType, ViewFamily, Level, ViewPlan, ViewDrafting
@@ -3062,19 +3284,22 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                 
                                                 # Set Backend Unique Name
                                                 try:
-                                                    view_to_place.Name = unique_backend_name
+                                                    view_to_place.Name = unique_backend_name if v.ViewNumber else v.Name
                                                     renames += 1
                                                     log_view_renamed.append(v.Name)
                                                 except: pass
                                                 
                                                 if Viewport.CanAddViewToSheet(doc, target_sheet_id, view_to_place.Id):
+                                                    debug_log.append("  [API] Viewport.Create(doc, target_sheet_id, view_to_place.Id={}, default_center)".format(view_to_place.Id.IntegerValue if hasattr(view_to_place.Id, 'IntegerValue') else view_to_place.Id.Value))
                                                     new_vp = Viewport.Create(doc, target_sheet_id, view_to_place.Id, XYZ(1.5, 1.0, 0))
                                                     from Autodesk.Revit.DB import BuiltInParameter
                                                     dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                     if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                        try: dn_param.Set(str(v.ViewNumber))
+                                                        try: 
+                                                            debug_log.append("  [API] new_vp.DetailNumber.Set('{}')".format(v.ViewNumber))
+                                                            dn_param.Set(str(v.ViewNumber))
                                                         except: pass
-                                                creates += 1
+                                                    creates += 1
                             t2.Commit()
                         except:
                             if t2.HasStarted() and not t2.HasEnded(): t2.RollBack()
@@ -3112,8 +3337,20 @@ class ManageSheetsPanel(forms.WPFWindow):
                         for err in error_log:
                             out.print_md("- {}".format(err))
                             
-                    self.Close()
+                    try:
+                        with open(debug_log_path, 'w') as f:
+                            f.write("\n".join(debug_log))
+                        out.print_md("---")
+                        out.print_md("**Debug Log Saved:** `{}`".format(debug_log_path))
+                    except: pass
+                            
+                    has_dropped_nodes = any(getattr(r, 'ValidationWarning', False) for r in validation_pool if r.IsChecked)
+                    if has_dropped_nodes or error_log:
+                        out.print_md("---")
+                        out.print_md("## ⚠️ WARNING: Some Sheets Were Dropped")
+                        out.print_md("Validation errors prevented some sheets from syncing. The Manage Sheets window will now close. Please re-run the tool to resolve the remaining errors.")
                     
+                    self.Close()
                 except Exception as ex:
                     if tg.HasStarted() and not tg.HasEnded(): tg.RollBack()
                     import traceback
@@ -3124,6 +3361,15 @@ class ManageSheetsPanel(forms.WPFWindow):
                     out.print_md("# Manage Sheets: Sync Failed ❌")
                     out.print_md("All changes have been safely rolled back.")
                     out.print_md("```\n{}\n```".format(err_msg))
+                    
+                    debug_log.append("CRASH OCCURRED: " + str(ex))
+                    debug_log.append(err_msg)
+                    try:
+                        with open(debug_log_path, 'w') as f:
+                            f.write("\n".join(debug_log))
+                        out.print_md("---")
+                        out.print_md("**Debug Log Saved:** `{}`".format(debug_log_path))
+                    except: pass
                     
                     self.main_vm.IsPushEnabled = True
         

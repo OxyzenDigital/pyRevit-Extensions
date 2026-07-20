@@ -161,14 +161,16 @@ class ViewViewModel(ViewModelBase):
         self._view_type = view_type
         self._scale = scale
         self._is_new = is_new
-        self._view_number = view_number
+        v_num_str = str(view_number).strip() if view_number is not None else ""
+        if v_num_str.lower() in ["nan", "none", "null"]: v_num_str = ""
+        self._view_number = v_num_str
         self._assignment_mode = "Existing" if not is_new else "New"
         self._source_view_id = ElementId.InvalidElementId
         self._validation_warning = ""
         self._level_name = level_name
         self.ParentSheet = parent_sheet
         self.OriginalName = name
-        self.OriginalViewNumber = str(view_number)
+        self.OriginalViewNumber = v_num_str
         
         self.AvailableLevels = AVAILABLE_LEVELS
         self.AvailableViewFamilyTypes = AVAILABLE_VIEW_FAMILY_TYPES
@@ -292,7 +294,9 @@ class ViewViewModel(ViewModelBase):
     def ViewNumber(self): return self._view_number
     @ViewNumber.setter
     def ViewNumber(self, val):
-        self._view_number = str(val)
+        v_num_str = str(val).strip() if val is not None else ""
+        if v_num_str.lower() in ["nan", "none", "null"]: v_num_str = ""
+        self._view_number = v_num_str
         self.OnPropertyChanged("ViewNumber")
         self.trigger_validation()
         
@@ -339,9 +343,10 @@ class ViewViewModel(ViewModelBase):
     def IsCreateNewMode(self): 
         return self._is_new and self._source_view_id == ElementId.InvalidElementId
 class SheetViewModel(ViewModelBase):
-    def __init__(self, element_id, number, name, collection_name, discipline_name="Unknown", content_group_name="Uncategorized", series_name="Unknown", is_template=False, validation_callback=None, number_changed_callback=None, move_up_callback=None, move_down_callback=None):
+    def __init__(self, element_id, number, name, collection_name, discipline_name="Unknown", content_group_name="Uncategorized", series_name="Unknown", is_template=False, validation_callback=None, number_changed_callback=None, move_up_callback=None, move_down_callback=None, context_callback=None):
         ViewModelBase.__init__(self)
         self.IsDirty = False
+        self.context_callback = context_callback
         self.validation_callback = validation_callback
         self.number_changed_callback = number_changed_callback
         self.move_up_callback = move_up_callback
@@ -455,6 +460,7 @@ class SheetViewModel(ViewModelBase):
         self.NumberDiff.ProposedValue = self._sheet_number
         self.IsDirty = True
         self.OnPropertyChanged("SheetNumber")
+        self.reclassify()
         self.update_action()
         if hasattr(self, 'number_changed_callback') and self.number_changed_callback:
             self.number_changed_callback(self, old_val, self._sheet_number)
@@ -468,6 +474,7 @@ class SheetViewModel(ViewModelBase):
         self.NameDiff.ProposedValue = self._sheet_name
         self.IsDirty = True
         self.OnPropertyChanged("SheetName")
+        self.reclassify()
         self.update_action()
 
     @property
@@ -640,6 +647,168 @@ class SheetViewModel(ViewModelBase):
             
         if hasattr(self, 'validation_callback') and self.validation_callback:
             self.validation_callback()
+
+    def reclassify(self):
+        try:
+            import classification
+            import re
+            
+            series_map = {
+                "0": "General", "1": "Plans", "2": "Elevations", "3": "Sections",
+                "4": "Large Scale Views", "5": "Details", "6": "Schedules", "7": "Diagrams", "8": "User Defined", "9": "ThreeD"
+            }
+            
+            series_num = "0"
+            disc_code = "Unknown"
+            
+            match = re.match(r"^([A-Z]+)[- ]?(\d)(\d\d)([A-Za-z]?)(.*)", self._sheet_number)
+            if match:
+                disc_code = match.group(1)
+                series_num = match.group(2)
+                
+            c_info = classification.classify_sheet(self._sheet_number, self._sheet_name)
+            
+            if c_info:
+                if c_info.get("drawingTypeCode", "99") != "99":
+                    dtc = c_info["drawingTypeCode"]
+                    if len(dtc) > 0:
+                        series_num = dtc[0]
+                if c_info.get("contentGroup") and c_info.get("contentGroup") != "Uncategorized":
+                    self.ContentGroupName = c_info["contentGroup"]
+                if c_info.get("discipline") and c_info.get("discipline") != "Unknown":
+                    self.DisciplineName = c_info["discipline"]
+            
+            series_name_str = series_map.get(series_num, series_num)
+            new_series = "0{}. {}".format(series_num, series_name_str)
+            
+            if getattr(self, "SheetSeries", None) != new_series:
+                self.SheetSeries = new_series
+                self.OnPropertyChanged("SheetSeries")
+        except:
+            pass
+
+    @property
+    def IsUnknownSeries(self):
+        return getattr(self, "SheetSeries", "Unknown") == "Unknown"
+        
+    @property
+    def AvailableSeriesOptions(self):
+        if not hasattr(self, "_available_series_options"):
+            self._available_series_options = [
+                "00. General",
+                "01. Plans",
+                "02. Elevations",
+                "03. Sections",
+                "04. Large Scale Views",
+                "05. Details",
+                "06. Schedules",
+                "07. Diagrams",
+                "08. User Defined",
+                "09. ThreeD"
+            ]
+        return self._available_series_options
+        
+    @property
+    def OverrideSeriesText(self):
+        return getattr(self, "_override_series_text", None)
+        
+    @OverrideSeriesText.setter
+    def OverrideSeriesText(self, value):
+        self._override_series_text = value
+        if not value: return
+        # Extract the series code from the string (e.g. "01. Plans" -> "1")
+        parts = value.split('.')
+        if len(parts) > 0 and parts[0].isdigit():
+            code_str = str(int(parts[0]))
+            self._auto_resolve_series(code_str)
+        self.OnPropertyChanged("OverrideSeriesText")
+        
+    def _auto_resolve_series(self, series_code):
+        import re
+        import classification
+        
+        # 1. Grab Discipline
+        disc_code = "A"
+        if getattr(self, 'DisciplineName', "Unknown") != "Unknown":
+            # If DisciplineName is set, we could map it back to code, but regex on number is safer
+            pass
+            
+        match = re.match(r"^([A-Z]+)[- ]?(\d)", self._sheet_number)
+        if match: 
+            disc_code = match.group(1)
+        else:
+            # Fallback if no valid prefix, look at other sheets
+            all_sheets = []
+            if hasattr(self, 'context_callback') and self.context_callback:
+                ctx = self.context_callback()
+                all_sheets = ctx.get("all_sheets", [])
+                
+            for s in all_sheets:
+                m = re.match(r"^([A-Z]+)[- ]?(\d)", getattr(s, "SheetNumber", ""))
+                if m:
+                    disc_code = m.group(1)
+                    break
+
+        append_sequence = False
+        all_sheets = []
+        if hasattr(self, 'context_callback') and self.context_callback:
+            ctx = self.context_callback()
+            append_sequence = ctx.get("append_sequence", False)
+            all_sheets = ctx.get("all_sheets", [])
+            
+        # Determine global pad format by sniffing all sheets
+        pad_fmt = "{:02d}"
+        if ctx and ctx.get("is_100_based", False):
+            pad_fmt = "{:03d}"
+        else:
+            for s in all_sheets:
+                n = getattr(s, "SheetNumber", "")
+                # If any sheet has 3 digits after the series digit, it's 100-based
+                if re.match(r"^([A-Z]+)[- ]?\d(\d\d\d)", n):
+                    pad_fmt = "{:03d}"
+                    break
+
+        # 2. Find next available number
+        prefix = "{}{}".format(disc_code, series_code)
+        used_nums = []
+        for s in all_sheets:
+            n = getattr(s, "SheetNumber", "")
+            if pad_fmt == "{:03d}":
+                m = re.match(r"^([A-Z]+)[- ]?(\d)(\d\d\d)", n)
+            else:
+                m = re.match(r"^([A-Z]+)[- ]?(\d)(\d\d)", n)
+                
+            if m and m.group(1) == disc_code and m.group(2) == series_code:
+                used_nums.append(int(m.group(3)))
+                
+        next_num = 1
+        if used_nums:
+            if append_sequence:
+                next_num = max(used_nums) + 1
+            else:
+                for i in range(1, 999):
+                    if i not in used_nums:
+                        next_num = i
+                        break
+                        
+        # Support A-101 or A101 based on existing format
+        has_dash = "-" in getattr(self, "SheetNumber", "")
+        dash_str = "-" if has_dash else ""
+        proposed_number = "{}{}{}{}".format(disc_code, dash_str, series_code, pad_fmt.format(next_num))
+        
+        # 3. Find closest name via classification engine
+        proposed_name = self.SheetName
+        if len(self.Views) > 0:
+            proposed_name = self.Views[0].Name
+            
+        c_info = classification.classify_sheet(proposed_number, proposed_name)
+        if c_info and c_info.get("originalName") != proposed_name:
+            # Ensure the matched name actually belongs to the chosen series code if possible
+            if c_info.get("drawingTypeCode", "99")[0] == series_code:
+                proposed_name = c_info["originalName"]
+        
+        self.SheetName = proposed_name
+        self.SheetNumber = proposed_number
 
 class NavTreeNode(ViewModelBase):
     def __init__(self, name, node_type, tag=None, parent=None):
