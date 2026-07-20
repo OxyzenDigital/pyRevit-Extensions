@@ -234,14 +234,19 @@ def match_sheets(harvested_data, slots):
             sheet_to_views[val].append(v)
             
     def get_matches(slots_subset, sheets_subset):
+        def remove_matched(s, sh):
+            slots_subset.remove(s)
+            sheets_subset.remove(sh)
+            if s in unmatched_slots: unmatched_slots.remove(s)
+            if sh in unmatched_sheets: unmatched_sheets.remove(sh)
+            
         # Pass A: exact number + exact name
         for s in list(slots_subset):
             for sh in list(sheets_subset):
                 if s.target_number == sh.number and s.target_name == sh.name:
                     s.status = "MATCHED"
                     s.existing_number, s.existing_name, s.sheet_element_id = sh.number, sh.name, sh.element_id
-                    slots_subset.remove(s)
-                    sheets_subset.remove(sh)
+                    remove_matched(s, sh)
                     break
         # Pass B: exact number, name differs
         for s in list(slots_subset):
@@ -249,8 +254,7 @@ def match_sheets(harvested_data, slots):
                 if s.target_number == sh.number:
                     s.status = "RENAME_NAME"
                     s.existing_number, s.existing_name, s.sheet_element_id = sh.number, sh.name, sh.element_id
-                    slots_subset.remove(s)
-                    sheets_subset.remove(sh)
+                    remove_matched(s, sh)
                     break
         # Pass C: exact name, number differs
         for s in list(slots_subset):
@@ -259,8 +263,7 @@ def match_sheets(harvested_data, slots):
                 if norm_slot == normalize_name(sh.name):
                     s.status = "RENAME_NUMBER"
                     s.existing_number, s.existing_name, s.sheet_element_id = sh.number, sh.name, sh.element_id
-                    slots_subset.remove(s)
-                    sheets_subset.remove(sh)
+                    remove_matched(s, sh)
                     break
         # Pass D: Fuzzy match
         for s in list(slots_subset):
@@ -342,8 +345,7 @@ def match_sheets(harvested_data, slots):
                 s.status = "RENAME_BOTH"
                 s.match_score = best_score
                 s.existing_number, s.existing_name, s.sheet_element_id = best_sh.number, best_sh.name, best_sh.element_id
-                slots_subset.remove(s)
-                sheets_subset.remove(best_sh)
+                remove_matched(s, best_sh)
 
         # Pass E: Semantic View-Centric Match
         for s in list(slots_subset):
@@ -396,8 +398,7 @@ def match_sheets(harvested_data, slots):
                 s.status = "RENAME_BOTH"
                 s.match_score = best_score
                 s.existing_number, s.existing_name, s.sheet_element_id = best_sh.number, best_sh.name, best_sh.element_id
-                slots_subset.remove(s)
-                sheets_subset.remove(best_sh)
+                remove_matched(s, best_sh)
     
     # Pass 1: Strict Same Collection Matching
     target_collections = set(s.collection for s in slots)
@@ -452,10 +453,16 @@ def match_sheets(harvested_data, slots):
                 new_slot.sheet_element_id = sh.element_id
                 slots.append(new_slot)
 
+    def safe_id(eid):
+        if eid == ElementId.InvalidElementId: return -1
+        return eid.IntegerValue if hasattr(eid, "IntegerValue") else eid.Value
+        
+    matched_ids = set([safe_id(s.sheet_element_id) for s in slots if s.sheet_element_id != ElementId.InvalidElementId])
+    
     # Any remaining unmapped slots are MISSING, unmapped sheets (within target collections) are EXTRA
     extra_sheets = [sh for sh in harvested_data.sheets 
                     if sh.sheet_collection in target_collections 
-                    and sh.element_id not in [s.sheet_element_id for s in slots if s.sheet_element_id != ElementId.InvalidElementId]]
+                    and safe_id(sh.element_id) not in matched_ids]
     
     return slots, extra_sheets
 
