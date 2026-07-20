@@ -2673,10 +2673,16 @@ class ManageSheetsPanel(forms.WPFWindow):
                         has_error = True
                         v.ValidationWarning += " Missing Level."
                         
+                # Revit allows Legends and Schedules to be placed on multiple sheets
+                is_legend_or_schedule = False
+                pt = getattr(v, 'PlanType', '').lower()
+                if 'legend' in pt or 'schedule' in pt:
+                    is_legend_or_schedule = True
+
                 # Check 4: Duplicate View Numbers on the SAME sheet
                 v_num = getattr(v, 'ViewNumber', '').strip().lower()
                 
-                if v_num:
+                if v_num and not is_legend_or_schedule:
                     if v_num in sheet_view_numbers:
                         has_error = True
                         v.ValidationWarning += " Duplicate View Number on sheet."
@@ -2684,12 +2690,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                         
                 # Check 5: Duplicate View Names GLOBALLY
                 v_name_lower = v.Name.lower() if v.Name else ""
-                
-                # Revit allows Legends and Schedules to be placed on multiple sheets
-                is_legend_or_schedule = False
-                pt = getattr(v, 'PlanType', '').lower()
-                if 'legend' in pt or 'schedule' in pt:
-                    is_legend_or_schedule = True
                 
                 if v_name_lower and v_num and not is_legend_or_schedule:
                     if v.IsNew and v_name_lower in existing_view_names:
