@@ -488,6 +488,12 @@ class SheetViewModel(ViewModelBase):
         if self.validation_callback: self.validation_callback()
 
     @property
+    def CollectionAndSeries(self):
+        c = self.CollectionName
+        s = getattr(self, "SheetSeries", "Unknown")
+        return "{} - {}".format(c, s)
+
+    @property
     def IsChecked(self): return self._is_checked
     @IsChecked.setter
     def IsChecked(self, val):

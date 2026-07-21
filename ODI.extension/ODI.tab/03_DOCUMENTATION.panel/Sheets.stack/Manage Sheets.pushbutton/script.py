@@ -30,6 +30,7 @@ if __name__ == '__main__':
             
         if not param_exists:
             res = forms.alert("The 'Sheet Series' parameter is missing from your project.\n\nThis parameter is required to persist custom Series assignments for your sheets. Would you like to automatically create it now?", options=["Yes", "No"])
+            import sys
             if res == "Yes":
                 from managesheets.panel import ensure_sheet_parameter
                 with Transaction(doc, "Add Manage Sheets Parameters") as t:
@@ -38,6 +39,10 @@ if __name__ == '__main__':
                     ensure_sheet_parameter(doc, "Discipline")
                     ensure_sheet_parameter(doc, "Content Group")
                     t.Commit()
+                forms.alert("Parameters created successfully!\n\nPlease restart the Manage Sheets tool to continue.")
+                sys.exit(0)
+            else:
+                sys.exit(0)
         
         window = ManageSheetsPanel()
         window.show_dialog() # Opens as a true modal window, blocking Revit until closed
