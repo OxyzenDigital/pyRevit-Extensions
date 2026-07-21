@@ -167,12 +167,16 @@ def ensure_sheet_parameter(doc, param_name):
             cat_set = existing_binding.Categories
             if not cat_set.Contains(Category.GetCategory(doc, BuiltInCategory.OST_Sheets)):
                 cat_set.Insert(Category.GetCategory(doc, BuiltInCategory.OST_Sheets))
+                import Autodesk.Revit.DB as DB
                 try:
-                    from Autodesk.Revit.DB import GroupTypeId
-                    res = doc.ParameterBindings.ReInsert(definition, existing_binding, GroupTypeId.IdentityData)
-                except:
-                    from Autodesk.Revit.DB import BuiltInParameterGroup
-                    res = doc.ParameterBindings.ReInsert(definition, existing_binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+                    res = doc.ParameterBindings.ReInsert(definition, existing_binding, DB.GroupTypeId.IdentityData)
+                except Exception as ex1:
+                    try:
+                        res = doc.ParameterBindings.ReInsert(definition, existing_binding, DB.BuiltInParameterGroup.PG_IDENTITY_DATA)
+                    except Exception as ex2:
+                        from System.Windows import MessageBox
+                        MessageBox.Show("Failed to ReInsert parameter due to version mismatch.\n2024 error: {}\nPre-2024 error: {}".format(ex1, ex2), "Debug")
+                        return False
                 if not res:
                     from System.Windows import MessageBox
                     MessageBox.Show("Failed to ReInsert parameter: " + param_name, "Debug")
@@ -183,12 +187,16 @@ def ensure_sheet_parameter(doc, param_name):
             cat_set.Insert(Category.GetCategory(doc, BuiltInCategory.OST_Sheets))
             binding = app.Create.NewInstanceBinding(cat_set)
             
+            import Autodesk.Revit.DB as DB
             try:
-                from Autodesk.Revit.DB import GroupTypeId
-                res = doc.ParameterBindings.Insert(definition, binding, GroupTypeId.IdentityData)
-            except:
-                from Autodesk.Revit.DB import BuiltInParameterGroup
-                res = doc.ParameterBindings.Insert(definition, binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+                res = doc.ParameterBindings.Insert(definition, binding, DB.GroupTypeId.IdentityData)
+            except Exception as ex1:
+                try:
+                    res = doc.ParameterBindings.Insert(definition, binding, DB.BuiltInParameterGroup.PG_IDENTITY_DATA)
+                except Exception as ex2:
+                    from System.Windows import MessageBox
+                    MessageBox.Show("Failed to Insert parameter due to version mismatch.\n2024 error: {}\nPre-2024 error: {}".format(ex1, ex2), "Debug")
+                    return False
             if not res:
                 from System.Windows import MessageBox
                 MessageBox.Show("Failed to Insert parameter: " + param_name, "Debug")
