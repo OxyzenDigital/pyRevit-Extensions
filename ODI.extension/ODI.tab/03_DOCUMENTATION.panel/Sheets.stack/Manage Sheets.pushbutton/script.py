@@ -14,6 +14,31 @@ if __name__ == '__main__':
         from managesheets import classification
         
         doc = __revit__.ActiveUIDocument.Document
+        
+        # Check if custom parameters exist
+        from Autodesk.Revit.DB import FilteredElementCollector, BuiltInCategory, Transaction
+        sheets = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Sheets).WhereElementIsNotElementType().ToElements()
+        param_exists = False
+        if sheets:
+            for test_sheet in sheets:
+                if test_sheet.LookupParameter("Sheet Series"):
+                    param_exists = True
+                break
+        else:
+            # No sheets in project, assume true or safe to skip
+            param_exists = True
+            
+        if not param_exists:
+            res = forms.alert("The 'Sheet Series' parameter is missing from your project.\n\nThis parameter is required to persist custom Series assignments for your sheets. Would you like to automatically create it now?", options=["Yes", "No"])
+            if res == "Yes":
+                from managesheets.panel import ensure_sheet_parameter
+                with Transaction(doc, "Add Manage Sheets Parameters") as t:
+                    t.Start()
+                    ensure_sheet_parameter(doc, "Sheet Series")
+                    ensure_sheet_parameter(doc, "Discipline")
+                    ensure_sheet_parameter(doc, "Content Group")
+                    t.Commit()
+        
         window = ManageSheetsPanel()
         window.show_dialog() # Opens as a true modal window, blocking Revit until closed
         
