@@ -151,8 +151,11 @@ def ensure_sheet_parameter(doc, param_name):
                 f.write("PARAM\t{}\t{}\tTEXT\t\t1\t1\t\t1\t0\n".format(System.Guid.NewGuid(), param_name))
                 
             app.SharedParametersFilename = temp_file
-            sp_file = app.GetSharedParameterFile()
-            if not sp_file: return False
+            sp_file = app.OpenSharedParameterFile()
+            if not sp_file:
+                from System.Windows import MessageBox
+                MessageBox.Show("Error: app.OpenSharedParameterFile() returned None for temp file:\n" + temp_file, "Debug")
+                return False
             group = sp_file.Groups.get_Item("ManageSheets")
             definition = group.Definitions.get_Item(param_name)
         else:
@@ -186,6 +189,8 @@ def ensure_sheet_parameter(doc, param_name):
             return True
     except Exception as e:
         import traceback
+        from System.Windows import MessageBox
+        MessageBox.Show("Error creating parameter '{}':\n\n{}".format(param_name, traceback.format_exc()), "Debug")
         return False
     finally:
         if original_file:
