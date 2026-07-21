@@ -141,33 +141,51 @@ def ensure_sheet_parameter(doc, param_name):
         temp_file = os.path.join(tempfile.gettempdir(), "temp_shared_params_{}.txt".format(System.Guid.NewGuid()))
         if not spe:
             with open(temp_file, "w") as f:
-                f.write("# META-DATA\n")
-                f.write("REVISION\t1\n")
-                f.write("FILEDESCRIPTION\tTemporary\n")
-                f.write("GROUP\t1\tTemporaryGroup\n")
-                f.write("PARAM\t{}\t{}\tTEXT\t\t1\t1\n".format(System.Guid.NewGuid(), param_name))
+                f.write("# This is a Revit shared parameter file.\n")
+                f.write("# Do not edit manually.\n")
+                f.write("*META\tVERSION\tMINVERSION\n")
+                f.write("META\t2\t1\n")
+                f.write("*GROUP\tID\tNAME\n")
+                f.write("GROUP\t1\tManageSheets\n")
+                f.write("*PARAM\tGUID\tNAME\tDATATYPE\tDATACATEGORY\tGROUP\tVISIBLE\tDESCRIPTION\tUSERMODIFIABLE\tHIDEWHENNOVALUE\n")
+                f.write("PARAM\t{}\t{}\tTEXT\t\t1\t1\t\t1\t0\n".format(System.Guid.NewGuid(), param_name))
                 
             app.SharedParametersFilename = temp_file
             sp_file = app.GetSharedParameterFile()
             if not sp_file: return False
-            group = sp_file.Groups.get_Item("TemporaryGroup")
+            group = sp_file.Groups.get_Item("ManageSheets")
             definition = group.Definitions.get_Item(param_name)
         else:
             definition = spe.GetDefinition()
             
-        cat_set = app.Create.NewCategorySet()
-        cat_set.Insert(Category.GetCategory(doc, BuiltInCategory.OST_Sheets))
-        binding = app.Create.NewInstanceBinding(cat_set)
-        
-        try:
-            from Autodesk.Revit.DB import GroupTypeId
-            doc.ParameterBindings.Insert(definition, binding, GroupTypeId.IdentityData)
-        except:
-            from Autodesk.Revit.DB import BuiltInParameterGroup
-            doc.ParameterBindings.Insert(definition, binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+        # Try to get the existing binding
+        existing_binding = doc.ParameterBindings.Item[definition]
+        if existing_binding:
+            cat_set = existing_binding.Categories
+            if not cat_set.Contains(Category.GetCategory(doc, BuiltInCategory.OST_Sheets)):
+                cat_set.Insert(Category.GetCategory(doc, BuiltInCategory.OST_Sheets))
+                try:
+                    from Autodesk.Revit.DB import GroupTypeId
+                    doc.ParameterBindings.ReInsert(definition, existing_binding, GroupTypeId.IdentityData)
+                except:
+                    from Autodesk.Revit.DB import BuiltInParameterGroup
+                    doc.ParameterBindings.ReInsert(definition, existing_binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+            return True
+        else:
+            cat_set = app.Create.NewCategorySet()
+            cat_set.Insert(Category.GetCategory(doc, BuiltInCategory.OST_Sheets))
+            binding = app.Create.NewInstanceBinding(cat_set)
             
-        return True
+            try:
+                from Autodesk.Revit.DB import GroupTypeId
+                doc.ParameterBindings.Insert(definition, binding, GroupTypeId.IdentityData)
+            except:
+                from Autodesk.Revit.DB import BuiltInParameterGroup
+                doc.ParameterBindings.Insert(definition, binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+                
+            return True
     except Exception as e:
+        import traceback
         return False
     finally:
         if original_file:
