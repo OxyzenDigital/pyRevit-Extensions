@@ -20,6 +20,7 @@ class SheetRecord(object):
         self.name = name
         self.is_placeholder = is_placeholder
         self.sheet_collection = sheet_collection or "Default"
+        self.series_name = "Unknown"
         self.placed_view_ids = []
 
 class ViewRecord(object):
@@ -96,6 +97,15 @@ def harvest_project(doc):
             pass
             
         rec = SheetRecord(sh.Id, sh.SheetNumber, sh.Name, sh.IsPlaceholder, sheet_collection)
+        
+        # Capture the custom "Sheet Series" parameter to persist user overrides
+        try:
+            series_param = sh.LookupParameter("Sheet Series")
+            if series_param and series_param.HasValue:
+                rec.series_name = series_param.AsString()
+        except:
+            pass
+            
         try:
             for v_id in sh.GetAllPlacedViews():
                 rec.placed_view_ids.append(v_id)
@@ -433,7 +443,26 @@ def match_sheets(harvested_data, slots):
                         ref_slot = s
                         break
                         
-            if ref_slot:
+            if not ref_slot and getattr(sh, 'series_name', None) and sh.series_name != "Unknown":
+                new_slot = SlotRecord(
+                    target_number=sh.number,
+                    target_name=sh.name,
+                    discipline="Unknown",
+                    series=prefix,
+                    ordinal=int(m.group(3)),
+                    suffix=m.group(4),
+                    canonical_name=sh.name,
+                    collection=sh.sheet_collection,
+                    series_name=sh.series_name,
+                    cg="Uncategorized"
+                )
+                new_slot.status = "MATCHED"
+                new_slot.match_score = 1.0
+                new_slot.existing_number = sh.number
+                new_slot.existing_name = sh.name
+                new_slot.sheet_element_id = sh.element_id
+                slots.append(new_slot)
+            elif ref_slot:
                 new_slot = SlotRecord(
                     target_number=sh.number,
                     target_name=sh.name,
@@ -640,7 +669,7 @@ def generate_plan_json(harvested_data, matched_slots, extra_sheets):
             "collection": sh.sheet_collection,
             "discipline": "Unknown",
             "cg": "Uncategorized",
-            "series_name": "Unknown"
+            "series_name": getattr(sh, 'series_name', 'Unknown')
         }
         rows.append(row)
         seq += 1
