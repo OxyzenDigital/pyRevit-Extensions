@@ -169,10 +169,14 @@ def ensure_sheet_parameter(doc, param_name):
                 cat_set.Insert(Category.GetCategory(doc, BuiltInCategory.OST_Sheets))
                 try:
                     from Autodesk.Revit.DB import GroupTypeId
-                    doc.ParameterBindings.ReInsert(definition, existing_binding, GroupTypeId.IdentityData)
+                    res = doc.ParameterBindings.ReInsert(definition, existing_binding, GroupTypeId.IdentityData)
                 except:
                     from Autodesk.Revit.DB import BuiltInParameterGroup
-                    doc.ParameterBindings.ReInsert(definition, existing_binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+                    res = doc.ParameterBindings.ReInsert(definition, existing_binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+                if not res:
+                    from System.Windows import MessageBox
+                    MessageBox.Show("Failed to ReInsert parameter: " + param_name, "Debug")
+                    return False
             return True
         else:
             cat_set = app.Create.NewCategorySet()
@@ -181,10 +185,14 @@ def ensure_sheet_parameter(doc, param_name):
             
             try:
                 from Autodesk.Revit.DB import GroupTypeId
-                doc.ParameterBindings.Insert(definition, binding, GroupTypeId.IdentityData)
+                res = doc.ParameterBindings.Insert(definition, binding, GroupTypeId.IdentityData)
             except:
                 from Autodesk.Revit.DB import BuiltInParameterGroup
-                doc.ParameterBindings.Insert(definition, binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+                res = doc.ParameterBindings.Insert(definition, binding, BuiltInParameterGroup.PG_IDENTITY_DATA)
+            if not res:
+                from System.Windows import MessageBox
+                MessageBox.Show("Failed to Insert parameter: " + param_name, "Debug")
+                return False
                 
             return True
     except Exception as e:
