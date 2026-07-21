@@ -632,12 +632,20 @@ class SheetViewModel(ViewModelBase):
                 views_changed = True
                 break
             
+        old_action = getattr(self, 'Action', None)
+        
         if self.IsTemplate:
             self.Action = "CREATE"
         elif self.MatchStatus != "MATCHED" or views_changed:
             self.Action = "UPDATE"
         else:
             self.Action = "MATCHED"
+            
+        if old_action is not None and old_action != self.Action:
+            if self.Action == "UPDATE" and old_action == "MATCHED":
+                self.IsChecked = True
+            elif self.Action == "MATCHED" and old_action == "UPDATE":
+                self.IsChecked = False
             
         # View validation
         nums = set()
