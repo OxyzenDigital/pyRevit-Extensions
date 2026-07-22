@@ -1233,7 +1233,12 @@ class ManageSheetsPanel(forms.WPFWindow):
             self._loaded_naming_schemes = classification.NAMING_SCHEMES
 
         saved_modifiers = p_setup.get("selected_modifiers", cfg.get_option("selected_modifiers", []))
-        custom_modifiers = p_setup.get("custom_modifiers", cfg.get_option("custom_modifiers", []))
+        
+        p_custom = p_setup.get("custom_modifiers", [])
+        g_custom = cfg.get_option("custom_modifiers", [])
+        # Merge lists and remove duplicates while preserving order where possible
+        custom_modifiers = list(dict.fromkeys(p_custom + g_custom))
+        
         modifier_grid_overrides = p_setup.get("modifier_grid_overrides", cfg.get_option("modifier_grid_overrides", {}))
         self.load_modifiers_from_cfg(saved_modifiers, custom_modifiers, modifier_grid_overrides)
         self.Chk_GlobalCover.IsChecked = p_setup.get("global_cover", cfg.get_option("global_cover", False))
@@ -1548,8 +1553,12 @@ class ManageSheetsPanel(forms.WPFWindow):
                 if "naming_scheme" in setup_dict: self.Cmb_NamingScheme.SelectedItem = setup_dict["naming_scheme"]
                 if "shuffle_on_exclude" in setup_dict: self.Chk_ShuffleOnExclude.IsChecked = setup_dict["shuffle_on_exclude"]
                 
+                i_custom = setup_dict.get("custom_modifiers", [])
+                g_custom = cfg.get_option("custom_modifiers", [])
+                merged_custom = list(dict.fromkeys(i_custom + g_custom))
+                
                 cfg.selected_modifiers = setup_dict.get("selected_modifiers", [])
-                cfg.custom_modifiers = setup_dict.get("custom_modifiers", [])
+                cfg.custom_modifiers = merged_custom
                 cfg.modifier_grid_overrides = setup_dict.get("modifier_grid_overrides", {})
                 self.excluded_target_sheets = set(setup_dict.get("excluded_target_sheets", []))
                 
@@ -1557,20 +1566,20 @@ class ManageSheetsPanel(forms.WPFWindow):
                 self.toggle_list(self.DisciplineNodes, False)
                 if "disciplines" in setup_dict:
                     for d_code in setup_dict["disciplines"]:
-                        for d_node in self.DisciplineNodes:
-                            if d_node.Name.startswith(d_code + " -"):
-                                d_node.IsChecked = True
+                        for node in self.DisciplineNodes:
+                            if node.Name.startswith(d_code + " - "):
+                                node.IsChecked = True
                                 
                 self.toggle_list(self.SeriesNodes, False)
                 if "series" in setup_dict:
                     for s_code in setup_dict["series"]:
-                        for s_node in self.SeriesNodes:
-                            if s_node.Name.startswith(s_code + " -"):
-                                s_node.IsChecked = True
+                        for node in self.SeriesNodes:
+                            if node.Name.startswith(s_code + " - "):
+                                node.IsChecked = True
                                 
                 self.load_modifiers_from_cfg(
                     saved_modifiers=setup_dict.get("selected_modifiers", []),
-                    custom_modifiers=setup_dict.get("custom_modifiers", []),
+                    custom_modifiers=merged_custom,
                     modifier_grid_overrides=setup_dict.get("modifier_grid_overrides", {})
                 )
                 self.generate_target_schema()
@@ -3059,10 +3068,13 @@ class ManageSheetsPanel(forms.WPFWindow):
                                         debug_log.append("Failed to auto-park sheet: {} -> {}: {}".format(old_num, new_num, str(ex)))
                             t_park.Commit()
                             
-                    ensure_sheet_parameter(doc, "Discipline")
-                    ensure_sheet_parameter(doc, "Content Group")
-                    ensure_sheet_parameter(doc, "Sheet Series")
-                    ensure_sheet_parameter(doc, " Sheet Collection")
+                    with Transaction(doc, "Ensure Parameters") as t_param:
+                        t_param.Start()
+                        ensure_sheet_parameter(doc, "Discipline")
+                        ensure_sheet_parameter(doc, "Content Group")
+                        ensure_sheet_parameter(doc, "Sheet Series")
+                        ensure_sheet_parameter(doc, " Sheet Collection")
+                        t_param.Commit()
                     
                     # Phase 1: Topological Sequencing
                     renumber_nodes = []

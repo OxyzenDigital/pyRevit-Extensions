@@ -3,12 +3,16 @@ import os
 import json
 import re
 
-CONFIG_PATH = os.path.join(os.path.dirname(__file__), "classification.json")
+DEFAULT_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "classification.json")
+USER_APPDATA = os.environ.get('APPDATA', '')
+USER_CONFIG_DIR = os.path.join(USER_APPDATA, 'OXYZEN_Digital', 'ManageSheets')
+USER_CONFIG_PATH = os.path.join(USER_CONFIG_DIR, 'classification.json')
 
 def load_config():
-    if os.path.exists(CONFIG_PATH):
+    config_to_load = USER_CONFIG_PATH if os.path.exists(USER_CONFIG_PATH) else DEFAULT_CONFIG_PATH
+    if os.path.exists(config_to_load):
         try:
-            with open(CONFIG_PATH, "r") as f:
+            with open(config_to_load, "r") as f:
                 return json.load(f)
         except Exception:
             pass
@@ -71,8 +75,15 @@ def save_config_to_disk(class_dict=None, naming_schemes=None):
         config["CLASSIFICATION_DICT"] = class_dict
     if naming_schemes is not None:
         config["NAMING_SCHEMES"] = naming_schemes
+        
+    if not os.path.exists(USER_CONFIG_DIR):
+        try:
+            os.makedirs(USER_CONFIG_DIR)
+        except Exception:
+            pass
+            
     try:
-        with open(CONFIG_PATH, "w") as f:
+        with open(USER_CONFIG_PATH, "w") as f:
             json.dump(config, f, indent=4)
     except Exception:
         pass
