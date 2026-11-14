@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import clr
 import sys
 import os
@@ -33,11 +34,12 @@ if os.path.exists(lib_dir):
     except Exception:
         pass
 
-from NPOI.SS.UserModel import WorkbookFactory, CellType, DateUtil, FillPattern
+from NPOI.SS.UserModel import WorkbookFactory, CellType, DateUtil, FillPattern, DataFormatter
 from NPOI.SS.Util import AreaReference, CellReference
 from NPOI.SS import SpreadsheetVersion
 from NPOI.XSSF.UserModel import XSSFWorkbook, XSSFColor
 from System.IO import FileStream, FileMode, FileAccess, FileShare
+from System.Globalization import CultureInfo
 
 # Helper for Colors
 def get_rgb(color_obj, cell_style=None):
@@ -157,7 +159,7 @@ def get_print_areas(file_path):
                 # Check for Print_Area or user defined ranges
                 # Print_Area is usually specific to a sheet, identified by SheetIndex
                 sheet_name = ""
-                if name.SheetIndex >= 0 and name.SheetIndex < wb.NumberOfSheets:
+                if 0 <= name.SheetIndex < wb.NumberOfSheets:
                     sheet_name = wb.GetSheetName(name.SheetIndex)
                 
                 # We return a dict for the UI
@@ -189,8 +191,8 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
             first_col, last_col = 0, 0
             valid_range_found = False
             
-            # Resolve Range
-            if range_name:
+            # Resolve Range (treat None, "", "<Entire Worksheet>" as sheet-wide fallback)
+            if range_name and range_name != "<Entire Worksheet>":
                 found_name = None
                 for i in range(wb.NumberOfNames):
                     try:
@@ -214,16 +216,24 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                 if found_name:
                     try:
                         version = SpreadsheetVersion.EXCEL2007
-                        area_ref = AreaReference(found_name.RefersToFormula, version)
-                        refs = area_ref.GetAllReferencedCells()
-                        if refs and len(refs) > 0:
-                            s_name = refs[0].SheetName
-                            target_sheet = wb.GetSheet(s_name)
-                            first_row = min(c.Row for c in refs)
-                            last_row = max(c.Row for c in refs)
-                            first_col = min(c.Col for c in refs)
-                            last_col = max(c.Col for c in refs)
-                            valid_range_found = True
+                        formula = found_name.RefersToFormula
+                        area_ref = None
+                        try:
+                            area_ref = AreaReference(formula, version)
+                        except Exception:
+                            if formula and "," in formula:
+                                parts = formula.split(",")
+                                area_ref = AreaReference(parts[0].strip(), version)
+                        if area_ref:
+                            refs = area_ref.GetAllReferencedCells()
+                            if refs and len(refs) > 0:
+                                s_name = refs[0].SheetName
+                                target_sheet = wb.GetSheet(s_name)
+                                first_row = min(c.Row for c in refs)
+                                last_row = max(c.Row for c in refs)
+                                first_col = min(c.Col for c in refs)
+                                last_col = max(c.Col for c in refs)
+                                valid_range_found = True
                     except: pass
             
             # Fallback to Sheet
@@ -240,6 +250,14 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
             if not target_sheet: return None
             data['sheet_name'] = target_sheet.SheetName
             
+            # Formatter and Evaluator initialization
+            formatter = DataFormatter(CultureInfo.CurrentCulture)
+            evaluator = None
+            try:
+                evaluator = wb.GetCreationHelper().CreateFormulaEvaluator()
+            except Exception:
+                evaluator = None
+
             # Pre-process Merged Regions into a map for O(1) lookup
             merge_map = {}
             for i in range(target_sheet.NumMergedRegions):
@@ -284,19 +302,27 @@ def get_excel_data(file_path, sheet_name=None, range_name=None):
                     
                     # Extract Value
                     val = ""
-                    ctype = cell.CellType
-                    if ctype == CellType.Formula:
-                        try: ctype = cell.CachedFormulaResultType
-                        except: pass
-                    
-                    if ctype == CellType.String: val = cell.StringCellValue or ""
-                    elif ctype == CellType.Numeric:
-                        try:
-                            if DateUtil.IsCellDateFormatted(cell): val = str(cell.DateCellValue)
-                            else: val = str(cell.NumericCellValue)
-                        except: val = str(cell.NumericCellValue)
-                    elif ctype == CellType.Boolean: val = str(cell.BooleanCellValue)
-                    elif ctype == CellType.Error: val = ""
+                    try:
+                        if evaluator is not None:
+                            val = formatter.FormatCellValue(cell, evaluator)
+                        else:
+                            val = formatter.FormatCellValue(cell)
+                        if val is None:
+                            val = ""
+                    except Exception:
+                        ctype = cell.CellType
+                        if ctype == CellType.Formula:
+                            try: ctype = cell.CachedFormulaResultType
+                            except: pass
+                        
+                        if ctype == CellType.String: val = cell.StringCellValue or ""
+                        elif ctype == CellType.Numeric:
+                            try:
+                                if DateUtil.IsCellDateFormatted(cell): val = str(cell.DateCellValue)
+                                else: val = str(cell.NumericCellValue)
+                            except: val = str(cell.NumericCellValue)
+                        elif ctype == CellType.Boolean: val = str(cell.BooleanCellValue)
+                        elif ctype == CellType.Error: val = ""
                     
                     # Extract Style
                     style = cell.CellStyle

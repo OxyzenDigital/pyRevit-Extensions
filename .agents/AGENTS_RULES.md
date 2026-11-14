@@ -23,6 +23,7 @@ Before writing, modifying, or suggesting any code, you MUST:
 1. Rely on standard Python libraries (e.g., `requests`, `os`, `json`) where possible to avoid dependency bloat.
 2. Never hardcode credentials, API keys, or directory paths. Always read from local `.env` files or project-relative directories.
 
-## 5. EXECUTION & COMMUNICATION
-1. Before executing multi-file changes or terminal commands, output a brief "Implementation Plan" for user approval.
-2. Keep conversational filler to zero. Output the code, the location to place it, and any necessary API warnings.
+## 5. EXECUTION & DELEGATION (MULTI-AGENT PROTOCOL)
+1. **Planning & Architecture:** Before executing multi-file changes or structural refactors, the Lead Architect outputs a brief Implementation Plan for user approval.
+2. **Mandatory Delegation to `@engineer`:** All concrete file creation, multi-line refactoring, and test execution must be delegated to the `@engineer` subagent via `invoke_subagent`. The Lead Architect does not perform large-scale manual coding directly in the primary chat.
+3. **Communication:** Keep conversational filler to zero. Provide clear architectural decomposition, bounded subagent tasks, and concise executive review summaries.

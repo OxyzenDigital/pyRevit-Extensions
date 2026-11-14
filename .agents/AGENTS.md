@@ -76,3 +76,8 @@
 - **Context:** WPF development relies heavily on loose string bindings in \ui.xaml\ and dynamic property references in python controllers (like \PropertyGroupDescription\ in \panel.py\).
 - **Directive:** Before executing ANY code change that involves UI bindings, data structure modification, grouping, or \ViewModelBase\ derivation, you MUST explicitly document the full data-flow (XAML -> ViewModel -> Controller) in an \implementation_plan.md\ artifact.
 - **Enforcement:** Never add or modify a WPF binding in \ui.xaml\ or \panel.py\ without verifying that the corresponding \@property\ exists in \data_model.py\. If a grouping fails or the UI renders blank data, immediately check for missing properties in the ViewModel.
+
+## 8. Multi-Agent Delegation Protocol
+- **Strict Role Separation:** Follow the Universal Multi-Agent Delegation Protocol defined in `.antigravity/rules.md`. The Lead Architect (primary session) handles high-level reasoning, system architecture, decomposition, and review. All concrete code writing, file creation, multi-line edits, and test runs are delegated to `@engineer` via `invoke_subagent`.
+- **Allowance Optimization:** Preserve frontier model quota by confining repetitive mechanical code generation and test execution to the junior subagent (`gemini-3.8-flash`).
+

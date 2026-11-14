@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 __title__ = "Excel Named \nRange to Annotation"
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __doc__ = """Imports Excel ranges as Revit Annotation Families.
 Features:
 - Preserves Formatting (Fonts, Colors, Borders)
-- One-click Updates
-- Persistent Settings"""
+- One-click Updates & Batch Refresh
+- ExtensibleStorage & Local Settings Persistence
+- Interactive Instance Placement
+- Dark & Light Theme Adaptive UI"""
 
 import os
 import sys
@@ -14,7 +16,14 @@ import clr
 import System
 import tempfile
 import shutil
-from pyrevit import revit, DB, forms, script
+
+from pyrevit import HOST_APP, revit, DB, forms, script
+from Autodesk.Revit.DB.ExtensibleStorage import SchemaBuilder, Schema, Entity, DataStorage, AccessLevel
+from Autodesk.Revit.Exceptions import OperationCanceledException
+from System.Windows import SystemColors
+from System.Windows.Media import BrushConverter
+
+import data_model
 import excelextract
 
 # --- Debug Helper ---
@@ -23,6 +32,15 @@ def log(msg):
 
 # --- Constants ---
 FAMILY_PREFIX = "ODI_Excel_"
+EXCEL_TABLE_SCHEMA_GUID = System.Guid("A4E8C912-5B3D-4E7A-9C1F-8D2E6F0A3B5C")
+
+# --- Revit Theme Detection ---
+def is_dark_theme():
+    try:
+        from Autodesk.Revit.UI import UIThemeManager, UITheme
+        return UIThemeManager.CurrentTheme == UITheme.Dark
+    except Exception:
+        return False
 
 # --- Load Options ---
 class FamLoadOpt(DB.IFamilyLoadOptions, System.Object):
@@ -56,7 +74,8 @@ class WarningSwallower(DB.IFailuresPreprocessor, System.Object):
             return DB.FailureProcessingResult.Continue
         try:
             failures = failuresAccessor.GetFailureMessages()
-            if not failures: return DB.FailureProcessingResult.Continue
+            if not failures:
+                return DB.FailureProcessingResult.Continue
             
             for f in failures:
                 if f.GetSeverity() == DB.FailureSeverity.Warning:
@@ -66,50 +85,278 @@ class WarningSwallower(DB.IFailuresPreprocessor, System.Object):
             log("WarningSwallower Error: " + str(e))
             return DB.FailureProcessingResult.Continue
 
-# --- Local Settings Manager (JSON) ---
+# --- Settings & ExtensibleStorage Manager ---
 SETTINGS_DIR = os.path.join(os.getenv('APPDATA'), 'ODI_ExcelTable')
 if not os.path.exists(SETTINGS_DIR):
-    try: os.makedirs(SETTINGS_DIR)
-    except: pass
+    try:
+        os.makedirs(SETTINGS_DIR)
+    except Exception:
+        pass
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, "excel_table_map.json")
 
 class TableDataManager(object):
+    META_KEY = "__meta__"
+
     @staticmethod
-    def load_db():
-        if os.path.exists(SETTINGS_FILE):
+    def get_or_create_schema():
+        try:
+            schema = Schema.Lookup(EXCEL_TABLE_SCHEMA_GUID)
+            if not schema:
+                builder = SchemaBuilder(EXCEL_TABLE_SCHEMA_GUID)
+                builder.SetReadAccessLevel(AccessLevel.Public)
+                builder.SetWriteAccessLevel(AccessLevel.Public)
+                builder.SetSchemaName("ODIExcelTableLinks")
+                builder.AddSimpleField("TableLinksJson", clr.GetClrType(System.String))
+                schema = builder.Finish()
+            return schema
+        except Exception as e:
+            log("SchemaBuilder Error: " + str(e))
+            return None
+
+    @staticmethod
+    def load_from_extensible_storage(doc=None):
+        if not doc:
             try:
-                with open(SETTINGS_FILE, 'r') as f:
-                    return json.load(f)
-            except: pass
+                doc = revit.doc
+            except Exception:
+                pass
+        if not doc:
+            return {}
+
+        try:
+            schema = TableDataManager.get_or_create_schema()
+            if not schema:
+                return {}
+            collector = DB.FilteredElementCollector(doc).OfClass(DataStorage)
+            for ds in collector:
+                entity = ds.GetEntity(schema)
+                if entity and entity.IsValid():
+                    raw_json = entity.Get[System.String]("TableLinksJson")
+                    if raw_json:
+                        return json.loads(raw_json)
+        except Exception as e:
+            log("ExtensibleStorage load error: " + str(e))
         return {}
 
     @staticmethod
-    def save_db(db):
+    def save_to_extensible_storage(doc, db):
+        if not doc:
+            try:
+                doc = revit.doc
+            except Exception:
+                pass
+        if not doc:
+            return False
+
+        try:
+            schema = TableDataManager.get_or_create_schema()
+            if not schema:
+                return False
+
+            raw_json = json.dumps(db)
+
+            def _write():
+                collector = DB.FilteredElementCollector(doc).OfClass(DataStorage)
+                target_ds = None
+                for ds in collector:
+                    entity = ds.GetEntity(schema)
+                    if entity and entity.IsValid():
+                        target_ds = ds
+                        break
+                if not target_ds:
+                    target_ds = DataStorage.Create(doc)
+                entity = Entity(schema)
+                entity.Set[System.String]("TableLinksJson", raw_json)
+                target_ds.SetEntity(entity)
+
+            if doc.IsModifiable:
+                _write()
+            else:
+                with DB.Transaction(doc, "Save Excel Table Links") as t:
+                    t.Start()
+                    _write()
+                    t.Commit()
+            return True
+        except Exception as e:
+            log("ExtensibleStorage save error: " + str(e))
+            return False
+
+    @staticmethod
+    def load_db(doc=None):
+        db = {}
+        if os.path.exists(SETTINGS_FILE):
+            try:
+                with open(SETTINGS_FILE, 'r') as f:
+                    db = json.load(f)
+            except Exception:
+                db = {}
+
+        # Overlay ExtensibleStorage (project ground truth)
+        es_db = TableDataManager.load_from_extensible_storage(doc)
+        if es_db:
+            db.update(es_db)
+        return db
+
+    @staticmethod
+    def save_db(db, doc=None):
         try:
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(db, f, indent=2)
         except Exception as e:
             log("Error saving DB: " + str(e))
 
+        TableDataManager.save_to_extensible_storage(doc, db)
+
     @staticmethod
-    def save_metadata(family, source_path, sheet_name, range_name, text_scale):
+    def save_metadata(family, source_path, sheet_name, range_name, text_scale, doc=None):
         fam_name = family.Name if hasattr(family, "Name") else str(family)
-        db = TableDataManager.load_db()
+        db = TableDataManager.load_db(doc)
         db[fam_name] = {
             "SourcePath": source_path,
             "SheetName": sheet_name,
             "RangeName": range_name,
             "TextScale": text_scale
         }
-        TableDataManager.save_db(db)
+
+        # Maintain __meta__ history
+        meta_rec = db.get(TableDataManager.META_KEY)
+        if not isinstance(meta_rec, dict):
+            meta_rec = {}
+        if source_path:
+            meta_rec["LastFilePath"] = source_path
+            recent = meta_rec.get("RecentFiles", [])
+            if not isinstance(recent, list):
+                recent = []
+            try:
+                norm_source = os.path.normcase(os.path.abspath(source_path))
+            except Exception:
+                norm_source = str(source_path).lower()
+            new_recent = [source_path]
+            for p in recent:
+                if p:
+                    try:
+                        norm_p = os.path.normcase(os.path.abspath(p))
+                    except Exception:
+                        norm_p = str(p).lower()
+                    if norm_p != norm_source:
+                        new_recent.append(p)
+            meta_rec["RecentFiles"] = new_recent[:15]
+            db[TableDataManager.META_KEY] = meta_rec
+
+        TableDataManager.save_db(db, doc)
 
     @staticmethod
-    def get_metadata(family_or_name):
+    def get_recent_files(doc=None):
+        db = TableDataManager.load_db(doc)
+        meta_rec = db.get(TableDataManager.META_KEY)
+        if not isinstance(meta_rec, dict):
+            meta_rec = {}
+
+        raw_candidates = []
+        last_p = meta_rec.get("LastFilePath")
+        if last_p:
+            raw_candidates.append(last_p)
+        for p in meta_rec.get("RecentFiles", []):
+            if p:
+                raw_candidates.append(p)
+        for k, v in db.items():
+            if k != TableDataManager.META_KEY and isinstance(v, dict):
+                sp = v.get("SourcePath")
+                if sp:
+                    raw_candidates.append(sp)
+
+        seen = set()
+        unique_paths = []
+        for p in raw_candidates:
+            if not p:
+                continue
+            try:
+                norm_p = os.path.normcase(os.path.abspath(p))
+            except Exception:
+                norm_p = str(p).lower()
+            if norm_p not in seen:
+                seen.add(norm_p)
+                unique_paths.append(p)
+
+        existing = [p for p in unique_paths if os.path.exists(p)]
+        missing = [p for p in unique_paths if not os.path.exists(p)]
+        return existing + missing
+
+    @staticmethod
+    def get_last_file_path(doc=None):
+        db = TableDataManager.load_db(doc)
+        meta_rec = db.get(TableDataManager.META_KEY)
+        if isinstance(meta_rec, dict):
+            last_p = meta_rec.get("LastFilePath")
+            if last_p:
+                return last_p
+        recent = TableDataManager.get_recent_files(doc)
+        return recent[0] if recent else ""
+
+    @staticmethod
+    def infer_hint_metadata(fam_name, db, recent_files):
+        def _norm(s):
+            if not s:
+                return ""
+            val = str(s).lower()
+            if val.startswith("odi_excel_"):
+                val = val[len("odi_excel_"):]
+            val = val.replace("table", "").replace("_", "").replace(" ", "").strip()
+            return val
+
+        target_norm = _norm(fam_name)
+
+        # 1. Fuzzy match against existing DB records
+        for k, v in db.items():
+            if k == TableDataManager.META_KEY or not isinstance(v, dict):
+                continue
+            k_norm = _norm(k)
+            r_norm = _norm(v.get("RangeName", ""))
+            s_norm = _norm(v.get("SheetName", ""))
+            if target_norm and (k_norm == target_norm or r_norm == target_norm or s_norm == target_norm):
+                return {
+                    "HintPath": v.get("SourcePath", ""),
+                    "SheetName": v.get("SheetName", ""),
+                    "RangeName": v.get("RangeName", ""),
+                    "TextScale": v.get("TextScale", 80.0)
+                }
+
+        # 2. Most frequent SourcePath in DB
+        path_counts = {}
+        for k, v in db.items():
+            if k != TableDataManager.META_KEY and isinstance(v, dict):
+                sp = v.get("SourcePath")
+                if sp:
+                    path_counts[sp] = path_counts.get(sp, 0) + 1
+        if path_counts:
+            sorted_paths = sorted(path_counts.keys(), key=lambda p: (path_counts[p], 1 if os.path.exists(p) else 0), reverse=True)
+            return {"HintPath": sorted_paths[0]}
+
+        # 3. Fallback to first available recent file
+        if recent_files:
+            return {"HintPath": recent_files[0]}
+
+        return {}
+
+    @staticmethod
+    def get_metadata(family_or_name, doc=None):
         fam_name = family_or_name
         if hasattr(family_or_name, "Name"):
             fam_name = family_or_name.Name
-        db = TableDataManager.load_db()
-        return db.get(fam_name)
+        if fam_name == TableDataManager.META_KEY:
+            return None
+        db = TableDataManager.load_db(doc)
+        meta = db.get(fam_name)
+
+        if not meta and hasattr(family_or_name, "get_Parameter"):
+            try:
+                p = family_or_name.get_Parameter(DB.BuiltInParameter.ALL_MODEL_TYPE_COMMENTS)
+                if p and p.AsString() and p.AsString().startswith("ODI_EXCEL_META:"):
+                    raw = p.AsString()[len("ODI_EXCEL_META:"):]
+                    meta = json.loads(raw)
+            except Exception:
+                pass
+        return meta
 
 # --- Family Generation Logic ---
 class FamilyGenerator(object):
@@ -279,8 +526,7 @@ class FamilyGenerator(object):
         new_type.get_Parameter(DB.BuiltInParameter.TEXT_WIDTH_SCALE).Set(1.0)
         new_type.get_Parameter(DB.BuiltInParameter.TEXT_BACKGROUND).Set(1) 
         
-        # Cache the result mapped to the *original requested name* logic
-        # This ensures that next time we ask for "Arial_10...", we get this new valid type
+        # Cache the result mapped to the original requested name
         original_name_key = "{}_{}_{}{}_{}_{}_{}".format(
             font_data.get('name', 'Arial'), 
             int(font_data.get('size', 10)),
@@ -293,13 +539,51 @@ class FamilyGenerator(object):
 
     @staticmethod
     def get_template_path():
-        versions = ["2020", "2021", "2022", "2023", "2024", "2025"]
-        base_paths = [r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English\Annotations",
-                      r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English-Imperial\Annotations"]
+        # 1. Try Revit Application FamilyTemplatePath setting
+        try:
+            fam_tpl_path = revit.doc.Application.FamilyTemplatePath
+            if fam_tpl_path and os.path.exists(fam_tpl_path):
+                # Standard subfolder
+                p1 = os.path.join(fam_tpl_path, "Annotations", "Generic Annotation.rft")
+                if os.path.exists(p1):
+                    return p1
+                # Root template folder
+                p2 = os.path.join(fam_tpl_path, "Generic Annotation.rft")
+                if os.path.exists(p2):
+                    return p2
+                # Shallow walk
+                for root, dirs, files in os.walk(fam_tpl_path):
+                    for f in files:
+                        if f.lower() == "generic annotation.rft":
+                            return os.path.join(root, f)
+                    break
+        except Exception as e:
+            log("FamilyTemplatePath inspection error: " + str(e))
+
+        # 2. Known Autodesk RVT version paths
+        current_v = str(HOST_APP.version) if hasattr(HOST_APP, "version") else "2026"
+        versions = [current_v, "2027", "2026", "2025", "2024", "2023", "2022", "2021", "2020"]
+        # Deduplicate while preserving order
+        seen = set()
+        ordered_versions = []
         for v in versions:
-            for b in base_paths:
+            if v and v not in seen:
+                seen.add(v)
+                ordered_versions.append(v)
+
+        base_templates = [
+            r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English\Annotations",
+            r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English-Imperial\Annotations",
+            r"C:\ProgramData\Autodesk\RVT {}\Family Templates\English_I\Annotations"
+        ]
+
+        for v in ordered_versions:
+            for b in base_templates:
                 p = os.path.join(b.format(v), "Generic Annotation.rft")
-                if os.path.exists(p): return p
+                if os.path.exists(p):
+                    return p
+
+        # 3. User prompt fallback
         return forms.pick_file(file_ext='rft', title="Select 'Generic Annotation' Template")
 
     @staticmethod
@@ -341,7 +625,6 @@ class FamilyGenerator(object):
                     gs_col = DB.FilteredElementCollector(doc).OfClass(DB.GraphicsStyle).ToElements()
                     found_gs = next((g for g in gs_col if g.GraphicsStyleCategory and g.GraphicsStyleCategory.Id == subcat.Id), None)
                     
-                    # Fallback: Try matching by name if ID match fails
                     if not found_gs:
                         found_gs = next((g for g in gs_col if FamilyGenerator.safe_name(g) == name), None)
                     
@@ -355,21 +638,18 @@ class FamilyGenerator(object):
     
     @staticmethod
     def get_invisible_style_id(doc):
-        # 1. Try Generic Annotation Category (Specific to Annotation Families)
         try:
             cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_GenericAnnotation)
             if cat and cat.SubCategories.Contains("Invisible Lines"):
                 return cat.SubCategories.get_Item("Invisible Lines").GetGraphicsStyle(DB.GraphicsStyleType.Projection).Id
         except: pass
 
-        # 2. Try Lines Category (Standard)
         try:
             cat = doc.Settings.Categories.get_Item(DB.BuiltInCategory.OST_Lines)
             if cat and cat.SubCategories.Contains("Invisible Lines"):
                 return cat.SubCategories.get_Item("Invisible Lines").GetGraphicsStyle(DB.GraphicsStyleType.Projection).Id
         except: pass
 
-        # 3. Search all GraphicsStyles by name (Fallback)
         for gs in DB.FilteredElementCollector(doc).OfClass(DB.GraphicsStyle):
             name = FamilyGenerator.safe_name(gs)
             if name == "<Invisible lines>" or name == "Invisible lines":
@@ -380,7 +660,7 @@ class FamilyGenerator(object):
     # --- Task-Based Managers ---
     class FillManager(object):
         def __init__(self):
-            self.fills = {} # Key: (rgb_str, transparency), Value: list of rects (x,y,w,h)
+            self.fills = {}
 
         def add(self, rgb_str, transparency, x, y, w, h):
             if not rgb_str: return
@@ -400,7 +680,7 @@ class FamilyGenerator(object):
                 ftype = FamilyGenerator.get_or_create_fill_type(doc, color, type_cache, solid_id)
                 if not ftype: continue
 
-                # 1. Merge Horizontally
+                # Merge Horizontally
                 sorted_rects = sorted(rects, key=lambda r: (-round(r[1], 5), round(r[0], 5)))
                 merged_h = []
                 if sorted_rects:
@@ -414,7 +694,7 @@ class FamilyGenerator(object):
                             curr_x, curr_y, curr_w, curr_h = nx, ny, nw, nh
                     merged_h.append((curr_x, curr_y, curr_w, curr_h))
 
-                # 2. Merge Vertically
+                # Merge Vertically
                 sorted_v = sorted(merged_h, key=lambda r: (round(r[0], 5), -round(r[1], 5)))
                 final_rects = []
                 if sorted_v:
@@ -428,7 +708,7 @@ class FamilyGenerator(object):
                             curr_x, curr_y, curr_w, curr_h = nx, ny, nw, nh
                     final_rects.append((curr_x, curr_y, curr_w, curr_h))
 
-                # 3. Create Regions
+                # Create Regions
                 batch_size = 500
                 chunks = [final_rects[i:i + batch_size] for i in range(0, len(final_rects), batch_size)]
                 
@@ -459,7 +739,7 @@ class FamilyGenerator(object):
                             created_regions.append(fr)
                         except Exception as e: log("Fill Create Error: " + str(e))
             
-            # 4. Apply Invisible Lines (Requires Regeneration first)
+            # Apply Invisible Lines
             if invisible_id != DB.ElementId.InvalidElementId and created_regions:
                 log("Regenerating to access sketches...")
                 doc.Regenerate()
@@ -469,7 +749,6 @@ class FamilyGenerator(object):
                     count_fixed = 0
                     for fr in created_regions:
                         try:
-                            # Try to find sketch
                             sketch = None
                             if hasattr(fr, "SketchId"):
                                 try:
@@ -479,7 +758,6 @@ class FamilyGenerator(object):
                                 except: pass
                             
                             if not sketch:
-                                # Fallback search
                                 sketch = next((s for s in DB.FilteredElementCollector(doc).OfClass(DB.Sketch).ToElements() if s.OwnerId == fr.Id), None)
                             
                             if sketch:
@@ -490,8 +768,6 @@ class FamilyGenerator(object):
                                 count_fixed += 1
                         except: pass
                     log("Applied invisible lines to {} regions.".format(count_fixed))
-                else:
-                    log("Invisible GraphicsStyle not found from ID.")
 
     class BorderManager(object):
         def __init__(self):
@@ -519,8 +795,6 @@ class FamilyGenerator(object):
 
         def _resolve(self, segments):
             if not segments: return []
-            # Split segments into points and find max weight for each interval.
-            # Round points to ensure continuity between adjacent cells.
             raw_points = [s for s,e,w in segments] + [e for s,e,w in segments]
             points = sorted(list(set([round(p, 5) for p in raw_points])))
             
@@ -537,7 +811,6 @@ class FamilyGenerator(object):
                 if max_w > 0:
                     resolved.append({'s': p1, 'e': p2, 'w': max_w})
             
-            # Merge adjacent equal weights
             if not resolved: return []
             merged = []
             curr = resolved[0]
@@ -559,7 +832,6 @@ class FamilyGenerator(object):
         def draw(self, doc, view, style_cache):
             log("Task: Drawing Borders...")
             cnt = 0
-            # Horizontal
             for y, segs in self.horiz.items():
                 for r in self._resolve(segs):
                     if abs(r['e'] - r['s']) > 0.0025:
@@ -570,7 +842,6 @@ class FamilyGenerator(object):
                             if sid != DB.ElementId.InvalidElementId: dc.LineStyle = doc.GetElement(sid)
                             cnt += 1
                         except: pass
-            # Vertical
             for x, segs in self.vert.items():
                 for r in self._resolve(segs):
                     if abs(r['e'] - r['s']) > 0.0025:
@@ -605,7 +876,6 @@ class FamilyGenerator(object):
                 ttype = FamilyGenerator.get_or_create_text_type(doc, scaled_font, type_cache)
                 if not ttype: continue
 
-                # Alignment
                 indent_level = t.get('indent', 0)
                 indent_offset = indent_level * 0.009
                 width_reduction = 0.0
@@ -637,7 +907,7 @@ class FamilyGenerator(object):
                     tn.HorizontalAlignment = r_align_h
                     tn.VerticalAlignment = r_align_v
                     if t['wrap']:
-                        tn.Width = max(t['w'] - 0.004 - width_reduction, 0.005) # Min width ~1.5mm
+                        tn.Width = max(t['w'] - 0.004 - width_reduction, 0.005)
                     cnt += 1
                 except Exception as e: log("Text Create Failed: " + str(e))
             log("Text Notes Created: {}".format(cnt))
@@ -664,9 +934,9 @@ class FamilyGenerator(object):
                 try: fam_doc.Delete(ids_to_del)
                 except: pass
 
-            # Caches (Use safe_name to prevent crashes on invalid elements)
-            text_type_cache = {FamilyGenerator.safe_name(t): t for t in DB.FilteredElementCollector(fam_doc).OfClass(DB.TextNoteType).ToElements()}
-            fill_type_cache = {FamilyGenerator.safe_name(t): t for t in DB.FilteredElementCollector(fam_doc).OfClass(DB.FilledRegionType).ToElements()}
+            # Caches
+            text_type_cache = {FamilyGenerator.safe_name(ty): ty for ty in DB.FilteredElementCollector(fam_doc).OfClass(DB.TextNoteType).ToElements()}
+            fill_type_cache = {FamilyGenerator.safe_name(ty): ty for ty in DB.FilteredElementCollector(fam_doc).OfClass(DB.FilledRegionType).ToElements()}
             
             # Solid Pattern
             solid_pat_id = None
@@ -680,14 +950,12 @@ class FamilyGenerator(object):
             # Line Styles
             line_style_map = FamilyGenerator.ensure_line_styles(fam_doc)
             invisible_style_id = FamilyGenerator.get_invisible_style_id(fam_doc)
-            log("Line Styles Mapped: {}".format(line_style_map.keys()))
 
-            # --- Task Managers ---
             fill_mgr = FamilyGenerator.FillManager()
             border_mgr = FamilyGenerator.BorderManager()
             text_mgr = FamilyGenerator.TextManager()
 
-            # --- 1. Coordinate Mapping ---
+            # 1. Coordinate Mapping
             row_y, col_x = {}, {}
             curr_y, curr_x = 0.0, 0.0
             
@@ -701,7 +969,7 @@ class FamilyGenerator(object):
                 cw_px = data['column_widths'].get(str(c), 64.0)
                 curr_x += max(FamilyGenerator.pixels_to_feet(cw_px), 0.005)
 
-            # --- 2. Data Collection ---
+            # 2. Data Collection
             for cell in data['cells']:
                 r, c = cell['row'], cell['col']
                 if r not in row_y or c not in col_x: continue
@@ -745,7 +1013,7 @@ class FamilyGenerator(object):
                                  cell.get('indent', 0),
                                  cell.get('wrap_text', False))
 
-            # --- 3. Execution Phase ---
+            # 3. Execution Phase
             fill_mgr.draw(fam_doc, ref_view, fill_type_cache, solid_pat_id, invisible_style_id)
             border_mgr.draw(fam_doc, ref_view, line_style_map)
             text_mgr.draw(fam_doc, ref_view, text_type_cache, text_scale)
@@ -761,12 +1029,6 @@ class FamilyGenerator(object):
 
     @staticmethod
     def load_family_to_project(fam_doc, target_name, existing_family_id=None):
-        """
-        Loads the family into the project.
-        Prioritizes Memory Load to avoid 'DocumentSaving' event triggers (SaveAs) which cause crashes 
-        with some external add-ins.
-        """
-        # Check if project is modifiable before starting
         if revit.doc.IsReadOnly:
             log("Error: Project document is Read-Only.")
             return None
@@ -775,11 +1037,8 @@ class FamilyGenerator(object):
         
         # --- Attempt 1: Memory Load (Primary) ---
         try:
-            # Memory Load requires the document to NOT be modifiable (no open transaction).
-            # It handles its own transaction internally.
             load_opt = FamLoadOpt()
             loaded_fam = fam_doc.LoadFamily(revit.doc, load_opt)
-                
         except Exception as e:
             log("Memory Load Failed: " + str(e))
             loaded_fam = None
@@ -791,7 +1050,6 @@ class FamilyGenerator(object):
 
         # --- Attempt 2: Disk Load (Fallback) ---
         log("Attempting Disk Load Fallback...")
-        app = revit.doc.Application
         temp_folder = None
         try:
             temp_folder = tempfile.mkdtemp()
@@ -800,16 +1058,13 @@ class FamilyGenerator(object):
             if not safe_name.lower().endswith(".rfa"): safe_name += ".rfa"
             temp_path = os.path.join(temp_folder, safe_name)
             
-            # Save Family
             save_opt = DB.SaveAsOptions()
             save_opt.OverwriteExistingFile = True
             fam_doc.SaveAs(temp_path, save_opt)
             
-            # Close Memory Doc
             try: fam_doc.Close(False)
             except: pass
             
-            # Load from Disk
             loaded_fam_ref = clr.Reference[DB.Family]()
             with DB.Transaction(revit.doc, "Load Excel Table (Disk)") as t:
                 t.Start()
@@ -844,6 +1099,41 @@ class FamilyGenerator(object):
         
         return loaded_fam
 
+# --- Interactive Placement ---
+def place_table_instance(family):
+    if not family:
+        return None
+    doc = revit.doc
+    uidoc = revit.uidoc
+    symbol_ids = family.GetFamilySymbolIds()
+    if not symbol_ids or len(list(symbol_ids)) == 0:
+        log("No symbols found in family.")
+        return None
+    
+    symbol_id = list(symbol_ids)[0]
+    symbol = doc.GetElement(symbol_id)
+    if not symbol:
+        return None
+
+    if not symbol.IsActive:
+        try:
+            with DB.Transaction(doc, "Activate Table Symbol") as t:
+                t.Start()
+                symbol.Activate()
+                doc.Regenerate()
+                t.Commit()
+        except Exception as e:
+            log("Symbol activation error: " + str(e))
+
+    active_view = doc.ActiveView
+    if active_view:
+        try:
+            uidoc.PromptForFamilyInstancePlacement(symbol)
+        except OperationCanceledException:
+            log("User canceled placement.")
+        except Exception as e:
+            log("Placement prompt error: " + str(e))
+
 # --- Main App Logic ---
 def perform_family_update(family, data, text_scale=1.0):
     if not family.IsEditable:
@@ -859,12 +1149,12 @@ def perform_family_update(family, data, text_scale=1.0):
         success = FamilyGenerator.draw_content(fam_doc, data, text_scale)
         
         if success:
-            # Force timestamp to ensure change detection
             try:
                 with DB.Transaction(fam_doc, "Update Timestamp") as t_time:
                     t_time.Start()
                     p = fam_doc.OwnerFamily.get_Parameter(DB.BuiltInParameter.ALL_MODEL_DESCRIPTION)
-                    if p: p.Set("Updated: " + str(System.DateTime.Now))
+                    if p and not p.IsReadOnly:
+                        p.Set("Updated: " + str(System.DateTime.Now))
                     t_time.Commit()
             except Exception as e:
                 log("Timestamp update failed: " + str(e))
@@ -880,18 +1170,20 @@ def perform_family_update(family, data, text_scale=1.0):
             except: pass
         return None
 
-def create_table(file_path, sheet_name, range_name, table_name, text_scale_percent=100.0):
+def create_table(file_path, sheet_name, range_name, table_name, text_scale_percent=100.0, place_instance=True):
     existing_fam = next((f for f in DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements() if f.Name == table_name), None)
     
-    data = excelextract.get_excel_data(file_path, sheet_name, range_name)
-    if not data: return
+    clean_range = None if range_name == "<Entire Worksheet>" else range_name
+    data = excelextract.get_excel_data(file_path, sheet_name, clean_range)
+    if not data:
+        forms.alert("Failed to extract data from Excel file.")
+        return
     
     scale_factor = text_scale_percent / 100.0
 
     if existing_fam:
         res = forms.alert("Table '{}' already exists.\nUpdate it with new data?".format(table_name), options=["Update", "Cancel"])
         if res == "Update":
-            # Deselect to prevent silent rejection during family update
             try:
                 revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]())
                 revit.uidoc.RefreshActiveView()
@@ -901,10 +1193,12 @@ def create_table(file_path, sheet_name, range_name, table_name, text_scale_perce
                 tg.Start()
                 updated_fam = perform_family_update(existing_fam, data, scale_factor)
                 if updated_fam:
-                    TableDataManager.save_metadata(updated_fam, file_path, sheet_name, range_name, text_scale_percent)
+                    TableDataManager.save_metadata(updated_fam, file_path, sheet_name, range_name, text_scale_percent, revit.doc)
                     log("Table updated successfully.")
                     tg.Assimilate()
-                    try: revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]([updated_fam.Id]))
+                    revit.uidoc.RefreshActiveView()
+                    try:
+                        revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]([updated_fam.Id]))
                     except: pass
                 else:
                     tg.RollBack()
@@ -918,184 +1212,549 @@ def create_table(file_path, sheet_name, range_name, table_name, text_scale_perce
     fam_doc = app.NewFamilyDocument(template)
     if not fam_doc: return
     
+    # Embed compact metadata backup inside family
+    try:
+        with DB.Transaction(fam_doc, "Embed Metadata") as t_meta:
+            t_meta.Start()
+            p_c = fam_doc.OwnerFamily.get_Parameter(DB.BuiltInParameter.ALL_MODEL_TYPE_COMMENTS)
+            if p_c and not p_c.IsReadOnly:
+                meta_dict = {
+                    "SourcePath": file_path,
+                    "SheetName": sheet_name or "",
+                    "RangeName": range_name or "",
+                    "TextScale": text_scale_percent
+                }
+                p_c.Set("ODI_EXCEL_META:" + json.dumps(meta_dict))
+            t_meta.Commit()
+    except Exception as e:
+        log("Metadata embedding warning: " + str(e))
+
     success = FamilyGenerator.draw_content(fam_doc, data, scale_factor)
     
     if success:
-        # Load using the unified method (handles saving/naming/loading)
         fam = FamilyGenerator.load_family_to_project(fam_doc, table_name)
-        
         if fam:
-            # Ensure name matches (in case fallback memory load was used)
             if fam.Name != table_name:
                 try:
                     with revit.Transaction("Rename Table Family"):
                         fam.Name = table_name
-                        # Also rename the type/symbol if possible
                         for sid in fam.GetFamilySymbolIds():
                             s = revit.doc.GetElement(sid)
                             if s: s.Name = table_name
                             break
                 except: pass
             
-            TableDataManager.save_metadata(fam, file_path, sheet_name, range_name, text_scale_percent)
-            try: revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]([fam.Id]))
+            TableDataManager.save_metadata(fam, file_path, sheet_name, range_name, text_scale_percent, revit.doc)
+            try:
+                revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]([fam.Id]))
             except: pass
+
+            if place_instance:
+                place_table_instance(fam)
         else:
-            # If load failed, fam_doc might still be open if it wasn't closed by load_family_to_project
             try: fam_doc.Close(False)
             except: pass
     else:
         fam_doc.Close(False)
 
-def update_table(instance):
-    # Deselect to prevent silent rejection during family update
+def update_table(family_or_instance, silent=False):
     try:
         revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]())
         revit.uidoc.RefreshActiveView()
     except: pass
 
-    fam = instance.Symbol.Family
-    meta = TableDataManager.get_metadata(fam)
-    
+    fam = None
+    if isinstance(family_or_instance, DB.FamilyInstance):
+        fam = family_or_instance.Symbol.Family
+    elif isinstance(family_or_instance, DB.Family):
+        fam = family_or_instance
+    elif isinstance(family_or_instance, (str, System.String)):
+        fam = next((f for f in DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements() if f.Name == str(family_or_instance)), None)
+
+    if not fam:
+        if not silent: forms.alert("Could not locate family in project.")
+        return False
+
+    meta = TableDataManager.get_metadata(fam, revit.doc)
     if not meta:
-        forms.alert("Not a linked Excel Table (No local settings found).")
-        return
+        if not silent: forms.alert("Not a linked Excel Table (No settings found).")
+        return False
     
-    if not os.path.exists(meta["SourcePath"]):
-        forms.alert("Source file missing: " + meta["SourcePath"])
-        return
+    source_path = meta.get("SourcePath", "")
+    if not source_path or not os.path.exists(source_path):
+        if not silent: forms.alert("Source file missing: " + str(source_path))
+        return False
         
-    data = excelextract.get_excel_data(meta["SourcePath"], meta["SheetName"], meta["RangeName"])
+    range_n = meta.get("RangeName")
+    clean_range = None if range_n == "<Entire Worksheet>" else range_n
+    data = excelextract.get_excel_data(source_path, meta.get("SheetName"), clean_range)
     if not data: 
-        forms.alert("Failed to read Excel data. Check file path and permissions.")
-        return
+        if not silent: forms.alert("Failed to read Excel data. Check file path and permissions.")
+        return False
     
     scale_pct = meta.get("TextScale", 80.0)
+    try:
+        scale_pct = float(scale_pct)
+    except:
+        scale_pct = 80.0
     scale_factor = scale_pct / 100.0
     
     updated_fam = perform_family_update(fam, data, scale_factor)
     if updated_fam:
-        TableDataManager.save_metadata(updated_fam, meta["SourcePath"], meta["SheetName"], meta["RangeName"], scale_pct)
-        log("Table updated.")
+        TableDataManager.save_metadata(updated_fam, source_path, meta.get("SheetName"), meta.get("RangeName"), scale_pct, revit.doc)
+        log("Table updated: " + fam.Name)
         revit.uidoc.RefreshActiveView()
-        try: revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]([instance.Id]))
-        except: pass
+        return True
     else:
-        log("Update failed (Family object not returned).")
-        forms.alert("Failed to update table family.")
+        log("Update failed for: " + fam.Name)
+        if not silent: forms.alert("Failed to update table family.")
+        return False
 
-# --- UI ---
-class NamedRangeItem(object):
-    def __init__(self, data):
-        self.name = data['name']
-        self.sheet = data['sheet'] if data['sheet'] else "Global"
-        self.formula = data['formula']
+def batch_update_tables(linked_items):
+    if not linked_items:
+        return
 
+    try:
+        revit.uidoc.Selection.SetElementIds(System.Collections.Generic.List[DB.ElementId]())
+        revit.uidoc.RefreshActiveView()
+    except Exception:
+        pass
+
+    updated_count = 0
+    missing_count = 0
+    failed_count = 0
+
+    with DB.TransactionGroup(revit.doc, "Batch Update Excel Tables") as tg:
+        tg.Start()
+        for item in linked_items:
+            if not item.FileExists:
+                missing_count += 1
+                continue
+            res = update_table(item.FamilyName, silent=True)
+            if res:
+                updated_count += 1
+            else:
+                failed_count += 1
+        tg.Assimilate()
+
+    revit.uidoc.RefreshActiveView()
+    msg = "Batch update completed.\n\nUpdated: {}\nMissing File: {}\nFailed: {}".format(
+        updated_count, missing_count, failed_count
+    )
+    forms.alert(msg, title="Batch Update Results")
+
+# --- Directory Helper ---
+def get_best_init_dir(*candidate_paths):
+    for p in candidate_paths:
+        if not p:
+            continue
+        try:
+            curr = p if os.path.isdir(p) else os.path.dirname(p)
+            while curr and not os.path.exists(curr):
+                parent = os.path.dirname(curr)
+                if parent == curr:
+                    curr = ""
+                    break
+                curr = parent
+            if curr and os.path.exists(curr):
+                return curr
+        except Exception:
+            pass
+    return ""
+
+# --- MVVM Window Controller ---
 class ExcelScheduleWindow(forms.WPFWindow):
-    def __init__(self, metadata=None):
+    def __init__(self, initial_family_name=None, metadata=None):
         forms.WPFWindow.__init__(self, 'ui.xaml')
-        self.excel_path = None
+        self.vm = data_model.ExcelImportViewModel()
+        self.DataContext = self.vm
+        self.initial_family_name = initial_family_name
         self.initial_metadata = metadata
+        self._suppress_recent_event = False
+
+        self.apply_revit_theme()
+        self.wire_events()
+
+    def wire_events(self):
+        self.HeaderDrag.MouseLeftButtonDown += self.drag_window
+        self.Btn_WinClose.Click += self.Btn_Close_Click
+        self.Btn_Close.Click += self.Btn_Close_Click
+        self.Btn_Browse.Click += self.Btn_Browse_Click
+        self.Btn_Import.Click += self.Btn_Import_Click
+        self.Btn_UpdateChecked.Click += self.Btn_UpdateChecked_Click
+        self.Btn_PlaceSelected.Click += self.Btn_PlaceSelected_Click
+        self.Btn_SelectAllLinked.Click += self.Btn_SelectAllLinked_Click
+        self.Btn_SelectNoneLinked.Click += self.Btn_SelectNoneLinked_Click
+        self.Cb_RecentFiles.SelectionChanged += self.Cb_RecentFiles_SelectionChanged
+        self.Cb_Sheets.SelectionChanged += self.Cb_Sheets_SelectionChanged
+        self.Cb_Ranges.SelectionChanged += self.Cb_Ranges_SelectionChanged
+        self.Grid_LinkedTables.SelectionChanged += self.Grid_LinkedTables_SelectionChanged
         self.Loaded += self.window_loaded
 
+    def apply_revit_theme(self):
+        if is_dark_theme():
+            dark_palette = {
+                "WindowBrush": "#1F2937",
+                "ToolbarBrush": "#1F2937",
+                "ControlBrush": "#111827",
+                "FooterBrush": "#111827",
+                "AltRowBrush": "#1F2937",
+                "TextBrush": "#F9FAFB",
+                "TextLightBrush": "#9CA3AF",
+                "HeaderTextBrush": "#F9FAFB",
+                "BorderBrush": "#4B5563",
+                "ButtonBrush": "#374151",
+                "HoverBrush": "#374151",
+                "AccentBrush": "#3B82F6",
+                "SelectionBrush": "#1E3A8A",
+                "SelectionBorderBrush": "#3B82F6",
+                "SelectionTextBrush": "#FFFFFF",
+                "InactiveSelectionBrush": "#374151",
+                "CardBrush": "#374151",
+                "CardBorderBrush": "#4B5563",
+                "CardTextBrush": "#FFFFFF",
+                "CardSubTextBrush": "#D1D5DB",
+                "CardLabelBrush": "#9CA3AF",
+                "CardValueBrush": "#FFFFFF",
+                "CardAccentBrush": "#60A5FA",
+                "PrimaryButtonTextBrush": "#FFFFFF"
+            }
+            conv = BrushConverter()
+            for k, v in dark_palette.items():
+                self.Resources[k] = conv.ConvertFromString(v)
+
+            self.Resources[SystemColors.HighlightBrushKey] = conv.ConvertFromString("#1E3A8A")
+            self.Resources[SystemColors.HighlightTextBrushKey] = conv.ConvertFromString("#FFFFFF")
+            self.Resources[SystemColors.InactiveSelectionHighlightBrushKey] = conv.ConvertFromString("#374151")
+            self.Resources[SystemColors.InactiveSelectionHighlightTextBrushKey] = conv.ConvertFromString("#F9FAFB")
+
+    def drag_window(self, sender, args):
+        try:
+            self.DragMove()
+        except Exception:
+            pass
+
     def window_loaded(self, sender, args):
+        self.refresh_linked_tables(select_family_name=self.initial_family_name)
+
         if self.initial_metadata:
-            self.load_initial_settings(self.initial_metadata)
+            self.load_metadata_into_editor(self.initial_metadata, family_name=self.initial_family_name)
+        elif self.initial_family_name:
+            meta = TableDataManager.get_metadata(self.initial_family_name, revit.doc)
+            if meta:
+                self.load_metadata_into_editor(meta, family_name=self.initial_family_name)
+            else:
+                db = TableDataManager.load_db(revit.doc)
+                hint = TableDataManager.infer_hint_metadata(self.initial_family_name, db, self.vm.RecentFiles)
+                self.load_metadata_into_editor(hint, family_name=self.initial_family_name, hint_path=hint.get("HintPath", ""))
+        elif self.vm.LinkedTables:
+            self.vm.SelectedLinkedTable = self.vm.LinkedTables[0]
+            self.Grid_LinkedTables_SelectionChanged(None, None)
+        elif self.vm.RecentFiles:
+            first_recent = self.vm.RecentFiles[0]
+            self._suppress_recent_event = True
+            self.vm.SelectedRecentFile = first_recent
+            self._suppress_recent_event = False
+            if os.path.exists(first_recent):
+                self.vm.FilePath = first_recent
+                self.vm.LinkedFileHint = "Loaded last saved source: {}".format(first_recent)
+                self.refresh_data()
+            else:
+                self.vm.LinkedFileHint = "Last saved source (missing): {}  (Click Browse to locate)".format(first_recent)
+                self.vm.StatusText = "Missing File"
         else:
-            self.Tb_Scale.Text = "80"
             self.Btn_Browse_Click(None, None)
 
-    def load_initial_settings(self, meta):
-        path = meta.get("SourcePath")
+    def refresh_linked_tables(self, select_family_name=None):
+        all_families = DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements()
+        db = TableDataManager.load_db(revit.doc)
+        recent = TableDataManager.get_recent_files(revit.doc)
+
+        self._suppress_recent_event = True
+        self.vm.RecentFiles = recent
+        self._suppress_recent_event = False
+
+        existing_names = set(f.Name for f in all_families if f.Name != TableDataManager.META_KEY)
+        self.vm.existing_family_names = existing_names
+
+        items = []
+        for f in all_families:
+            if f.Name == TableDataManager.META_KEY:
+                continue
+            meta = db.get(f.Name)
+            if not meta and f.Name.startswith(FAMILY_PREFIX):
+                meta = TableDataManager.get_metadata(f, revit.doc)
+
+            if meta:
+                source = meta.get("SourcePath", "")
+                sheet = meta.get("SheetName", "")
+                range_n = meta.get("RangeName", "")
+                scale = meta.get("TextScale", 80.0)
+                hint_path = ""
+            elif f.Name.startswith(FAMILY_PREFIX):
+                hint = TableDataManager.infer_hint_metadata(f.Name, db, recent)
+                source = ""
+                hint_path = hint.get("HintPath", "")
+                sheet = hint.get("SheetName", "")
+                range_n = hint.get("RangeName", "")
+                scale = hint.get("TextScale", 80.0)
+            else:
+                continue
+
+            item = data_model.LinkedTableItem(
+                family_name=f.Name,
+                source_path=source,
+                sheet_name=sheet,
+                range_name=range_n,
+                text_scale=scale,
+                family_id=f.Id,
+                hint_path=hint_path
+            )
+            items.append(item)
+
+        items.sort(key=lambda x: x.FamilyName)
+        self.vm.LinkedTables = items
+
+        if select_family_name:
+            target_item = next((i for i in items if i.FamilyName == select_family_name), None)
+            if target_item:
+                self.vm.SelectedLinkedTable = target_item
+
+    def load_metadata_into_editor(self, meta, family_name=None, hint_path=""):
+        path = (meta.get("SourcePath", "") if meta else "")
+        eff_hint = hint_path or (meta.get("HintPath", "") if meta else "")
+
+        if family_name:
+            self.vm.TableName = family_name
+        elif meta and meta.get("FamilyName"):
+            self.vm.TableName = meta.get("FamilyName")
+
+        if meta and meta.get("TextScale"):
+            self.vm.TextScale = str(meta.get("TextScale"))
+
+        self.vm.SelectedSheet = None
+        self.vm.SelectedRange = None
+
         if path and os.path.exists(path):
-            self.excel_path = path
-            self.Tb_FilePath.Text = path
-            self.Tb_Scale.Text = str(meta.get("TextScale", "80"))
-            if meta.get("FamilyName"):
-                self.Tb_Name.Text = meta["FamilyName"]
+            self.vm.FilePath = path
+            self.vm.LinkedFileHint = "Linked to: {}".format(path)
             self.refresh_data()
-            
+
             target_sheet = meta.get("SheetName")
-            if target_sheet and self.Cb_Sheets.ItemsSource:
-                for item in self.Cb_Sheets.ItemsSource:
-                    if item == target_sheet:
-                        self.Cb_Sheets.SelectedItem = item
+            if target_sheet and self.vm.Sheets:
+                for s in self.vm.Sheets:
+                    if s == target_sheet:
+                        self.vm.SelectedSheet = s
                         break
-            
+
             target_range = meta.get("RangeName")
-            if target_range and self.Cb_Ranges.ItemsSource:
-                for item in self.Cb_Ranges.ItemsSource:
-                    if item.name == target_range:
-                        self.Cb_Ranges.SelectedItem = item
+            if target_range and self.vm.Ranges:
+                matched_range = None
+                for r in self.vm.Ranges:
+                    if r.Name == target_range or r.name == target_range:
+                        matched_range = r
                         break
+                if matched_range:
+                    self.vm.SelectedRange = matched_range
+                elif self.vm.Ranges:
+                    self.vm.SelectedRange = self.vm.Ranges[0]
+            elif self.vm.Ranges:
+                self.vm.SelectedRange = self.vm.Ranges[0]
         else:
-            self.Tb_Scale.Text = "80"
-            self.Btn_Browse_Click(None, None)
+            self.vm.FilePath = path or ""
+            self.vm.Sheets = []
+            self.vm.Ranges = []
+            if path:
+                self.vm.StatusText = "Missing File"
+                self.vm.LinkedFileHint = "Missing original file: {}  (Click Browse to locate)".format(path)
+            elif eff_hint:
+                self.vm.StatusText = "Hint Only"
+                self.vm.LinkedFileHint = "Hint (nearest match / history): {}  (Select source or Browse to relink)".format(eff_hint)
+            else:
+                self.vm.StatusText = "No Link"
+                self.vm.LinkedFileHint = "No source file recorded for this table. Pick a Saved Source or click Browse."
+
+        target_match = path or eff_hint
+        if target_match and self.vm.RecentFiles:
+            try:
+                norm_match = os.path.normcase(os.path.abspath(target_match))
+            except Exception:
+                norm_match = str(target_match).lower()
+            matched_recent = None
+            for rf in self.vm.RecentFiles:
+                try:
+                    norm_rf = os.path.normcase(os.path.abspath(rf))
+                except Exception:
+                    norm_rf = str(rf).lower()
+                if norm_rf == norm_match:
+                    matched_recent = rf
+                    break
+            self._suppress_recent_event = True
+            self.vm.SelectedRecentFile = matched_recent
+            self._suppress_recent_event = False
+        else:
+            self._suppress_recent_event = True
+            self.vm.SelectedRecentFile = None
+            self._suppress_recent_event = False
 
     def Btn_Browse_Click(self, sender, args):
-        f = forms.pick_file(file_ext='xlsx')
+        sel_table = self.vm.SelectedLinkedTable
+        init_dir = get_best_init_dir(
+            self.vm.FilePath,
+            sel_table.SourcePath if sel_table else None,
+            sel_table.HintPath if sel_table else None,
+            self.vm.SelectedRecentFile,
+            TableDataManager.get_last_file_path(revit.doc)
+        )
+        f = forms.pick_file(file_ext='xlsx', init_dir=init_dir, title="Select Excel File")
         if f:
-            self.excel_path = f
-            self.Tb_FilePath.Text = f
-            self.refresh_data()
+            if sel_table and (not sel_table.FileExists or not sel_table.SourcePath):
+                self.vm.FilePath = f
+                self.vm.LinkedFileHint = "Relinking '{}' -> {}".format(sel_table.FamilyName, f)
+                self.refresh_data()
+            else:
+                self.vm.SelectedLinkedTable = None
+                self.vm.SelectedSheet = None
+                self.vm.SelectedRange = None
+                self.vm.FilePath = f
+                self.vm.LinkedFileHint = "Loaded: {}".format(f)
+                self.refresh_data()
 
     def refresh_data(self):
-        if not self.excel_path: return
-        self.Lb_Status.Text = "Reading..."
-        self.Cb_Sheets.ItemsSource = excelextract.get_sheet_names(self.excel_path)
-        if self.Cb_Sheets.ItemsSource: self.Cb_Sheets.SelectedIndex = 0
-        
-        raw_ranges = excelextract.get_print_areas(self.excel_path)
-        self.Cb_Ranges.ItemsSource = [NamedRangeItem(r) for r in raw_ranges]
-        if self.Cb_Ranges.ItemsSource: self.Cb_Ranges.SelectedIndex = 0
-        self.Lb_Status.Text = "Ready"
+        if not self.vm.FilePath or not os.path.exists(self.vm.FilePath):
+            return
 
-    def check_existing_scale(self):
-        try:
-            t_name = self.Tb_Name.Text
-            if not t_name: return
-            meta = TableDataManager.get_metadata(t_name)
-            if meta and meta.get("TextScale"):
-                self.Tb_Scale.Text = str(meta["TextScale"])
-        except: pass
+        self.vm.StatusText = "Reading..."
+        sheets = excelextract.get_sheet_names(self.vm.FilePath)
+        self.vm.Sheets = sheets
+
+        raw_ranges = excelextract.get_print_areas(self.vm.FilePath)
+        range_items = [data_model.NamedRangeItem({
+            'name': '<Entire Worksheet>',
+            'sheet': '',
+            'formula': '',
+            'is_full_sheet': True
+        })]
+        for r in raw_ranges:
+            range_items.append(data_model.NamedRangeItem(r))
+
+        self.vm.Ranges = range_items
+        if sheets and not self.vm.SelectedSheet:
+            self.vm.SelectedSheet = sheets[0]
+        if range_items and not self.vm.SelectedRange:
+            self.vm.SelectedRange = range_items[0]
+
+        self.vm.StatusText = "Ready"
+
+    def Cb_RecentFiles_SelectionChanged(self, sender, args):
+        if self._suppress_recent_event:
+            return
+        picked = self.vm.SelectedRecentFile
+        if not picked:
+            return
+        if os.path.exists(picked):
+            self.vm.SelectedSheet = None
+            self.vm.SelectedRange = None
+            self.vm.FilePath = picked
+            self.vm.LinkedFileHint = "Selected saved source: {}".format(picked)
+            self.refresh_data()
+        else:
+            self.vm.LinkedFileHint = "Saved source missing on disk: {}  (Click Browse to open nearest folder)".format(picked)
+            self.vm.StatusText = "Missing File"
 
     def Cb_Sheets_SelectionChanged(self, sender, args):
-        if self.Cb_Sheets.SelectedItem:
-             self.Tb_Name.Text = "{}{}_Table".format(FAMILY_PREFIX, self.Cb_Sheets.SelectedItem)
-             self.check_existing_scale()
+        if self.vm.SelectedSheet and not self.vm.SelectedLinkedTable:
+            self.vm.TableName = "{}{}_Table".format(FAMILY_PREFIX, self.vm.SelectedSheet)
 
     def Cb_Ranges_SelectionChanged(self, sender, args):
-        sel = self.Cb_Ranges.SelectedItem
+        sel = self.vm.SelectedRange
+        if sel and not self.vm.SelectedLinkedTable:
+            if getattr(sel, 'IsFullSheet', False):
+                clean = "{}_Table".format(self.vm.SelectedSheet if self.vm.SelectedSheet else "Worksheet")
+            else:
+                name_val = sel.Name if hasattr(sel, 'Name') else sel.name
+                sheet_val = sel.Sheet if hasattr(sel, 'Sheet') else sel.sheet
+                clean = name_val.replace("_", " ") if name_val != "Print_Area" else "{} Print Area".format(sheet_val)
+            self.vm.TableName = "{}{}".format(FAMILY_PREFIX, clean)
+
+    def Grid_LinkedTables_SelectionChanged(self, sender, args):
+        sel = self.vm.SelectedLinkedTable
         if sel:
-            clean = sel.name.replace("_", " ") if sel.name != "Print_Area" else "{} Print Area".format(sel.sheet)
-            self.Tb_Name.Text = "{}{}".format(FAMILY_PREFIX, clean)
-            self.check_existing_scale()
+            meta = TableDataManager.get_metadata(sel.FamilyName, revit.doc)
+            if meta:
+                self.load_metadata_into_editor(meta, family_name=sel.FamilyName, hint_path=sel.HintPath)
+            else:
+                hint_meta = {
+                    "SourcePath": sel.SourcePath,
+                    "SheetName": sel.SheetName,
+                    "RangeName": sel.RangeName,
+                    "TextScale": sel.TextScale,
+                    "HintPath": sel.HintPath
+                }
+                self.load_metadata_into_editor(hint_meta, family_name=sel.FamilyName, hint_path=sel.HintPath)
+
+    def Btn_SelectAllLinked_Click(self, sender, args):
+        self.vm.select_all_linked(True)
+
+    def Btn_SelectNoneLinked_Click(self, sender, args):
+        self.vm.select_all_linked(False)
+
+    def Btn_UpdateChecked_Click(self, sender, args):
+        checked = [t for t in self.vm.LinkedTables if t.IsChecked]
+        if not checked:
+            forms.alert("No linked tables selected for update.")
+            return
+        batch_update_tables(checked)
+        self.refresh_linked_tables()
+
+    def Btn_PlaceSelected_Click(self, sender, args):
+        sel = self.vm.SelectedLinkedTable
+        if not sel:
+            forms.alert("Please select a table from the list.")
+            return
+
+        fam = next((f for f in DB.FilteredElementCollector(revit.doc).OfClass(DB.Family).ToElements() if f.Name == sel.FamilyName), None)
+        if not fam:
+            forms.alert("Table family '{}' not found in project.".format(sel.FamilyName))
+            return
+
+        self.Close()
+        place_table_instance(fam)
 
     def Btn_Import_Click(self, sender, args):
-        if not self.excel_path: return
-        s = self.Cb_Sheets.SelectedItem
-        r = self.Cb_Ranges.SelectedItem.name if self.Cb_Ranges.SelectedItem else None
-        n = self.Tb_Name.Text or FAMILY_PREFIX + "Table"
-        
+        if not self.vm.FilePath:
+            return
+
+        s = self.vm.SelectedSheet
+        r = self.vm.SelectedRange.Name if self.vm.SelectedRange else None
+        n = self.vm.TableName or FAMILY_PREFIX + "Table"
+
         scale_pct = 80.0
-        try: scale_pct = float(self.Tb_Scale.Text)
-        except: pass
-        
+        try:
+            scale_pct = float(self.vm.TextScale)
+        except Exception:
+            scale_pct = 80.0
+
+        place_inst = self.vm.PlaceOnView
+
         self.Close()
-        create_table(self.excel_path, s, r, n, scale_pct)
+        create_table(self.vm.FilePath, s, r, n, scale_pct, place_instance=place_inst)
 
     def Btn_Close_Click(self, sender, args):
         self.Close()
 
-# --- Entry ---
-sel = revit.get_selection()
-initial_meta = None
+# --- Entry Point ---
+if __name__ == '__main__':
+    sel = revit.get_selection()
+    initial_meta = None
+    initial_fam_name = None
 
-if len(sel) == 1 and isinstance(sel[0], DB.FamilyInstance):
-    fam = sel[0].Symbol.Family
-    meta = TableDataManager.get_metadata(fam)
-    if meta and meta["SourcePath"]:
-        initial_meta = meta
-        initial_meta["FamilyName"] = fam.Name
+    if len(sel) == 1 and isinstance(sel[0], DB.FamilyInstance):
+        fam = sel[0].Symbol.Family
+        if fam.Name.startswith(FAMILY_PREFIX) or TableDataManager.get_metadata(fam, revit.doc):
+            initial_fam_name = fam.Name
+            initial_meta = TableDataManager.get_metadata(fam, revit.doc)
+            if initial_meta:
+                initial_meta["FamilyName"] = fam.Name
 
-ExcelScheduleWindow(initial_meta).ShowDialog()
+    ExcelScheduleWindow(initial_family_name=initial_fam_name, metadata=initial_meta).ShowDialog()

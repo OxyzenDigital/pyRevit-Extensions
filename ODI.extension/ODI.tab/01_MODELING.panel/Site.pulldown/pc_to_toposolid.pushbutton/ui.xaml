@@ -1,0 +1,674 @@
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Point Cloud to Toposolid" Height="860" Width="440"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanResize"
+        WindowStyle="None"
+        Foreground="{DynamicResource TextBrush}"
+        BorderBrush="{DynamicResource AccentBrush}"
+        BorderThickness="1"
+        Background="{DynamicResource WindowBrush}">
+
+    <Window.Resources>
+        <!-- ── Light-theme defaults (overridden in code for Dark theme) ── -->
+        <SolidColorBrush x:Key="WindowBrush"        Color="#F4F4F4"/>
+        <SolidColorBrush x:Key="ControlBrush"       Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="TextBrush"          Color="#1E1E1E"/>
+        <SolidColorBrush x:Key="TextLightBrush"     Color="#767676"/>
+        <SolidColorBrush x:Key="AccentBrush"        Color="#0078D4"/>
+        <SolidColorBrush x:Key="HeaderTextBrush"    Color="#FFFFFF"/>
+        <SolidColorBrush x:Key="HeaderSubTextBrush" Color="#CCE4FF"/>
+        <SolidColorBrush x:Key="BorderBrush"        Color="#D6D6D6"/>
+        <SolidColorBrush x:Key="StatusReadyBrush"   Color="#107C10"/>
+        <SolidColorBrush x:Key="StatusErrorBrush"   Color="#C50F1F"/>
+        <SolidColorBrush x:Key="ButtonBrush"        Color="#F0F0F0"/>
+        <SolidColorBrush x:Key="HoverBrush"         Color="#E1EFFF"/>
+        <SolidColorBrush x:Key="PressedBrush"       Color="#C7E0FF"/>
+
+        <!-- ── Default Button style ── -->
+        <Style TargetType="Button">
+            <Setter Property="Background"      Value="{DynamicResource ButtonBrush}"/>
+            <Setter Property="Foreground"      Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush"     Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding"         Value="8,3"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Name="border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Background"  Value="{DynamicResource HoverBrush}"/>
+                                <Setter TargetName="border" Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Background" Value="{DynamicResource PressedBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── Accent (primary action) Button style ── -->
+        <Style x:Key="AccentButton" TargetType="Button">
+            <Setter Property="Background"      Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="Foreground"      Value="White"/>
+            <Setter Property="BorderBrush"     Value="{DynamicResource AccentBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding"         Value="8,3"/>
+            <Setter Property="Cursor"          Value="Hand"/>
+            <Setter Property="FontWeight"      Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Name="border"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="3">
+                            <ContentPresenter HorizontalAlignment="Center"
+                                              VerticalAlignment="Center"
+                                              Margin="{TemplateBinding Padding}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="border" Property="Opacity" Value="0.88"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="border" Property="Opacity" Value="0.75"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="border" Property="Opacity" Value="0.40"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── Misc element styles ── -->
+        <Style TargetType="TextBox">
+            <Setter Property="Background"        Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground"        Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush"       Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness"   Value="1"/>
+            <Setter Property="Padding"           Value="6,3"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+        </Style>
+        <!-- ── Custom ComboBox Toggle Button ── -->
+        <ControlTemplate x:Key="ComboBoxToggleButton" TargetType="ToggleButton">
+            <Border Background="{TemplateBinding Background}"
+                    BorderBrush="{TemplateBinding BorderBrush}"
+                    BorderThickness="{TemplateBinding BorderThickness}"
+                    CornerRadius="3">
+                <Path Data="M0,0 L4,4 L8,0 z"
+                      Fill="{TemplateBinding Foreground}"
+                      HorizontalAlignment="Right"
+                      Margin="0,0,8,0"
+                      VerticalAlignment="Center"
+                      IsHitTestVisible="False"/>
+            </Border>
+            <ControlTemplate.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                </Trigger>
+            </ControlTemplate.Triggers>
+        </ControlTemplate>
+
+        <!-- ── Global ComboBox Style with Themed Popup ── -->
+        <Style TargetType="ComboBox">
+            <Setter Property="Background"              Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground"              Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush"             Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="BorderThickness"         Value="1"/>
+            <Setter Property="Height"                  Value="28"/>
+            <Setter Property="Padding"                 Value="8,3"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="ToggleButton"
+                                          Template="{StaticResource ComboBoxToggleButton}"
+                                          Focusable="false"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}"
+                                          Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}" 
+                                          BorderThickness="{TemplateBinding BorderThickness}"
+                                          Foreground="{TemplateBinding Foreground}"/>
+                            <ContentPresenter x:Name="ContentSite"
+                                              IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                              Margin="{TemplateBinding Padding}"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                            <Popup x:Name="Popup"
+                                   Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Slide">
+                                <Border x:Name="DropDownBorder"
+                                        Background="{DynamicResource ControlBrush}"
+                                        BorderBrush="{DynamicResource BorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="3"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource AncestorType=ComboBox}}"
+                                        TextElement.Foreground="{DynamicResource TextBrush}">
+                                    <ScrollViewer Margin="0" SnapsToDevicePixels="True" MaxHeight="220"
+                                                  TextElement.Foreground="{DynamicResource TextBrush}">
+                                        <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsDropDownOpen" Value="True">
+                                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ToggleButton" Property="Opacity" Value="0.45"/>
+                                <Setter TargetName="ContentSite" Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ── ComboBox Item Styles with High-Contrast Selected State ── -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Background"              Value="{DynamicResource ControlBrush}"/>
+            <Setter Property="Foreground"              Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderThickness"         Value="0"/>
+            <Setter Property="Padding"                 Value="8,5"/>
+            <Setter Property="Cursor"                  Value="Hand"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border Name="ItemBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderThickness="0"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Left"
+                                              VerticalAlignment="Center"
+                                              TextElement.Foreground="{TemplateBinding Foreground}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource HoverBrush}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="IsHighlighted" Value="True"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource AccentBrush}"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="GroupBox">
+            <Setter Property="Foreground"  Value="{DynamicResource TextBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="FontWeight"  Value="SemiBold"/>
+        </Style>
+        <Style TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Cursor"     Value="Hand"/>
+        </Style>
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="FontWeight" Value="Normal"/>
+            <Setter Property="Cursor"     Value="Hand"/>
+        </Style>
+        <Style TargetType="Label">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+        </Style>
+        <Style TargetType="Separator">
+            <Setter Property="Background" Value="{DynamicResource BorderBrush}"/>
+            <Setter Property="Margin"     Value="0,6"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>  <!-- 0: Draggable Header -->
+            <RowDefinition Height="*"/>     <!-- 1: Form Body        -->
+            <RowDefinition Height="Auto"/>  <!-- 2: Actions & Footer -->
+        </Grid.RowDefinitions>
+
+        <!-- ═══════════════════════════════════════════════
+             ROW 0 — Draggable Header with live status dot
+             ═══════════════════════════════════════════════ -->
+        <Border Name="HeaderDrag" Grid.Row="0"
+                Background="{DynamicResource AccentBrush}" Padding="12,10"
+                MouseLeftButtonDown="Header_MouseDown">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>   <!-- status dot -->
+                    <ColumnDefinition Width="*"/>      <!-- title      -->
+                    <ColumnDefinition Width="Auto"/>   <!-- close btn  -->
+                </Grid.ColumnDefinitions>
+
+                <!-- Live status dot: green=ready, amber=busy, red=error -->
+                <Ellipse Name="Dot_Status" Grid.Column="0"
+                         Width="10" Height="10" Fill="#55DD55"
+                         Margin="0,0,10,0" VerticalAlignment="Center"
+                         ToolTip="Tool status indicator"/>
+
+                <StackPanel Grid.Column="1">
+                    <TextBlock Text="Point Cloud to Toposolid"
+                               FontSize="17" FontWeight="Bold"
+                               Foreground="{DynamicResource HeaderTextBrush}"/>
+                    <TextBlock Name="Tb_StatusHeader"
+                               Text="Terrain Extraction &amp; Denoising"
+                               FontSize="11" FontStyle="Italic"
+                               Foreground="{DynamicResource HeaderSubTextBrush}"/>
+                </StackPanel>
+
+                <Button Name="Btn_WinClose" Grid.Column="2"
+                        Content="✕" Width="28" Height="28"
+                        Foreground="White" Background="Transparent"
+                        BorderThickness="0" FontSize="14" FontWeight="Bold"
+                        Cursor="Hand" VerticalAlignment="Top" HorizontalAlignment="Right"
+                        Click="Close_Click">
+                    <Button.Template>
+                        <ControlTemplate TargetType="Button">
+                            <Border Name="cb" Background="{TemplateBinding Background}" CornerRadius="3">
+                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter TargetName="cb" Property="Background" Value="#44FFFFFF"/>
+                                    <Setter Property="Foreground" Value="#FF8888"/>
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Button.Template>
+                </Button>
+            </Grid>
+        </Border>
+
+        <!-- ═══════════════════════════════════════════════
+             ROW 1 — Form Content (Scrollable GroupBoxes)
+             ═══════════════════════════════════════════════ -->
+        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Padding="12,8,12,4">
+            <StackPanel>
+
+                <!-- Group 1: Target Toposolid -->
+                <GroupBox Header="1. Target Toposolid" Padding="10,8" Margin="0,0,0,8"
+                          Background="{DynamicResource ControlBrush}"
+                          BorderBrush="{DynamicResource BorderBrush}">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                            <RadioButton x:Name="rbCreateNew"
+                                         GroupName="TargetAction"
+                                         Content="Create New Toposolid"
+                                         IsChecked="True"
+                                         Margin="0,0,16,0"
+                                         Checked="Action_Changed"/>
+                            <RadioButton x:Name="rbUpdateExisting"
+                                         GroupName="TargetAction"
+                                         Content="Update Existing Toposolid"
+                                         Checked="Action_Changed"/>
+                        </StackPanel>
+
+                        <TextBlock x:Name="txtNoToposolidNote"
+                                   Text="* No existing Toposolids found in document — New Toposolid will be created."
+                                   Foreground="{DynamicResource TextLightBrush}"
+                                   FontStyle="Italic"
+                                   FontSize="10.5"
+                                   Visibility="Collapsed"
+                                   Margin="0,0,0,6"/>
+
+                        <!-- Panel: Create New Toposolid Type -->
+                        <StackPanel x:Name="pnlCreateNew">
+                            <TextBlock Text="Target Toposolid Type:" FontSize="11" Margin="0,0,0,3"/>
+                            <ComboBox x:Name="cmbToposolidType"
+                                      ItemsSource="{Binding ToposolidTypes}"
+                                      SelectedItem="{Binding SelectedToposolidType}"
+                                      DisplayMemberPath="Name"/>
+                        </StackPanel>
+
+                        <!-- Panel: Update Existing Toposolid Selector -->
+                        <StackPanel x:Name="pnlUpdateExisting" Visibility="Collapsed">
+                            <TextBlock Text="Select Toposolid to Update:" FontSize="11" Margin="0,0,0,3"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="8"/>
+                                    <ColumnDefinition Width="90"/>
+                                </Grid.ColumnDefinitions>
+                                <ComboBox x:Name="cmbExistingToposolids"
+                                          ItemsSource="{Binding ExistingToposolids}"
+                                          SelectedItem="{Binding SelectedExistingToposolid}"
+                                          DisplayMemberPath="DisplayText"/>
+                                <Button Grid.Column="2"
+                                        Content="Pick in View"
+                                        Height="26"
+                                        Click="PickToposolid_Click"
+                                        ToolTip="Click to select a Toposolid directly in the active Revit view"/>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Group 2: Reference Level & Elevation Clipping Band -->
+                <GroupBox Header="2. Reference Level &amp; Elevation Range" Padding="10,8" Margin="0,0,0,8"
+                          Background="{DynamicResource ControlBrush}"
+                          BorderBrush="{DynamicResource BorderBrush}">
+                    <StackPanel>
+                        <TextBlock Text="Reference Datum Level:" FontSize="11" Margin="0,0,0,3"/>
+                        <ComboBox x:Name="cmbLevel"
+                                  ItemsSource="{Binding Levels}"
+                                  SelectedItem="{Binding SelectedLevel}"
+                                  DisplayMemberPath="DisplayText"
+                                  Margin="0,0,0,4"/>
+
+                        <TextBlock Text="{Binding PointCloudExtentsText}"
+                                   Foreground="{DynamicResource AccentBrush}"
+                                   FontSize="11"
+                                   FontWeight="SemiBold"
+                                   Margin="2,0,0,8"/>
+
+                        <!-- Z Offset Band -->
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="12"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Min Z Offset:" FontSize="11" Margin="0,0,0,2"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="22"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding MinZOffset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Height="25"/>
+                                    <TextBlock Text="ft" Grid.Column="1" VerticalAlignment="Center" Margin="4,0,0,0"
+                                               Foreground="{DynamicResource TextLightBrush}"/>
+                                </Grid>
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Max Z Offset:" FontSize="11" Margin="0,0,0,2"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="22"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Text="{Binding MaxZOffset, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" Height="25"/>
+                                    <TextBlock Text="ft" Grid.Column="1" VerticalAlignment="Center" Margin="4,0,0,0"
+                                               Foreground="{DynamicResource TextLightBrush}"/>
+                                </Grid>
+                            </StackPanel>
+                        </Grid>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Group 3: Progressive Ground Extraction & Denoising -->
+                <GroupBox Header="3. Ground Extraction &amp; Denoising" Padding="10,8" Margin="0,0,0,8"
+                          Background="{DynamicResource ControlBrush}"
+                          BorderBrush="{DynamicResource BorderBrush}">
+                    <StackPanel>
+                        <CheckBox Content="Enable Progressive Ground Extraction"
+                                  IsChecked="{Binding FilterNoise, Mode=TwoWay}"
+                                  FontWeight="SemiBold"
+                                  Margin="0,0,0,6"
+                                  ToolTip="Removes buildings, roofs, and vegetation canopy using lowest-seed ground growing and Laplace relaxation"/>
+
+                        <!-- Max Ground Slope -->
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="32"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Max Natural Terrain Slope:" FontSize="11" FontWeight="SemiBold"/>
+                                <TextBlock Text="Jumps steeper than this grade are rejected as obstacles."
+                                           Foreground="{DynamicResource TextLightBrush}"
+                                           FontSize="10" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <TextBox Grid.Column="2"
+                                     Text="{Binding MaxGroundSlope, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Height="25"
+                                     VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="3" Text="ft/ft" VerticalAlignment="Center" Margin="4,0,0,0"
+                                       Foreground="{DynamicResource TextLightBrush}"/>
+                        </Grid>
+
+                        <!-- Elevation Tolerance -->
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="32"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Elevation Step Tolerance:" FontSize="11" FontWeight="SemiBold"/>
+                                <TextBlock Text="Local height tolerance across rough terrain soil."
+                                           Foreground="{DynamicResource TextLightBrush}"
+                                           FontSize="10" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <TextBox Grid.Column="2"
+                                     Text="{Binding GroundElevationTolerance, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Height="25"
+                                     VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="3" Text="ft" VerticalAlignment="Center" Margin="4,0,0,0"
+                                       Foreground="{DynamicResource TextLightBrush}"/>
+                        </Grid>
+
+                        <Separator/>
+
+                        <!-- Obstacle Handling -->
+                        <TextBlock Text="Obstacle Handling (Under Roofs &amp; Canopy):" FontSize="11" Margin="0,2,0,3"/>
+                        <ComboBox ItemsSource="{Binding ObstacleModes}"
+                                  SelectedIndex="{Binding SelectedObstacleModeIndex, Mode=TwoWay}"
+                                  Margin="0,0,0,8"/>
+
+                        <!-- Surface Denoising -->
+                        <TextBlock Text="Surface Denoising &amp; Smoothing (Civil 3D DEM):" FontSize="11" Margin="0,0,0,3"/>
+                        <ComboBox ItemsSource="{Binding SmoothingModes}"
+                                  SelectedIndex="{Binding SelectedSmoothingModeIndex, Mode=TwoWay}"
+                                  Margin="0,0,0,2"/>
+                        <TextBlock Text="Smooths peaks and valleys using edge-preserving Bilateral Gaussian relaxation."
+                                   Foreground="{DynamicResource TextLightBrush}"
+                                   FontSize="10"
+                                   Margin="0,0,0,4"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Group 4: Sampling Grid & Boundaries -->
+                <GroupBox Header="4. Sampling Grid &amp; Boundaries" Padding="10,8" Margin="0,0,0,8"
+                          Background="{DynamicResource ControlBrush}"
+                          BorderBrush="{DynamicResource BorderBrush}">
+                    <StackPanel>
+                        <!-- Grid Spacing -->
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="32"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Grid Sampling Spacing:" FontSize="11" FontWeight="SemiBold"/>
+                                <TextBlock Text="Spacing between terrain sample points."
+                                           Foreground="{DynamicResource TextLightBrush}"
+                                           FontSize="10"/>
+                            </StackPanel>
+                            <TextBox Grid.Column="2"
+                                     Text="{Binding GridResolution, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Height="25"
+                                     VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="3" Text="ft" VerticalAlignment="Center" Margin="4,0,0,0"
+                                       Foreground="{DynamicResource TextLightBrush}"/>
+                        </Grid>
+
+                        <!-- Ground Point Strategy -->
+                        <TextBlock Text="Cell Ground Elevation Strategy:" FontSize="11" Margin="0,2,0,3"/>
+                        <ComboBox x:Name="cmbStrategy"
+                                  ItemsSource="{Binding Strategies}"
+                                  SelectedItem="{Binding SelectedStrategy}"
+                                  DisplayMemberPath="Name"
+                                  Margin="0,0,0,8"/>
+
+                        <!-- Boundary Mode -->
+                        <TextBlock Text="Boundary Area Mode:" FontSize="11" Margin="0,0,0,3"/>
+                        <ComboBox x:Name="cmbBoundaryMode"
+                                  ItemsSource="{Binding BoundaryModes}"
+                                  SelectedItem="{Binding SelectedBoundaryMode}"
+                                  DisplayMemberPath="Name"
+                                  Margin="0,0,0,4"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Group 5: Detail Areas (Higher Resolution) -->
+                <GroupBox Header="5. Detail Areas (Optional Local Refinement)" Padding="10,8" Margin="0,0,0,8"
+                          Background="{DynamicResource ControlBrush}"
+                          BorderBrush="{DynamicResource BorderBrush}">
+                    <StackPanel>
+                        <!-- Explanatory step-by-step guidance banner -->
+                        <Border Background="{DynamicResource WindowBrush}" BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1" Padding="8,6" Margin="0,0,0,8" CornerRadius="2">
+                            <TextBlock Foreground="{DynamicResource TextLightBrush}" FontSize="10" TextWrapping="Wrap" LineHeight="14">
+                                <Bold Foreground="{DynamicResource TextBrush}">How Refinement Works:</Bold>&#x0a;
+                                • Check the box below and set the finer spacing (e.g. 1.0 - 2.0 ft)&#x0a;
+                                • Click "Pick in View", drag a box around curbs or steep spots, then press &lt;Esc&gt;&#x0a;
+                                • <Bold>Create New Mode:</Bold> Generates whole site at base grid, swapping in high-res points in the boxes.&#x0a;
+                                • <Bold>Update Existing Mode:</Bold> Replaces points ONLY inside the boxes without touching the rest of the site.
+                            </TextBlock>
+                        </Border>
+
+                        <CheckBox Content="Enable Local High-Resolution Refinement"
+                                  IsChecked="{Binding EnableDetailAreas, Mode=TwoWay}"
+                                  FontWeight="SemiBold"
+                                  Margin="0,0,0,6"
+                                  ToolTip="When enabled, selected boxes will be sampled at the finer spacing below."/>
+
+                        <!-- Detail Resolution -->
+                        <Grid Margin="0,0,0,6">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="10"/>
+                                <ColumnDefinition Width="80"/>
+                                <ColumnDefinition Width="32"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0" VerticalAlignment="Center">
+                                <TextBlock Text="Detail Sampling Spacing:" FontSize="11" FontWeight="SemiBold"/>
+                                <TextBlock Text="Must be finer than base grid (e.g. 1.0 - 2.0 ft, min 0.5 ft)."
+                                           Foreground="{DynamicResource TextLightBrush}"
+                                           FontSize="10" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <TextBox Grid.Column="2"
+                                     Text="{Binding DetailResolution, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                     Height="25"
+                                     VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="3" Text="ft" VerticalAlignment="Center" Margin="4,0,0,0"
+                                       Foreground="{DynamicResource TextLightBrush}"/>
+                        </Grid>
+
+                        <!-- Pick / Clear -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="8"/>
+                                <ColumnDefinition Width="70"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    Content="Pick Detail Areas in View..."
+                                    Height="26"
+                                    Click="PickDetailAreas_Click"
+                                    ToolTip="Drag a rectangle across the area to refine. Press Esc when done."/>
+                            <Button Grid.Column="2"
+                                    Content="Clear"
+                                    Height="26"
+                                    Click="ClearDetailAreas_Click"
+                                    ToolTip="Clear all selected detail boxes"/>
+                        </Grid>
+                        <TextBlock Text="{Binding DetailAreasSummary}"
+                                   Foreground="{DynamicResource TextLightBrush}"
+                                   FontSize="10"
+                                   Margin="0,2,0,0"
+                                   TextWrapping="Wrap"/>
+                    </StackPanel>
+                </GroupBox>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- ═══════════════════════════════════════════════
+             ROW 2 — Status Bar & Actions Footer
+             ═══════════════════════════════════════════════ -->
+        <Border Grid.Row="2" Background="{DynamicResource WindowBrush}" Padding="12,6,12,10">
+            <StackPanel>
+                <!-- Status Bar -->
+                <Border BorderBrush="{DynamicResource BorderBrush}" BorderThickness="1"
+                        CornerRadius="3" Padding="8,5" Margin="0,0,0,8"
+                        Background="{DynamicResource ControlBrush}">
+                    <TextBlock Name="Lb_Status"
+                               Text="{Binding StatusMessage}"
+                               HorizontalAlignment="Center"
+                               Foreground="{DynamicResource TextLightBrush}"
+                               FontSize="11"
+                               TextTrimming="CharacterEllipsis"/>
+                </Border>
+
+                <!-- Action Buttons -->
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="10"/>
+                        <ColumnDefinition Width="200"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Button Content="Cancel"
+                            Height="34"
+                            Click="Close_Click"/>
+
+                    <Button x:Name="btnAction"
+                            Grid.Column="2"
+                            Content="{Binding ActionButtonText}"
+                            Height="34"
+                            Style="{StaticResource AccentButton}"
+                            FontSize="12"
+                            Click="Generate_Click"/>
+                </Grid>
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>

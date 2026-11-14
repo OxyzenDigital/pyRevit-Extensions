@@ -240,6 +240,59 @@ def generate_suffixes(rows, cols, naming_scheme="Segment-Based", custom_schemes=
         
     return suffixes
 
+def infer_modifier_level_scope(mod_name, series_code):
+    """
+    Classifies a modifier by its level multiplication scope so Cartoon Sheet Sets
+    generate the right number of sheets instead of multiplying Roof/Site/Foundation
+    across every building story:
+      - 'series_once': Series != '1', or global single-sheet plans (Key Plan)
+      - 'site_once': Site / Civil / Grading / Utility / Landscape plans -> 1 sheet
+      - 'roof_only': Roof / Penthouse plans -> only Roof-matching levels (or 1 sheet)
+      - 'foundation_only': Foundation / Basement / Slab / Footing plans -> only lowest/foundation level
+      - 'per_floor': Standard Floor / Ceiling / Dimension / Demolition / Finish / Furniture / Framing / Power / Lighting / HVAC / Plumbing plans -> occupied floor levels
+    """
+    if str(series_code) != "1":
+        return "series_once"
+    m_low = (mod_name or "").lower()
+    if any(k in m_low for k in ("site", "grading", "utility", "erosion", "landscape", "planting", "irrigation", "paving", "key plan", "overall plan")):
+        return "site_once"
+    if any(k in m_low for k in ("roof", "penthouse")):
+        return "roof_only"
+    if any(k in m_low for k in ("foundation", "footing", "basement", "subgrade", "slab on grade", "pile")):
+        return "foundation_only"
+    return "per_floor"
+
+def is_enlarged_or_segmented_modifier(mod_name, modifier_overrides=None):
+    """
+    Only apply R x C grid segment expansion (A, B, C, D...) to modifiers that represent
+    Enlarged / Area / Sector plans, OR when the user explicitly configured GridOverrides for that modifier.
+    """
+    if modifier_overrides and mod_name in modifier_overrides and modifier_overrides[mod_name] is not None:
+        return True
+    m_low = (mod_name or "").lower()
+    return any(k in m_low for k in ("enlarged", "segment", "area", "sector", "zone", "quadrant", "unit"))
+
+def filter_levels_for_scope(levels, scope):
+    """
+    Returns the list of level names (or [None] for non-level-bound sheets) appropriate for `scope`.
+    """
+    if not levels:
+        return [None]
+    if scope in ("series_once", "site_once"):
+        return [None]
+    if scope == "roof_only":
+        roof_lvls = [l for l in levels if any(k in l.lower() for k in ("roof", "penthouse", "parapet", "high roof", "low roof"))]
+        return roof_lvls if roof_lvls else [None]
+    if scope == "foundation_only":
+        fnd_lvls = [l for l in levels if any(k in l.lower() for k in ("foundation", "fnd", "footing", "basement", "bsmt", "cellar", "b1", "b2", "sub"))]
+        return fnd_lvls if fnd_lvls else [levels[0]]
+    # 'per_floor': exclude pure Roof / Parapet / Foundation / Footing datum levels when standard floor levels exist
+    floor_lvls = [
+        l for l in levels
+        if not any(k in l.lower() for k in ("roof", "parapet", "t.o.", "top of", "foundation", "footing", "fnd", "subgrade", "pile"))
+    ]
+    return floor_lvls if floor_lvls else list(levels)
+
 def generate_discipline_sheets(disc_code, levels, active_series, active_modifiers, global_cover, rows, cols, naming_scheme, custom_schemes=None, excluded_targets=None, shuffle_on_exclude=False, modifier_overrides=None):
     if excluded_targets is None: excluded_targets = set()
     if modifier_overrides is None: modifier_overrides = {}
@@ -248,7 +301,7 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
     disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors", "CS": "Cover Sheet" }
     target_disc_name = disc_dict.get(disc_code, None)
 
-    # 1. Pre-calculate series_mods for all active series to determine universal padding and multiplier
+    # 1. Pre-calculate series_mods for all active series
     all_series_mods = {}
     max_mods = 0
     
@@ -284,13 +337,26 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
                         if (mod, series + "99", "Custom") not in series_mods:
                             series_mods.append((mod, series + "99", "Custom"))
                 else:
-                    # Prevent duplicating completely unknown custom modifiers across every series
                     if len(active_series) > 0 and series == active_series[0]:
                         if (mod, series + "99", "Custom") not in series_mods:
                             series_mods.append((mod, series + "99", "Custom"))
         
         if not series_mods:
             series_mods.append((SERIES_MAP.get(series, series).upper(), series + "01", "0{}. {}".format(series, SERIES_MAP.get(series, series))))
+        elif series == "1":
+            def _plan_mod_sort_key(item_tuple):
+                mn = (item_tuple[0] or "").lower()
+                if "site" in mn or "key plan" in mn: return (0, mn)
+                if "demo" in mn: return (1, mn)
+                if "foundation" in mn or "basement" in mn or "footing" in mn: return (2, mn)
+                if "floor plan" in mn and "enlarged" not in mn: return (3, mn)
+                if "dimension" in mn or "partition" in mn: return (4, mn)
+                if "roof" in mn: return (5, mn)
+                if "ceiling" in mn or "rcp" in mn: return (6, mn)
+                if "finish" in mn or "furniture" in mn or "equipment" in mn: return (7, mn)
+                if "enlarged" in mn or "sector" in mn or "area" in mn: return (8, mn)
+                return (4, mn)
+            series_mods.sort(key=_plan_mod_sort_key)
             
         all_series_mods[series] = series_mods
         if len(series_mods) > max_mods:
@@ -300,18 +366,25 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
     seq_mult = 100 if max_mods > 10 else 10
     pad_fmt = "{:03d}" if max_mods > 10 else "{:02d}"
     
-    # 3. Generate targets using the pre-calculated mods and universal formatting
+    # 3. Generate right-sized targets using Level Scope & Enlargement Scope
     for series in active_series:
         if series not in all_series_mods:
             continue
         series_mods = all_series_mods[series]
         
         if series == "1":
-            for idx, lvl in enumerate(levels):
-                lvl_seq = (idx + 1) * seq_mult
-                actual_mod_seq = 0
-                for mod_idx, (m_name, m_code, cg) in enumerate(series_mods):
-                    baseline_seq = lvl_seq + mod_idx
+            # Separate per-floor modifiers from single-instance/scoped plan modifiers (Site, Foundation, Roof)
+            running_seq = 1
+            actual_seq = 1
+            for mod_idx, (m_name, m_code, cg) in enumerate(series_mods):
+                scope = infer_modifier_level_scope(m_name, series)
+                scoped_levels = filter_levels_for_scope(levels, scope)
+                use_segments = (len(suffixes) > 1) and is_enlarged_or_segmented_modifier(m_name, modifier_overrides)
+
+                for lvl_idx, lvl in enumerate(scoped_levels):
+                    baseline_seq = running_seq
+                    running_seq += 1
+
                     baseline_num = "{}-{}{}".format(disc_code, series, pad_fmt.format(baseline_seq))
                     is_excluded = baseline_num in excluded_targets
                     
@@ -319,15 +392,29 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
                         if is_excluded:
                             actual_num = baseline_num + " [Skipped]"
                         else:
-                            actual_num = "{}-{}{}".format(disc_code, series, pad_fmt.format(lvl_seq + actual_mod_seq))
-                            actual_mod_seq += 1
+                            actual_num = "{}-{}{}".format(disc_code, series, pad_fmt.format(actual_seq))
+                            actual_seq += 1
                     else:
                         actual_num = baseline_num
-                        
-                    if len(suffixes) == 1:
-                        targets.append({"num": actual_num, "baseline_num": baseline_num, "name": "{} {}".format(m_name.upper(), lvl.upper()), "series_name": "01. Plans", "cg": cg, "type": "1"})
+
+                    # Compose clean Sheet Name without redundant level duplication (e.g. avoid "ROOF PLAN ROOF")
+                    base_title = m_name.upper()
+                    if lvl and lvl.upper() not in base_title:
+                        composed_name = "{} - {}".format(base_title, lvl.upper())
                     else:
-                        targets.append({"num": actual_num, "baseline_num": baseline_num, "name": "{} {} - OVERALL".format(m_name.upper(), lvl.upper()), "series_name": "01. Plans", "cg": cg, "type": "1"})
+                        composed_name = base_title
+
+                    if not use_segments:
+                        targets.append({
+                            "num": actual_num,
+                            "baseline_num": baseline_num,
+                            "name": composed_name,
+                            "series_name": "01. Plans",
+                            "cg": cg,
+                            "type": "1",
+                            "level_name": lvl or ""
+                        })
+                    else:
                         for let, name_part in suffixes:
                             if m_name in modifier_overrides and modifier_overrides[m_name] is not None:
                                 if let not in modifier_overrides[m_name]:
@@ -336,21 +423,24 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
                             baseline_num_suffixed = "{}{}".format(baseline_num, let)
                             is_suffixed_excluded = baseline_num_suffixed in excluded_targets
                             
-                            if shuffle_on_exclude:
-                                if is_suffixed_excluded:
-                                    final_actual = baseline_num_suffixed + " [Skipped]"
-                                else:
-                                    final_actual = "{}{}".format(actual_num.replace(" [Skipped]", ""), let)
+                            if shuffle_on_exclude and is_suffixed_excluded:
+                                final_actual = baseline_num_suffixed + " [Skipped]"
                             else:
-                                final_actual = baseline_num_suffixed
+                                final_actual = "{}{}".format(actual_num.replace(" [Skipped]", ""), let)
                                 
-                            prefix_mod = m_name.upper()
+                            prefix_mod = composed_name
                             if not prefix_mod.startswith("ENLARGED"):
-                                # e.g. "FLOOR PLAN" -> "ENLARGED FLOOR PLAN"
                                 prefix_mod = "ENLARGED " + prefix_mod
                                 
-                            targets.append({"num": final_actual, "baseline_num": baseline_num_suffixed, "name": "{} {} - {}".format(prefix_mod, lvl.upper(), name_part.upper()), "series_name": "01. Plans", "cg": cg, "type": "1"})
-                            
+                            targets.append({
+                                "num": final_actual,
+                                "baseline_num": baseline_num_suffixed,
+                                "name": "{} - {}".format(prefix_mod, name_part.upper()),
+                                "series_name": "01. Plans",
+                                "cg": cg,
+                                "type": "1",
+                                "level_name": lvl or ""
+                            })
         else:
             actual_mod_seq = 1
             for mod_idx, (m_name, m_code, cg) in enumerate(series_mods):
@@ -367,7 +457,15 @@ def generate_discipline_sheets(disc_code, levels, active_series, active_modifier
                     actual_num = baseline_num
                     
                 coll_name = "0{}. {}".format(series, SERIES_MAP.get(series, series))
-                targets.append({"num": actual_num, "baseline_num": baseline_num, "name": m_name.upper(), "series_name": coll_name, "cg": cg, "type": series})
+                targets.append({
+                    "num": actual_num,
+                    "baseline_num": baseline_num,
+                    "name": m_name.upper(),
+                    "series_name": coll_name,
+                    "cg": cg,
+                    "type": series,
+                    "level_name": ""
+                })
                 
     return targets
 
@@ -462,10 +560,11 @@ def calculate_smart_score(sheet_row, target):
     return score
 
 def is_dark_theme():
-    # TEMPORARY DEBUG: Forcing to True to verify if the apply_theme function is working correctly
-    # If the UI turns dark after this, then our Revit API detection logic was failing.
-    # If it stays light, then the Resource override logic is failing.
-    return True
+    try:
+        from Autodesk.Revit.UI import UIThemeManager, UITheme
+        return UIThemeManager.CurrentTheme == UITheme.Dark
+    except Exception:
+        return False
 
 # --- Main Window ---
 
@@ -846,7 +945,23 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.Btn_EditNamingSchemes.Click += self.on_edit_naming_schemes
         self.Btn_EditModifiers.Click += self.on_edit_modifiers
         
-        self.MainTabControl.SelectionChanged += self.on_tab_changed
+        if hasattr(self, 'MainTabControl') and self.MainTabControl:
+            self.MainTabControl.SelectionChanged += self.on_tab_changed
+        if hasattr(self, 'Btn_QuickAddSheet') and self.Btn_QuickAddSheet:
+            self.Btn_QuickAddSheet.Click += self.on_quick_add_sheet
+        if hasattr(self, 'Btn_ToggleCartoonDrawer') and self.Btn_ToggleCartoonDrawer:
+            self.Btn_ToggleCartoonDrawer.Click += self.on_toggle_cartoon_drawer
+        if hasattr(self, 'Btn_AutoSuggestViews') and self.Btn_AutoSuggestViews:
+            self.Btn_AutoSuggestViews.Click += self.on_auto_populate_all_views
+        if hasattr(self, 'Chk_AddMissing') and self.Chk_AddMissing:
+            self.Chk_AddMissing.Checked += self.on_include_cartoon_changed
+            self.Chk_AddMissing.Unchecked += self.on_include_cartoon_changed
+        if hasattr(self, 'Chk_ShowInvalid') and self.Chk_ShowInvalid:
+            self.Chk_ShowInvalid.Checked += self.on_filter_changed
+            self.Chk_ShowInvalid.Unchecked += self.on_filter_changed
+        self._suppress_disc_filter = False
+        if hasattr(self, 'Cmb_DisciplineFilter') and self.Cmb_DisciplineFilter:
+            self.Cmb_DisciplineFilter.SelectionChanged += self.on_discipline_filter_changed
         
         # Setup Lists Select All
         self.Btn_DiscAll.Click += self.on_disc_all
@@ -879,6 +994,9 @@ class ManageSheetsPanel(forms.WPFWindow):
         # MVVM Reactive State
         from data_model import ManageSheetsViewModel
         self.main_vm = ManageSheetsViewModel()
+        self.main_vm.fill_floor_plans_callback = self.on_fill_floor_plans_column
+        self.main_vm.fill_ceiling_plans_callback = self.on_fill_ceiling_plans_column
+        self.main_vm.auto_fix_messy_callback = self.on_auto_fix_all_messy_sheets
         self.DataContext = self.main_vm
 
         # Data Models
@@ -888,6 +1006,9 @@ class ManageSheetsPanel(forms.WPFWindow):
         
         self.TargetSchemaRoot = ObservableCollection[NavTreeNode]()
         self.TargetSchemaTree.ItemsSource = self.TargetSchemaRoot
+        self.TargetSchemaTree.SelectedItemChanged += self.on_tree_selection_changed
+        if hasattr(self, 'Cmb_TargetCollection'):
+            self.Cmb_TargetCollection.SelectionChanged += self.trigger_generation
         
         self.EditorItems = self.main_vm.EditorItems
         self.ViewTypes = ObservableCollection[str](["FloorPlan", "CeilingPlan", "Elevation", "Section", "Detail", "DraftingView", "3D", "Legend"])
@@ -911,6 +1032,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.all_grid_nodes = []
         self.generated_targets = []
         self.excluded_target_sheets = set()
+        self._cached_harvest_data = None
         
         # Attach event handlers for the toggle switch
         self.Tgl_ShowExcluded.Checked += self.on_toggle_show_excluded
@@ -944,10 +1066,36 @@ class ManageSheetsPanel(forms.WPFWindow):
         if hasattr(self, 'ResizeTopRight'): self.ResizeTopRight.DragDelta += self.on_resize_top_right
         if hasattr(self, 'ResizeTopLeft'): self.ResizeTopLeft.DragDelta += self.on_resize_top_left
         
+        if hasattr(self, 'FooterBorder') and self.FooterBorder:
+            self.FooterBorder.Visibility = Visibility.Visible
 
         self.load_settings()
         self.generate_target_schema() # Initial run
         self.check_and_load_data()
+
+    def on_toggle_cartoon_drawer(self, sender, e):
+        self.main_vm.IsCartoonDrawerOpen = not self.main_vm.IsCartoonDrawerOpen
+        if hasattr(self, 'CartoonDrawerPanel') and self.CartoonDrawerPanel:
+            self.CartoonDrawerPanel.Visibility = Visibility.Visible if self.main_vm.IsCartoonDrawerOpen else Visibility.Collapsed
+
+    def on_include_cartoon_changed(self, sender, e):
+        self.refresh_active_workbench()
+
+    def refresh_active_workbench(self):
+        node = getattr(self, "_current_selected_node", None)
+        if hasattr(self.TargetSchemaTree, "SelectedItem") and self.TargetSchemaTree.SelectedItem:
+            if hasattr(self.TargetSchemaTree.SelectedItem, "NodeType"):
+                node = self.TargetSchemaTree.SelectedItem
+        elif hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
+            if hasattr(self.NavTree.SelectedItem, "NodeType"):
+                node = self.NavTree.SelectedItem
+        if not node and self.TargetSchemaRoot.Count > 0:
+            node = self.TargetSchemaRoot[0]
+        elif not node and self.NavRoot.Count > 0:
+            node = self.NavRoot[0]
+        if node:
+            self._last_selected_node = None
+            self._fake_selection(node)
 
     def on_refresh_clicked(self, sender, e):
         try:
@@ -1047,6 +1195,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                 "ButtonBrush": "#374151",
                 "HoverBrush": "#4B5563",
                 "AccentBrush": "#3B82F6",
+                "OnAccentTextBrush": "#FFFFFF",
                 "SelectionBrush": "#1E3A8A",
                 "SelectionBorderBrush": "#3B82F6",
                 "SelectionTextBrush": "White",
@@ -1077,37 +1226,17 @@ class ManageSheetsPanel(forms.WPFWindow):
             self.Resources[SystemColors.HighlightTextBrushKey] = bc.ConvertFromString(colors["SelectionTextBrush"])
             self.Resources[SystemColors.InactiveSelectionHighlightBrushKey] = bc.ConvertFromString(colors["InactiveSelectionBrush"])
             self.Resources[SystemColors.InactiveSelectionHighlightTextBrushKey] = bc.ConvertFromString(colors["TextBrush"])
+        else:
+            if not self.Resources.Contains("OnAccentTextBrush"):
+                self.Resources.Add("OnAccentTextBrush", bc.ConvertFromString("#FFFFFF"))
 
     def on_tab_changed(self, sender, e):
-        # Ignore SelectionChanged events that bubble up from child controls (like DataGrid or ComboBox)
-        if e.OriginalSource != self.MainTabControl:
+        if not hasattr(self, 'MainTabControl') or e.OriginalSource != self.MainTabControl:
             return
-            
-        if self.MainTabControl.SelectedIndex == 1:
+        if hasattr(self, 'FooterBorder') and self.FooterBorder:
             self.FooterBorder.Visibility = Visibility.Visible
-            try:
-                # Force rebind just in case TabControl unloaded it
-                # Force a schema regeneration in case settings changed in Tab 0
-                self.generate_target_schema()
-                
-                # Force a refresh of the grid based on the latest schema when switching tabs
-                node = getattr(self, "_current_selected_node", None)
-                if hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
-                    node = self.NavTree.SelectedItem
-                elif self.NavRoot.Count > 0:
-                    node = self.NavRoot[0]
-                    
-                if node:
-                    self._current_selected_node = node
-                    
-                    class DummyArgs: pass
-                    self.on_tree_selection_changed(self.NavTree, DummyArgs())
-                else:
-                    self.Txt_GridTitle.Text = "WARNING: No node selected and NavRoot is empty!"
-            except Exception as ex:
-                self.Txt_GridTitle.Text = "TAB ERROR: " + str(ex)
-        else:
-            self.FooterBorder.Visibility = Visibility.Collapsed
+        if self.MainTabControl.SelectedIndex == 1:
+            self.build_matrix_board()
             
     def toggle_list(self, coll, state):
         for node in coll: node.IsChecked = state
@@ -1180,7 +1309,14 @@ class ManageSheetsPanel(forms.WPFWindow):
         p_setup = project_settings.load_project_setup(doc) or {}
         
         # Setup Target Collection ComboBox
-        existing_collections = set()
+        existing_collections = set([
+            "SCHEMATIC DESIGN",
+            "DESIGN DEVELOPMENT",
+            "PERMIT SET",
+            "CONSTRUCTION DOCUMENTS",
+            "BID SET",
+            "ISSUED FOR CONSTRUCTION"
+        ])
         if doc:
             from Autodesk.Revit.DB import FilteredElementCollector, ViewSheet
             sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
@@ -1189,9 +1325,9 @@ class ManageSheetsPanel(forms.WPFWindow):
                 c_name = get_sheet_collection_name(doc, s)
                 if c_name and c_name != "Undefined":
                     existing_collections.add(c_name)
-        if "PERMIT SET" not in existing_collections:
-            existing_collections.add("PERMIT SET")
             
+        if self.Cmb_TargetCollection.ItemsSource is None and self.Cmb_TargetCollection.Items.Count > 0:
+            self.Cmb_TargetCollection.Items.Clear()
         self.Cmb_TargetCollection.ItemsSource = sorted(list(existing_collections))
         self.Cmb_TargetCollection.Text = p_setup.get("target_collection", cfg.get_option("target_collection", "PERMIT SET"))
         self.Cmb_TargetCollection.LostFocus += self.trigger_generation
@@ -1200,7 +1336,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.Sld_GridRows.Value = float(p_setup.get("grid_rows", cfg.get_option("grid_rows", 1)))
         self.Sld_GridCols.Value = float(p_setup.get("grid_cols", cfg.get_option("grid_cols", 1)))
         
-        saved_discs = p_setup.get("disciplines", cfg.get_option("disciplines", ["A", "M", "E", "P"]))
+        saved_discs = p_setup.get("disciplines", cfg.get_option("disciplines", ["A"]))
         aia_order = ['CS', 'G', 'H', 'V', 'B', 'C', 'L', 'S', 'A', 'I', 'Q', 'F', 'P', 'D', 'M', 'E', 'W', 'T', 'R', 'X', 'Z', 'O']
         sorted_disciplines = sorted(DISCIPLINE_CODES.items(), key=lambda x: aia_order.index(x[0]) if x[0] in aia_order else 999)
         def handle_discipline_change():
@@ -1748,8 +1884,23 @@ class ManageSheetsPanel(forms.WPFWindow):
             self.generated_targets.extend(generate_discipline_sheets(d, active_levels, active_series, active_modifiers, global_cover, r, c, naming_scheme, self._loaded_naming_schemes, self.excluded_target_sheets, shuffle, modifier_overrides))
             
         self.TargetSchemaRoot.Clear()
-        t_root = NavTreeNode("AIA Schema", "Root")
+        t_root = NavTreeNode("All Collections & AIA Schema", "Root", is_expanded=True)
+        t_root.target_callback = self.on_target_node_toggled
         self.TargetSchemaRoot.Add(t_root)
+        
+        target_col_name = "PERMIT SET"
+        if hasattr(self, 'Cmb_TargetCollection') and self.Cmb_TargetCollection:
+            if self.Cmb_TargetCollection.SelectedItem:
+                sel_item = self.Cmb_TargetCollection.SelectedItem
+                target_col_name = sel_item.Content if hasattr(sel_item, "Content") else str(sel_item)
+            elif self.Cmb_TargetCollection.Text:
+                target_col_name = self.Cmb_TargetCollection.Text
+                
+        col_nodes = {}
+        active_col_node = NavTreeNode(target_col_name, "Collection", tag=target_col_name, parent=t_root, is_expanded=True)
+        active_col_node.target_callback = self.on_target_node_toggled
+        col_nodes[target_col_name] = active_col_node
+        t_root.Children.Add(active_col_node)
         
         d_map = {}
         cg_map = {}
@@ -1760,22 +1911,23 @@ class ManageSheetsPanel(forms.WPFWindow):
             disc_dict = { "A": "Architectural", "S": "Structural", "M": "Mechanical", "E": "Electrical", "P": "Plumbing", "C": "Civil", "L": "Landscape", "F": "Fire Protection", "G": "General", "I": "Interiors", "CS": "Cover Sheet" }
             disc_name = "{} - {}".format(disc_code, disc_dict.get(disc_code, "Discipline")) if disc_code != "Other" else "Uncategorized"
             
-            if disc_name not in d_map:
-                dn = NavTreeNode(disc_name, "Discipline", tag=disc_name)
+            d_key = (target_col_name, disc_name)
+            if d_key not in d_map:
+                dn = NavTreeNode(disc_name, "Discipline", tag=(target_col_name, disc_name), parent=active_col_node)
                 dn.target_callback = self.on_target_node_toggled
-                d_map[disc_name] = dn
-                t_root.Children.Add(dn)
+                d_map[d_key] = dn
+                active_col_node.Children.Add(dn)
                 
             cg_name = t.get("cg", "Unknown Content Group")
-            cg_key = (disc_name, cg_name)
+            cg_key = (target_col_name, disc_name, cg_name)
             
             if cg_key not in cg_map:
-                cn = NavTreeNode(cg_name, "ContentGroup", tag=disc_name)
+                cn = NavTreeNode(cg_name, "ContentGroup", tag=(target_col_name, disc_name, cg_name), parent=d_map[d_key])
                 cn.target_callback = self.on_target_node_toggled
                 cg_map[cg_key] = cn
-                d_map[disc_name].Children.Add(cn)
+                d_map[d_key].Children.Add(cn)
                 
-            sn = NavTreeNode("{} - {}".format(t["num"], t["name"]), "Sheet", tag=t["baseline_num"])
+            sn = NavTreeNode("{} - {}".format(t["num"], t["name"]), "Sheet", tag=t["baseline_num"], parent=cg_map[cg_key])
             if t["baseline_num"] in self.excluded_target_sheets:
                 sn.IsTargetIncluded = False
                 if not self.Tgl_ShowExcluded.IsChecked:
@@ -1784,12 +1936,37 @@ class ManageSheetsPanel(forms.WPFWindow):
             cg_map[cg_key].Children.Add(sn)
             
             t_root.Count += 1
-            d_map[disc_name].Count += 1
+            active_col_node.Count += 1
+            d_map[d_key].Count += 1
             cg_map[cg_key].Count += 1
-        if not self.generated_targets:
-            pass
-        else:
-            pass
+            
+        # Also include any other existing Revit Sheet Collections from all_grid_nodes (Rule 1)
+        for existing_sh in getattr(self, "all_grid_nodes", []):
+            ex_col = getattr(existing_sh, "OriginalCollectionName", existing_sh.CollectionName) or "Default"
+            if ex_col not in col_nodes:
+                ex_col_node = NavTreeNode(ex_col, "Collection", tag=ex_col, parent=t_root, is_expanded=False)
+                ex_col_node.target_callback = self.on_target_node_toggled
+                col_nodes[ex_col] = ex_col_node
+                t_root.Children.Add(ex_col_node)
+            if ex_col != target_col_name:
+                col_nodes[ex_col].Count += 1
+                t_root.Count += 1
+                ex_disc = existing_sh.DisciplineName or "Uncategorized"
+                ex_cg = existing_sh.ContentGroupName or "Uncategorized"
+                d_key = (ex_col, ex_disc)
+                if d_key not in d_map:
+                    dn = NavTreeNode(ex_disc, "Discipline", tag=(ex_col, ex_disc), parent=col_nodes[ex_col], is_expanded=False)
+                    dn.target_callback = self.on_target_node_toggled
+                    d_map[d_key] = dn
+                    col_nodes[ex_col].Children.Add(dn)
+                d_map[d_key].Count += 1
+                cg_key = (ex_col, ex_disc, ex_cg)
+                if cg_key not in cg_map:
+                    cn = NavTreeNode(ex_cg, "ContentGroup", tag=(ex_col, ex_disc, ex_cg), parent=d_map[d_key], is_expanded=False)
+                    cn.target_callback = self.on_target_node_toggled
+                    cg_map[cg_key] = cn
+                    d_map[d_key].Children.Add(cn)
+                cg_map[cg_key].Count += 1
             
         # Only enable Sheet Reviewer tab if a schema is actively generated
         if hasattr(self, 'Tab_SheetReviewer'):
@@ -1799,66 +1976,80 @@ class ManageSheetsPanel(forms.WPFWindow):
         if hasattr(self, 'toggle_tree'):
             self.toggle_tree(self.TargetSchemaRoot, True)
 
+        # In the Unified Workbench, immediately refresh the active sheet list when Cartoon Set rules change
+        if hasattr(self, 'all_grid_nodes') and not getattr(self, '_suppress_workbench_refresh', False):
+            self.refresh_active_workbench()
+
     def on_target_node_toggled(self, node):
         import System
         from System.Windows.Input import Keyboard, ModifierKeys
         
-        # Shift-Select Logic
-        if Keyboard.Modifiers == ModifierKeys.Shift:
-            if hasattr(self, '_last_toggled_schema_node') and self._last_toggled_schema_node:
-                last_node = self._last_toggled_schema_node
-                flat_list = []
-                def _flatten(n):
-                    if n.IsVisible:
-                        flat_list.append(n)
-                        if n.IsExpanded:
-                            for c in n.Children:
-                                _flatten(c)
-                for root in self.TargetSchemaRoot:
-                    _flatten(root)
-                    
-                if last_node in flat_list and node in flat_list:
-                    idx1 = flat_list.index(last_node)
-                    idx2 = flat_list.index(node)
-                    start, end = min(idx1, idx2), max(idx1, idx2)
-                    for i in range(start, end + 1):
-                        n = flat_list[i]
-                        if n != node and n != last_node:
-                            old_cb = n.target_callback
-                            n.target_callback = None
-                            n.IsTargetIncluded = node.IsTargetIncluded
-                            n.target_callback = old_cb
-                            
-                            if n.NodeType == "Sheet":
-                                if not n.IsTargetIncluded:
-                                    self.excluded_target_sheets.add(n.Tag)
-                                    if not self.Tgl_ShowExcluded.IsChecked:
-                                        n.IsVisible = False
-                                else:
-                                    if n.Tag in self.excluded_target_sheets:
-                                        self.excluded_target_sheets.remove(n.Tag)
-                                    n.IsVisible = True
-        
-        self._last_toggled_schema_node = node
+        is_top_call = not getattr(self, '_in_target_toggle', False)
+        self._in_target_toggle = True
+        try:
+            # Shift-Select Logic
+            if is_top_call and Keyboard.Modifiers == ModifierKeys.Shift:
+                if hasattr(self, '_last_toggled_schema_node') and self._last_toggled_schema_node:
+                    last_node = self._last_toggled_schema_node
+                    flat_list = []
+                    def _flatten(n):
+                        if n.IsVisible:
+                            flat_list.append(n)
+                            if n.IsExpanded:
+                                for c in n.Children:
+                                    _flatten(c)
+                    for root in self.TargetSchemaRoot:
+                        _flatten(root)
+                        
+                    if last_node in flat_list and node in flat_list:
+                        idx1 = flat_list.index(last_node)
+                        idx2 = flat_list.index(node)
+                        start, end = min(idx1, idx2), max(idx1, idx2)
+                        for i in range(start, end + 1):
+                            n = flat_list[i]
+                            if n != node and n != last_node:
+                                old_cb = n.target_callback
+                                n.target_callback = None
+                                n.IsTargetIncluded = node.IsTargetIncluded
+                                n.target_callback = old_cb
+                                
+                                if n.NodeType == "Sheet":
+                                    if not n.IsTargetIncluded:
+                                        self.excluded_target_sheets.add(n.Tag)
+                                        if not self.Tgl_ShowExcluded.IsChecked:
+                                            n.IsVisible = False
+                                    else:
+                                        if n.Tag in self.excluded_target_sheets:
+                                            self.excluded_target_sheets.remove(n.Tag)
+                                        n.IsVisible = True
+            
+            if is_top_call:
+                self._last_toggled_schema_node = node
 
-        if node.NodeType == "Sheet":
-            if not node.IsTargetIncluded:
-                self.excluded_target_sheets.add(node.Tag)
-                if not self.Tgl_ShowExcluded.IsChecked:
-                    node.IsVisible = False
+            if node.NodeType == "Sheet":
+                if not node.IsTargetIncluded:
+                    self.excluded_target_sheets.add(node.Tag)
+                    if not self.Tgl_ShowExcluded.IsChecked:
+                        node.IsVisible = False
+                else:
+                    if node.Tag in self.excluded_target_sheets:
+                        self.excluded_target_sheets.remove(node.Tag)
+                    node.IsVisible = True
             else:
-                if node.Tag in self.excluded_target_sheets:
-                    self.excluded_target_sheets.remove(node.Tag)
-                node.IsVisible = True
-        else:
-            # If a parent is toggled, recursively toggle all its children
-            # Temporarily unhook the callback to prevent recursive flood
-            for child in node.Children:
-                old_cb = child.target_callback
-                child.target_callback = None
-                child.IsTargetIncluded = node.IsTargetIncluded
-                child.target_callback = old_cb
-                self.on_target_node_toggled(child)
+                for child in node.Children:
+                    old_cb = child.target_callback
+                    child.target_callback = None
+                    child.IsTargetIncluded = node.IsTargetIncluded
+                    child.target_callback = old_cb
+                    self.on_target_node_toggled(child)
+        finally:
+            if is_top_call:
+                self._in_target_toggle = False
+                if hasattr(self, 'Chk_ShuffleOnExclude') and self.Chk_ShuffleOnExclude.IsChecked:
+                    self.generate_target_schema()
+                else:
+                    self.save_settings()
+                    self.refresh_active_workbench()
                 
     def on_toggle_show_excluded(self, sender, e):
         show_excluded = bool(self.Tgl_ShowExcluded.IsChecked)
@@ -1945,12 +2136,7 @@ class ManageSheetsPanel(forms.WPFWindow):
         all_sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
         for s in all_sheets:
             if not s.IsTemplate:
-                s_coll = "Default"
-                try:
-                    p = s.LookupParameter(" Sheet Collection")
-                    if p and p.HasValue:
-                        s_coll = p.AsString()
-                except: pass
+                s_coll = get_sheet_collection_name(doc, s) or "Default"
                 k = (s_coll, s.SheetNumber.strip().lower())
                 if k not in self._cached_global_sheets:
                     self._cached_global_sheets[k] = []
@@ -1977,6 +2163,11 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.last_loaded_doc_hash = doc.PathName + "_" + doc.Title
         
         self.refresh_global_cache(doc)
+        try:
+            import reconciliation
+            self._cached_harvest_data = reconciliation.harvest_project(doc)
+        except Exception:
+            self._cached_harvest_data = None
         
         # Populate TitleBlocks ComboBox
         class TitleBlockOption:
@@ -2008,13 +2199,35 @@ class ManageSheetsPanel(forms.WPFWindow):
         self.EditorItems.Clear()
         self.AssignableViews.Clear()
         
-        # Add default option for new view
-        from data_model import AssignableViewNode
+        import data_model
+        from data_model import AssignableViewNode, format_revit_scale
         
-        # Collect all assignable views
-        from Autodesk.Revit.DB import View, Viewport
+        # Collect all assignable views with ViewType, Level, and real Scale
+        from Autodesk.Revit.DB import View, Viewport, FamilyInstance
         all_views = FilteredElementCollector(doc).OfClass(View).ToElements()
         viewports = FilteredElementCollector(doc).OfClass(Viewport).ToElements()
+        
+        # Map sheet -> annotation symbols on sheet to detect existing Graphic Scales & North Arrows
+        sheet_has_gs = set()
+        sheet_has_na = set()
+        try:
+            annos = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_GenericAnnotation).WhereElementIsNotElementType().ToElements()
+            for a in annos:
+                owner_id = a.OwnerViewId
+                if not owner_id or owner_id == ElementId.InvalidElementId:
+                    continue
+                owner_val = owner_id.IntegerValue if hasattr(owner_id, "IntegerValue") else owner_id.Value
+                fam_name = ""
+                try:
+                    fam_name = (a.Symbol.Family.Name or "").lower()
+                except Exception:
+                    pass
+                if "graphic scale" in fam_name or "scale bar" in fam_name:
+                    sheet_has_gs.add(owner_val)
+                elif "north" in fam_name:
+                    sheet_has_na.add(owner_val)
+        except Exception:
+            pass
         
         placed_views_map = {}
         for vp in viewports:
@@ -2024,12 +2237,19 @@ class ManageSheetsPanel(forms.WPFWindow):
                     placed_views_map[vp.ViewId.ToString()] = sheet.SheetNumber
             except: pass
             
+        assignable_list = []
         for v in all_views:
-            if not v.IsTemplate and v.CanBePrinted:
+            if not v.IsTemplate and v.CanBePrinted and v.ViewType != ViewType.DrawingSheet:
                 v_id_str = v.Id.ToString()
                 is_placed = v_id_str in placed_views_map
                 sh_num = placed_views_map.get(v_id_str, "")
-                self.AssignableViews.Add(AssignableViewNode(v.Id, v.Name, is_placed, sh_num))
+                v_lvl = v.GenLevel.Name if hasattr(v, "GenLevel") and v.GenLevel else ""
+                v_scale = getattr(v, "Scale", 48)
+                node_av = AssignableViewNode(v.Id, v.Name, is_placed, sh_num, view_type=str(v.ViewType), level_name=v_lvl, scale_int=v_scale)
+                self.AssignableViews.Add(node_av)
+                assignable_list.append(node_av)
+        data_model.AVAILABLE_ASSIGNABLE_VIEWS = assignable_list
+        data_model.AVAILABLE_EXISTING_VIEWS = assignable_list
         
         levels = FilteredElementCollector(doc).OfClass(Level).ToElements()
         
@@ -2037,28 +2257,31 @@ class ManageSheetsPanel(forms.WPFWindow):
             try: return l.ProjectElevation
             except AttributeError: return l.Elevation
             
-        for idx, lvl in enumerate(sorted(levels, key=get_elev)):
-            elev_val = get_elev(lvl)
+        self._suppress_workbench_refresh = True
+        try:
+            for idx, lvl in enumerate(sorted(levels, key=get_elev)):
+                elev_val = get_elev(lvl)
 
-            try:
-                from Autodesk.Revit.DB import UnitFormatUtils, SpecTypeId
-                elev_str = UnitFormatUtils.Format(doc.GetUnits(), SpecTypeId.Length, elev_val, False)
-            except ImportError:
                 try:
-                    from Autodesk.Revit.DB import UnitFormatUtils, UnitType
-                    elev_str = UnitFormatUtils.Format(doc.GetUnits(), UnitType.UT_Length, elev_val, False, False)
-                except Exception:
-                    elev_str = str(elev_val)
+                    from Autodesk.Revit.DB import UnitFormatUtils, SpecTypeId
+                    elev_str = UnitFormatUtils.Format(doc.GetUnits(), SpecTypeId.Length, elev_val, False)
+                except ImportError:
+                    try:
+                        from Autodesk.Revit.DB import UnitFormatUtils, UnitType
+                        elev_str = UnitFormatUtils.Format(doc.GetUnits(), UnitType.UT_Length, elev_val, False, False)
+                    except Exception:
+                        elev_str = str(elev_val)
 
-            display_name = "{:02d} - {} ({})".format(idx + 1, lvl.Name, elev_str)
-            self.LevelNodes.Add(SelectableNode(lvl.Name, True, self.generate_target_schema, display_name=display_name))
+                display_name = "{:02d} - {} ({})".format(idx + 1, lvl.Name, elev_str)
+                self.LevelNodes.Add(SelectableNode(lvl.Name, True, self.generate_target_schema, display_name=display_name))
+        finally:
+            self._suppress_workbench_refresh = False
 
-        import data_model
         data_model.AVAILABLE_LEVELS = [lvl.Name for lvl in sorted(levels, key=get_elev)]
         vfts = FilteredElementCollector(doc).OfClass(ViewFamilyType).ToElements()
         
         from Autodesk.Revit.DB import ViewFamily
-        valid_families = [ViewFamily.FloorPlan, ViewFamily.CeilingPlan, ViewFamily.StructuralPlan]
+        valid_families = [ViewFamily.FloorPlan, ViewFamily.CeilingPlan, ViewFamily.StructuralPlan, ViewFamily.Drafting, ViewFamily.Elevation, ViewFamily.Section, ViewFamily.Detail]
         
         vft_names = []
         for vft in vfts:
@@ -2079,14 +2302,6 @@ class ManageSheetsPanel(forms.WPFWindow):
         if not scope_ids: sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
         else: sheets = [doc.GetElement(i) for i in scope_ids]
             
-        root_node = NavTreeNode("All Sheets", "Root")
-        root_node.IsExpanded = True
-        self.NavRoot.Add(root_node)
-        
-        col_map = {}
-        disc_map = {}
-        cg_map = {}
-        
         for s in sheets:
             if s.IsPlaceholder: continue
             
@@ -2095,23 +2310,24 @@ class ManageSheetsPanel(forms.WPFWindow):
             c_result = classification.classify_sheet(s.SheetNumber, s.Name)
             disc_name = c_result.get("discipline", "Unknown")
             cg_name = c_result.get("contentGroup", "Uncategorized")
-            draw_type = c_result.get("drawingType", "Unknown")
             
-            # 1. Sheet Collection Level
-            if c_name not in col_map:
-                col_node = NavTreeNode(c_name, "Collection", tag=c_name)
-                col_map[c_name] = col_node
-                root_node.Children.Add(col_node)
-            else:
-                col_node = col_map[c_name]
-                
-            sh_row = SheetViewModel(s.Id, s.SheetNumber, s.Name, c_name, discipline_name=disc_name, content_group_name=cg_name, validation_callback=self.run_validation, number_changed_callback=self.on_sheet_number_changed, context_callback=self.get_sheet_context)
+            sh_row = SheetViewModel(
+                s.Id, s.SheetNumber, s.Name, c_name,
+                discipline_name=disc_name, content_group_name=cg_name,
+                validation_callback=self.run_validation,
+                number_changed_callback=self.on_sheet_number_changed,
+                context_callback=self.get_sheet_context,
+                clone_sheet_callback=self.on_clone_sheet,
+                auto_populate_callback=self.auto_populate_sheet_views,
+                select_sheet_callback=self.on_select_sheet_vm,
+                accept_suggestion_callback=self.on_accept_sheet_suggestion
+            )
             self.all_grid_nodes.append(sh_row)
             
-            root_node.Count += 1
-            col_node.Count += 1
+            s_id_val = s.Id.IntegerValue if hasattr(s.Id, "IntegerValue") else s.Id.Value
+            has_gs_on_sheet = s_id_val in sheet_has_gs
+            has_na_on_sheet = s_id_val in sheet_has_na
             
-            views = 0
             for v_id in s.GetAllPlacedViews():
                 v = doc.GetElement(v_id)
                 if not v: continue
@@ -2129,34 +2345,136 @@ class ManageSheetsPanel(forms.WPFWindow):
                 if param_title and param_title.AsString():
                     v_name = param_title.AsString()
                     
-                v_row = ViewViewModel(v.Id, v_name, str(v.ViewType), level_name=lvl_name, view_number=v_number)
+                v_scale_str = format_revit_scale(getattr(v, "Scale", 48))
+                is_plan_type = any(k in str(v.ViewType).lower() for k in ("floor", "ceiling", "engineering", "structural", "area"))
+                
+                v_row = ViewViewModel(
+                    v.Id, v_name, str(v.ViewType),
+                    level_name=lvl_name,
+                    scale=v_scale_str,
+                    view_number=v_number,
+                    parent_sheet=sh_row,
+                    has_graphic_scale=has_gs_on_sheet if v_scale_str != "NTS" else False,
+                    has_north_arrow=has_na_on_sheet if is_plan_type else False
+                )
                 sh_row.Views.Add(v_row)
-                views += 1
-        self.run_validation()
-        
+
+        # Build full 4-tier Navigation Tree: All Sheets -> Collection -> Discipline -> ContentGroup
+        self.rebuild_nav_tree()
+
+        # 2D Matrix Board Default Mode:
+        # Keep the Advanced Rule Book drawer collapsed by default so the 2D Building x Series Matrix
+        # takes center stage, and Ground-Truth First: start with Chk_AddMissing = False.
+        self.main_vm.IsCartoonDrawerOpen = False
+        if hasattr(self, 'CartoonDrawerPanel') and self.CartoonDrawerPanel:
+            self.CartoonDrawerPanel.Visibility = Visibility.Collapsed
+        if hasattr(self, 'Chk_AddMissing') and self.Chk_AddMissing:
+            self.Chk_AddMissing.Checked -= self.on_include_cartoon_changed
+            self.Chk_AddMissing.Unchecked -= self.on_include_cartoon_changed
+            self.Chk_AddMissing.IsChecked = False
+            self.Chk_AddMissing.Checked += self.on_include_cartoon_changed
+            self.Chk_AddMissing.Unchecked += self.on_include_cartoon_changed
+
         # Prepopulate AIA Schema
-        self.generate_target_schema()
-        # Automatically select the Root node to populate the initial grid
-        self.NavTree.SelectedItemChanged -= self.on_tree_selection_changed
-        self.NavTree.SelectedItemChanged += self.on_tree_selection_changed
+        self._suppress_workbench_refresh = True
+        try:
+            self.generate_target_schema()
+        finally:
+            self._suppress_workbench_refresh = False
+
+        # Wire tree selection handlers and select NavRoot[0] first (Ground-Truth First)
+        if hasattr(self, 'NavTree') and self.NavTree:
+            self.NavTree.SelectedItemChanged -= self.on_tree_selection_changed
+            self.NavTree.SelectedItemChanged += self.on_tree_selection_changed
+        if hasattr(self, 'TargetSchemaTree') and self.TargetSchemaTree:
+            self.TargetSchemaTree.SelectedItemChanged -= self.on_tree_selection_changed
+            self.TargetSchemaTree.SelectedItemChanged += self.on_tree_selection_changed
+
         if self.NavRoot.Count > 0:
+            self._last_selected_node = None
             self._fake_selection(self.NavRoot[0])
+        elif self.TargetSchemaRoot.Count > 0:
+            self._last_selected_node = None
+            self._fake_selection(self.TargetSchemaRoot[0])
+
+    def rebuild_nav_tree(self):
+        from data_model import NavTreeNode
+        from collections import OrderedDict
+        self.NavRoot.Clear()
+        root_node = NavTreeNode("All Sheets", "Root", is_expanded=True)
+        
+        col_groups = OrderedDict()
+        for sh in self.all_grid_nodes:
+            c_name = getattr(sh, 'CollectionName', 'PERMIT SET') or 'PERMIT SET'
+            d_name = getattr(sh, 'DisciplineName', 'Unknown') or 'Unknown'
+            cg_name = getattr(sh, 'ContentGroupName', 'Uncategorized') or 'Uncategorized'
             
+            if c_name not in col_groups:
+                col_groups[c_name] = OrderedDict()
+            if d_name not in col_groups[c_name]:
+                col_groups[c_name][d_name] = OrderedDict()
+            if cg_name not in col_groups[c_name][d_name]:
+                col_groups[c_name][d_name][cg_name] = []
+            col_groups[c_name][d_name][cg_name].append(sh)
+            
+        total_sheets = 0
+        for c_name, disc_dict in col_groups.items():
+            col_node = NavTreeNode(c_name, "Collection", tag=c_name, parent=root_node, is_expanded=True)
+            col_count = 0
+            for d_name, cg_dict in disc_dict.items():
+                disc_node = NavTreeNode(d_name, "Discipline", tag=(c_name, d_name), parent=col_node, is_expanded=False)
+                disc_count = 0
+                for cg_name, sh_list in cg_dict.items():
+                    cg_node = NavTreeNode(cg_name, "ContentGroup", tag=(c_name, d_name, cg_name), parent=disc_node, is_expanded=False)
+                    cg_count = len(sh_list)
+                    cg_node.Count = cg_count
+                    disc_count += cg_count
+                    disc_node.Children.Add(cg_node)
+                disc_node.Count = disc_count
+                col_count += disc_count
+                col_node.Children.Add(disc_node)
+            col_node.Count = col_count
+            total_sheets += col_count
+            root_node.Children.Add(col_node)
+            
+        root_node.Count = total_sheets
+        self.NavRoot.Add(root_node)
+
+    def on_quick_add_sheet(self, sender=None, e=None):
+        if self.main_vm.SelectedSheet:
+            self.on_clone_sheet(self.main_vm.SelectedSheet)
+            return
+        target_cell = None
+        for r in self.main_vm.MatrixRows:
+            if r.IsLevelRow:
+                target_cell = r.CellFloorPlans
+                break
+        if not target_cell and self.main_vm.MatrixRows.Count > 0:
+            target_cell = self.main_vm.MatrixRows[0].CellFloorPlans
+        if target_cell:
+            self.on_matrix_add_sheet(target_cell)
+
     def _fake_selection(self, node):
-        class DummyArgs: pass
+        class DummyArgs(object): pass
         self._current_selected_node = node
-        self.on_tree_selection_changed(self.NavTree, DummyArgs())
+        tree_sender = self.NavTree if (hasattr(self, 'NavTree') and self.NavTree) else self.TargetSchemaTree
+        self.on_tree_selection_changed(tree_sender, DummyArgs())
 
             
     def on_tree_selection_changed(self, sender, e):
         if getattr(self, "_ignore_tree_event", False): return
         if hasattr(e, "OriginalSource") and e.OriginalSource != sender: return
         
-        new_node = getattr(self, "_current_selected_node", None)
-        if hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
-            # Prevent WPF DisconnectedItem crashes
-            if hasattr(self.NavTree.SelectedItem, "NodeType"):
+        if getattr(e, "__class__", None).__name__ == "DummyArgs":
+            new_node = getattr(self, "_current_selected_node", None)
+        else:
+            new_node = getattr(self, "_current_selected_node", None)
+            if hasattr(sender, "SelectedItem") and sender.SelectedItem and hasattr(sender.SelectedItem, "NodeType"):
+                new_node = sender.SelectedItem
+            elif hasattr(self, 'NavTree') and self.NavTree and hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem and hasattr(self.NavTree.SelectedItem, "NodeType"):
                 new_node = self.NavTree.SelectedItem
+            elif hasattr(self, 'TargetSchemaTree') and self.TargetSchemaTree and hasattr(self.TargetSchemaTree, "SelectedItem") and self.TargetSchemaTree.SelectedItem and hasattr(self.TargetSchemaTree.SelectedItem, "NodeType"):
+                new_node = self.TargetSchemaTree.SelectedItem
                 
         if not new_node: return
         
@@ -2185,62 +2503,88 @@ class ManageSheetsPanel(forms.WPFWindow):
         
         valid_sheets = []
         
-        c_name = "Undefined"
-        has_real_collections = False
-        if self.NavRoot.Count > 0:
-            for child in self.NavRoot[0].Children:
-                if child.Name not in ["Undefined", "Default"]:
-                    has_real_collections = True
-                    break
-        if not has_real_collections:
-            c_name = self.Cmb_TargetCollection.Text if hasattr(self, 'Cmb_TargetCollection') and self.Cmb_TargetCollection.Text else "PERMIT SET"
+        c_name = self.Cmb_TargetCollection.Text if hasattr(self, 'Cmb_TargetCollection') and self.Cmb_TargetCollection.Text else "PERMIT SET"
             
         if not hasattr(node, "NodeType"): return
         
         active_discipline = None
         active_cg = None
+        focused_sheet_prefix = None
         
         if node.NodeType == "Root":
-            # Pass all sheets to match against the raw AIA schema so existing sheets in the project are detected
-            # For the Root node, we must target the intended AIA schema collection from the UI
-            c_name = self.Cmb_TargetCollection.Text if hasattr(self, 'Cmb_TargetCollection') and self.Cmb_TargetCollection.Text else "PERMIT SET"
             valid_sheets = list(self.all_grid_nodes)
-            self.Txt_GridTitle.Text = "All Generated Sheets"
+            self.Txt_GridTitle.Text = "2D Spatial Cartoon Matrix — All Collections"
         elif node.NodeType == "Collection":
             c_name = node.Tag
-            self.Txt_GridTitle.Text = "Collection: " + c_name
-            valid_sheets = [s for s in self.all_grid_nodes if getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name]
+            self.Txt_GridTitle.Text = "2D Spatial Cartoon Matrix — Collection: " + str(c_name)
+            valid_sheets = [s for s in self.all_grid_nodes if getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name or s.OriginalCollectionName in ("Undefined", "Default")]
         elif node.NodeType == "Discipline":
-            c_name, d_name = node.Tag
+            if isinstance(node.Tag, tuple) and len(node.Tag) == 2:
+                c_name, d_name = node.Tag
+                valid_sheets = [s for s in self.all_grid_nodes if (getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name or s.OriginalCollectionName in ("Undefined", "Default")) and s.DisciplineName == d_name]
+            else:
+                c_name = None
+                d_name = str(node.Tag or node.Name)
+                valid_sheets = [s for s in self.all_grid_nodes if s.DisciplineName == d_name]
             active_discipline = d_name
-            self.Txt_GridTitle.Text = "Collection: {} | Discipline: {}".format(c_name, d_name)
-            valid_sheets = [s for s in self.all_grid_nodes if getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name and s.DisciplineName == d_name]
+            if c_name:
+                self.Txt_GridTitle.Text = "Collection: {} | Discipline: {}".format(c_name, d_name)
+            else:
+                self.Txt_GridTitle.Text = "Discipline: {}".format(d_name)
         elif node.NodeType == "ContentGroup":
-            c_name, d_name, cg_name = node.Tag
+            if isinstance(node.Tag, tuple) and len(node.Tag) == 3:
+                c_name, d_name, cg_name = node.Tag
+                valid_sheets = [s for s in self.all_grid_nodes if (getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name or s.OriginalCollectionName in ("Undefined", "Default")) and s.DisciplineName == d_name and s.ContentGroupName == cg_name]
+            else:
+                c_name = None
+                d_name = str(node.Tag) if node.Tag else None
+                cg_name = node.Name
+                valid_sheets = [s for s in self.all_grid_nodes if (not d_name or s.DisciplineName == d_name) and s.ContentGroupName == cg_name]
             active_discipline = d_name
             active_cg = cg_name
-            self.Txt_GridTitle.Text = "Collection: {} | Group: {}".format(c_name, cg_name)
-            valid_sheets = [s for s in self.all_grid_nodes if getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name and s.DisciplineName == d_name and s.ContentGroupName == cg_name]
+            if c_name:
+                self.Txt_GridTitle.Text = "Collection: {} | Group: {}".format(c_name, cg_name)
+            else:
+                self.Txt_GridTitle.Text = "Group: {}".format(cg_name)
+        elif node.NodeType == "Sheet":
+            focused_sheet_prefix = node.Name.split(" - ")[0].strip().upper()
+            parent_cg = getattr(node, "Parent", None)
+            if parent_cg and isinstance(getattr(parent_cg, "Tag", None), tuple) and len(parent_cg.Tag) == 3:
+                c_name, d_name, cg_name = parent_cg.Tag
+                active_discipline = d_name
+                active_cg = cg_name
+                self.Txt_GridTitle.Text = "Sheet: {}".format(node.Name)
+                valid_sheets = [s for s in self.all_grid_nodes if (getattr(s, 'OriginalCollectionName', s.CollectionName) == c_name or s.OriginalCollectionName in ("Undefined", "Default")) and s.DisciplineName == d_name and s.ContentGroupName == cg_name]
+            else:
+                valid_sheets = list(self.all_grid_nodes)
             
         self.update_grid_title()
         
-        # Highlight active collection in NavTree
+        # Highlight active collection in TargetSchemaRoot and NavRoot
+        for root_node in self.TargetSchemaRoot:
+            for c_node in root_node.Children:
+                c_node.IsActiveContext = (c_node.Tag == c_name)
         for root_node in self.NavRoot:
-            if c_name is None:
-                root_node.IsActiveContext = True
-            else:
-                root_node.IsActiveContext = False
             for c_node in root_node.Children:
                 c_node.IsActiveContext = (c_node.Tag == c_name)
                 
         self.execute_schema_match(valid_sheets, active_collection=c_name, active_discipline=active_discipline, active_cg=active_cg)
+        if focused_sheet_prefix:
+            for vm in self.EditorItems:
+                if (vm.SheetNumber or "").strip().upper() == focused_sheet_prefix:
+                    self.on_select_sheet_vm(vm)
 
     def execute_schema_match(self, valid_sheets, active_collection="Undefined", active_discipline=None, active_cg=None):
         raw_targets = getattr(self, "generated_targets", [])
+        include_missing = True
+        if hasattr(self, 'Chk_AddMissing') and self.Chk_AddMissing is not None:
+            include_missing = bool(self.Chk_AddMissing.IsChecked)
         
         # Filter generated targets based on the active node context
         generated_targets = []
         for t in raw_targets:
+            if t.get("baseline_num") in self.excluded_target_sheets:
+                continue
             t_copy = t.copy()
             match = re.match(r"^([A-Z]+)[- ]?(\d+)", t_copy["num"].upper())
             disc_code = match.group(1) if match else "Other"
@@ -2273,94 +2617,747 @@ class ManageSheetsPanel(forms.WPFWindow):
                     valid_sheet_ids.append(s.ElementId.Value)
                     
             try:
-                plan = reconciliation.run_pipeline(doc, generated_targets, existing_sheet_ids=valid_sheet_ids)
+                plan = reconciliation.run_pipeline(
+                    doc,
+                    generated_targets,
+                    existing_sheet_ids=valid_sheet_ids,
+                    h_data=getattr(self, "_cached_harvest_data", None),
+                    include_missing_slots=include_missing
+                )
             except Exception as e:
                 self.Txt_GridTitle.Text = "ERROR IN PIPELINE: " + str(e)
                 forms.alert("ERROR IN PIPELINE: " + str(e))
                 plan = {"rows": []}
             
             from Autodesk.Revit.DB import ElementId
-            existing_nodes = {}
-            existing_unmatched_nodes = {}
+            # Rule 6: Keep self.all_grid_nodes as a strictly read-only baseline!
+            baseline_by_id = {}
             for n in self.all_grid_nodes:
                 if n.ElementId and n.ElementId != ElementId.InvalidElementId:
                     try:
                         key = n.ElementId.IntegerValue if hasattr(n.ElementId, "IntegerValue") else n.ElementId.Value
-                        existing_nodes[key] = n
+                        baseline_by_id[key] = n
                     except Exception:
                         pass
-                else:
-                    # Cache unmatched/missing nodes by (collection, original_number) to prevent duplicates
-                    key = (n.OriginalCollectionName, n.OriginalNumber)
-                    existing_unmatched_nodes[key] = n
                         
             self.EditorItems.Clear()
             
             for row in plan["rows"]:
-                is_template = False
-                if row["status"] == "MISSING":
-                    is_template = True
-                
+                is_template = (row["status"] == "MISSING")
                 sh_id = row["sheet_element_id"]
                 
-                if sh_id in existing_nodes and sh_id != -1:
-                    vm = existing_nodes[sh_id]
-                    # DO NOT overwrite CollectionName with the AIA generated schema (which doesn't have native Revit collection context).
-                    # Keep it bound to its existing Native Revit Collection (e.g. 'Permit Set')
+                if sh_id in baseline_by_id and sh_id != -1:
+                    # Clone from read-only baseline so edits in EditorItems never corrupt all_grid_nodes
+                    vm = baseline_by_id[sh_id].clone_for_sandbox(
+                        validation_callback=self.run_validation,
+                        number_changed_callback=self.on_sheet_number_changed,
+                        move_up_callback=self.move_item_up,
+                        move_down_callback=self.move_item_down,
+                        context_callback=self.get_sheet_context,
+                        clone_sheet_callback=self.on_clone_sheet,
+                        auto_populate_callback=self.auto_populate_sheet_views,
+                        select_sheet_callback=self.on_select_sheet_vm,
+                        accept_suggestion_callback=self.on_accept_sheet_suggestion
+                    )
                     vm.SheetSeries = row.get("series_name", "Unknown")
-                    vm.DisciplineName = row["discipline"]
-                    vm.ContentGroupName = row["cg"]
-                    if row["status"] != "UNRECONCILED" and row["status"] != "EXTRA":
-                        vm.SheetNumber = row["target_number"]
-                        vm.SheetName = row["target_name"]
-                    
-                    vm.move_up_callback = self.move_item_up
-                    vm.move_down_callback = self.move_item_down
+                    row_disc = row.get("discipline")
+                    if row_disc and row_disc != "Unknown":
+                        vm.DisciplineName = row_disc
+                    elif not vm.DisciplineName or vm.DisciplineName == "Unknown":
+                        vm.reclassify()
 
+                    row_cg = row.get("cg")
+                    if row_cg and row_cg != "Uncategorized":
+                        vm.ContentGroupName = row_cg
                     
-                    vm._action = row["status"]
-                    vm.IsChecked = (vm._action != "UNRECONCILED")
+                    # Always record AIA Rule Book suggestions
+                    sug_num = row.get("target_number", "")
+                    sug_name = row.get("target_name", "")
+                    vm.SuggestedNumber = sug_num
+                    vm.SuggestedName = sug_name
+                    vm.SuggestedSeries = row.get("series_name", "01. Plans")
+
+                    vm._sheet_number = sug_num if sug_num else vm.OriginalNumber
+                    vm._sheet_name = sug_name if sug_name else vm.OriginalName
+                    vm._is_user_modified = False
+                    vm._is_checked = False
+                    vm.update_diffs()
+                    vm.update_action()
+                    vm.notify_reconciliation_state()
+                    
+                    # Re-check semantic mismatches on placed views against the proposed sheet name
+                    for v_item in vm.Views:
+                        v_item.check_semantic_mismatch()
                     self.EditorItems.Add(vm)
                 else:
                     tgt_num = row["target_number"] if is_template else row["existing_number"]
-                    key = (active_collection, tgt_num)
-                    
-                    if key in existing_unmatched_nodes:
-                        vm = existing_unmatched_nodes[key]
-                        # Ensure UI state matches latest generation
-                        vm.IsChecked = True
-                        if row["status"] in ["CREATE", "MISSING"]:
-                            vm._action = "CREATE"
-                        else:
-                            vm._action = row["status"]
-                        self.EditorItems.Add(vm)
-                    else:
-                        real_id = ElementId(sh_id) if sh_id != -1 else ElementId.InvalidElementId
-                        vm = SheetViewModel(real_id, tgt_num, 
-                                            row["target_name"] if is_template else row["existing_name"], 
-                                            active_collection, row["discipline"], row["cg"], 
-                                            series_name=row.get("series_name", "Unknown"),
-                                            is_template=is_template, validation_callback=self.run_validation, 
-                                            number_changed_callback=self.on_sheet_number_changed,
-                                            move_up_callback=self.move_item_up, move_down_callback=self.move_item_down,
-                                            context_callback=self.get_sheet_context)
-                        vm.OriginalCollectionName = active_collection
-                        vm.IsChecked = True
-                        if row["status"] in ["CREATE", "MISSING"]:
-                            vm._action = "CREATE"
-                        else:
-                            vm._action = row["status"]
-                        self.EditorItems.Add(vm)
+                    real_id = ElementId(sh_id) if sh_id != -1 else ElementId.InvalidElementId
+                    vm = SheetViewModel(
+                        real_id, tgt_num,
+                        row["target_name"] if is_template else row["existing_name"],
+                        active_collection, row["discipline"], row["cg"],
+                        series_name=row.get("series_name", "Unknown"),
+                        is_template=is_template,
+                        validation_callback=self.run_validation,
+                        number_changed_callback=self.on_sheet_number_changed,
+                        move_up_callback=self.move_item_up,
+                        move_down_callback=self.move_item_down,
+                        context_callback=self.get_sheet_context,
+                        clone_sheet_callback=self.on_clone_sheet,
+                        auto_populate_callback=self.auto_populate_sheet_views,
+                        select_sheet_callback=self.on_select_sheet_vm,
+                        accept_suggestion_callback=self.on_accept_sheet_suggestion
+                    )
+                    vm.OriginalCollectionName = active_collection
+                    vm.IsChecked = True
+                    vm._action = "CREATE" if row["status"] in ["CREATE", "MISSING"] else row["status"]
+                    # Auto-populate a smart view slot on newly generated Cartoon Set sheets
+                    self.auto_populate_sheet_views(vm, run_val=False)
+                    vm.notify_reconciliation_state()
+                    self.EditorItems.Add(vm)
             
             for vm in self.EditorItems:
                 vm.IsDirty = False
             
+            self.update_discipline_filter_options()
+            
+            self.build_matrix_board()
             self.update_grid_title()
-            self.Txt_GridTitle.Text += " | Items: " + str(len(self.EditorItems))
             self.run_validation()
             
         except Exception as big_e:
-            forms.alert("CRITICAL CRASH IN SCHEMA MATCH:\n" + str(big_e))
+            import traceback
+            forms.alert("CRITICAL CRASH IN SCHEMA MATCH:\n" + traceback.format_exc())
+
+    def _classify_sheet_into_matrix_coords(self, sheet_vm, level_names_ordered):
+        """
+        Determines the exact (row_key, col_key) in the 2D Building x Series Matrix for `sheet_vm`.
+        """
+        sh_name_up = (sheet_vm.SheetName or "").upper()
+        series_str = (sheet_vm.SheetSeries or "").upper()
+        cg_up = (sheet_vm.ContentGroupName or "").upper()
+
+        # 1. Determine Column Key (AIA Series)
+        col_key = "FLOOR_PLANS"
+        if "00." in series_str or "COVER" in sh_name_up or "GENERAL" in sh_name_up or "INDEX" in sh_name_up or "SYMBOL" in sh_name_up:
+            col_key = "GENERAL"
+        elif "02." in series_str or "ELEVATION" in sh_name_up:
+            col_key = "ELEVATIONS"
+        elif "03." in series_str or "SECTION" in sh_name_up:
+            col_key = "SECTIONS"
+        elif "05." in series_str or "06." in series_str or "07." in series_str or "08." in series_str or "09." in series_str or "DETAIL" in sh_name_up or "SCHEDULE" in sh_name_up or "3D" in sh_name_up:
+            col_key = "DETAILS_SCHEDULES"
+        elif "04." in series_str or "ENLARGED" in sh_name_up or "QUADRANT" in sh_name_up or "SECTOR" in sh_name_up or "PARTIAL" in sh_name_up:
+            col_key = "ENLARGED_PLANS"
+        elif "CEILING" in sh_name_up or "RCP" in sh_name_up:
+            col_key = "CEILING_PLANS"
+        else:
+            col_key = "FLOOR_PLANS"
+
+        # 2. Determine Spatial Row Key (Level / Roof / Foundation / Site / Project-Wide)
+        # Check if sheet explicitly mentions a project Level
+        matched_lvl = None
+        for lvl_name in level_names_ordered:
+            if lvl_name.upper() in sh_name_up:
+                matched_lvl = lvl_name
+                break
+        if not matched_lvl and sheet_vm.Views.Count > 0:
+            v_lvl = sheet_vm.Views[0].LevelName
+            if v_lvl and v_lvl in level_names_ordered:
+                matched_lvl = v_lvl
+        if not matched_lvl:
+            m_lvl = re.search(r'LEVEL\s*0*(\d+)|(\d+)(ST|ND|RD|TH)\s*FLOOR', sh_name_up)
+            if m_lvl:
+                num_str = m_lvl.group(1) or m_lvl.group(2)
+                for lvl_name in level_names_ordered:
+                    if re.search(r'0*' + re.escape(num_str) + r'\b', lvl_name):
+                        matched_lvl = lvl_name
+                        break
+
+        if matched_lvl:
+            return ("LEVEL::" + matched_lvl, col_key)
+
+        if "SITE" in sh_name_up or "LANDSCAPE" in sh_name_up or "CIVIL" in cg_up:
+            return ("SCOPE::SITE", col_key)
+        if "FOUNDATION" in sh_name_up or "BASEMENT" in sh_name_up or "FOOTING" in sh_name_up:
+            return ("SCOPE::FOUNDATION", col_key)
+        if "ROOF" in sh_name_up:
+            # If there is a Roof level in Revit, map to it; else SCOPE::ROOF
+            for lvl_name in level_names_ordered:
+                if "roof" in lvl_name.lower():
+                    return ("LEVEL::" + lvl_name, col_key)
+            return ("SCOPE::ROOF", col_key)
+
+        return ("SCOPE::PROJECT", col_key)
+
+    def build_matrix_board(self):
+        """
+        Projects `self.EditorItems` into the 2D `self.main_vm.MatrixRows` board and populates `self.main_vm.UnreconciledItems`.
+        """
+        import data_model
+        from data_model import MatrixRowViewModel
+
+        show_invalid_only = False
+        if hasattr(self, 'Chk_ShowInvalid') and self.Chk_ShowInvalid and self.Chk_ShowInvalid.IsChecked:
+            show_invalid_only = True
+
+        avail_levels = list(getattr(data_model, "AVAILABLE_LEVELS", []))
+        if not avail_levels:
+            avail_levels = [n.Name for n in self.LevelNodes]
+
+        # Build rows in Top-to-Bottom Building Section order:
+        # 1. Project / Building-Wide
+        # 2. Roof (if no explicit Roof level)
+        # 3. Building Levels in descending elevation order (top floor -> ground floor)
+        # 4. Foundation / Basement (if no explicit Foundation level)
+        # 5. Site / Civil
+        row_Lookup = {}
+        ordered_rows = []
+
+        def _get_or_create_row(r_key, r_title, r_sub, is_lvl=True):
+            if r_key not in row_Lookup:
+                r_vm = MatrixRowViewModel(
+                    r_key, r_title, r_sub, is_level_row=is_lvl,
+                    add_sheet_callback=self.on_matrix_add_sheet,
+                    split_sectors_callback=self.on_matrix_split_sectors
+                )
+                row_Lookup[r_key] = r_vm
+                ordered_rows.append(r_vm)
+            return row_Lookup[r_key]
+
+        _get_or_create_row("SCOPE::PROJECT", u"🏢 Project / Building-Wide", "Cover, Elevations, Sections, Details", is_lvl=False)
+        has_roof_lvl = any("roof" in l.lower() for l in avail_levels)
+        if not has_roof_lvl:
+            _get_or_create_row("SCOPE::ROOF", u"🏔️ Roof", "Roof Plans & Details", is_lvl=True)
+
+        # Add Revit Levels top-to-bottom (reversed elevation order)
+        lvl_display_map = {n.Name: n.DisplayName for n in self.LevelNodes}
+        for lvl_name in reversed(avail_levels):
+            disp = lvl_display_map.get(lvl_name, lvl_name)
+            elev_sub = ""
+            if "(" in disp and ")" in disp:
+                elev_sub = "Elev " + disp[disp.rfind("("):]
+            else:
+                elev_sub = "Building Story"
+            icon = u"🏔️ " if "roof" in lvl_name.lower() else (u"🧱 " if "found" in lvl_name.lower() or "base" in lvl_name.lower() else u"📐 ")
+            _get_or_create_row("LEVEL::" + lvl_name, icon + lvl_name, elev_sub, is_lvl=True)
+
+        has_found_lvl = any("found" in l.lower() or "base" in l.lower() for l in avail_levels)
+        if not has_found_lvl:
+            _get_or_create_row("SCOPE::FOUNDATION", u"🧱 Foundation / Substructure", "Foundation & Slab Plans", is_lvl=True)
+        _get_or_create_row("SCOPE::SITE", u"🌲 Site / Civil", "Site & Context Plans", is_lvl=True)
+
+        self.main_vm.UnreconciledItems.Clear()
+
+        for sh_vm in self.EditorItems:
+            if show_invalid_only and sh_vm.Action == "MATCHED" and not sh_vm.HasWarning:
+                continue
+
+            if sh_vm.Action in ("UNRECONCILED", "EXTRA") or sh_vm.HasSuggestion:
+                self.main_vm.UnreconciledItems.Add(sh_vm)
+
+            r_key, c_key = self._classify_sheet_into_matrix_coords(sh_vm, avail_levels)
+            target_row = row_Lookup.get(r_key) or row_Lookup["SCOPE::PROJECT"]
+
+            cell_map = {
+                "FLOOR_PLANS": target_row.CellFloorPlans,
+                "CEILING_PLANS": target_row.CellCeilingPlans,
+                "ENLARGED_PLANS": target_row.CellEnlargedPlans,
+                "GENERAL": target_row.CellGeneral,
+                "ELEVATIONS": target_row.CellElevations,
+                "SECTIONS": target_row.CellSections,
+                "DETAILS_SCHEDULES": target_row.CellDetails,
+            }
+            target_cell = cell_map.get(c_key, target_row.CellFloorPlans)
+            target_cell.add_sheet_vm(sh_vm)
+
+        self.main_vm.MatrixRows.Clear()
+        for r_vm in ordered_rows:
+            r_vm.OnPropertyChanged("RowBadge")
+            self.main_vm.MatrixRows.Add(r_vm)
+
+        self.main_vm.OnPropertyChanged("HasUnreconciledItems")
+        self.main_vm.OnPropertyChanged("UnreconciledCountText")
+
+        # Auto-select first sheet in Inspector if none selected
+        if (not self.main_vm.SelectedSheet or self.main_vm.SelectedSheet not in self.EditorItems) and self.EditorItems.Count > 0:
+            self.on_select_sheet_vm(self.EditorItems[0])
+
+        # Update top Matrix KPI summary
+        create_cnt = sum(1 for s in self.EditorItems if s.Action in ("CREATE", "MISSING") and s.IsChecked)
+        match_cnt = sum(1 for s in self.EditorItems if s.Action == "MATCHED")
+        update_cnt = sum(1 for s in self.EditorItems if "RENAME" in s.Action or s.Action == "UPDATE")
+        messy_cnt = self.main_vm.UnreconciledItems.Count
+        self.main_vm.MatrixSummaryText = u"{} Total Sheets  ·  {} Planned Create  ·  {} Matched  ·  {} Updates  ·  {} Messy".format(
+            self.EditorItems.Count, create_cnt, match_cnt, update_cnt, messy_cnt
+        )
+
+    def on_select_sheet_vm(self, sheet_vm):
+        if not sheet_vm:
+            return
+        self.main_vm.SelectedSheet = sheet_vm
+
+    def on_editor_row_clicked(self, sender, e):
+        if hasattr(sender, "DataContext") and sender.DataContext:
+            self.on_select_sheet_vm(sender.DataContext)
+
+    def on_accept_sheet_suggestion(self, sheet_vm):
+        """
+        Accepts the proposal or user modifications for a sheet,
+        marking it ready to push to Revit.
+        """
+        if not sheet_vm:
+            return
+        if not getattr(sheet_vm, "_is_user_modified", False) and (sheet_vm.SheetNumber == sheet_vm.OriginalNumber) and (sheet_vm.SheetName == sheet_vm.OriginalName):
+            if sheet_vm.SuggestedNumber:
+                sheet_vm.SheetNumber = sheet_vm.SuggestedNumber
+            if sheet_vm.SuggestedName:
+                sheet_vm.SheetName = sheet_vm.SuggestedName
+        if sheet_vm.SuggestedSeries and sheet_vm.SheetSeries in ("Unknown", ""):
+            sheet_vm.SheetSeries = sheet_vm.SuggestedSeries
+        sheet_vm.Action = "CREATE" if sheet_vm.IsTemplate else "UPDATE"
+        sheet_vm.IsChecked = True
+        sheet_vm.notify_reconciliation_state()
+        self.build_matrix_board()
+        self.on_select_sheet_vm(sheet_vm)
+        self.run_validation()
+
+    def on_auto_fix_all_messy_sheets(self):
+        """
+        Applies suggestions or confirms modifications for all candidate sheets.
+        """
+        candidates = [s for s in self.EditorItems if s.CanAcceptProposal or s.HasSuggestion]
+        if not candidates:
+            return
+        for sh_vm in candidates:
+            if not getattr(sh_vm, "_is_user_modified", False) and (sh_vm.SheetNumber == sh_vm.OriginalNumber) and (sh_vm.SheetName == sh_vm.OriginalName):
+                if sh_vm.SuggestedNumber:
+                    sh_vm.SheetNumber = sh_vm.SuggestedNumber
+                if sh_vm.SuggestedName:
+                    sh_vm.SheetName = sh_vm.SuggestedName
+            if sh_vm.SuggestedSeries and sh_vm.SheetSeries in ("Unknown", ""):
+                sh_vm.SheetSeries = sh_vm.SuggestedSeries
+            sh_vm.Action = "CREATE" if sh_vm.IsTemplate else "UPDATE"
+            sh_vm.IsChecked = True
+            sh_vm.notify_reconciliation_state()
+        self.build_matrix_board()
+        self.run_validation()
+
+    def _next_available_aia_number(self, disc_code, series_digit):
+        used_nums = set((s.SheetNumber or "").strip().upper() for s in self.EditorItems)
+        seq = 1
+        while True:
+            cand = "{}-{}{:02d}".format(disc_code, series_digit, seq)
+            if cand.upper() not in used_nums:
+                return cand
+            seq += 1
+
+    def on_matrix_add_sheet(self, cell_vm):
+        """
+        Direct 1-Click Cell Action (`+ Floor Plan`, `+ Ceiling Plan`, `+ Elevation`, etc.):
+        Creates a properly numbered & named AIA sheet directly inside the clicked [Level, Series] Matrix cell!
+        """
+        if not cell_vm:
+            return
+        from Autodesk.Revit.DB import ElementId
+
+        # If cell already has a sheet, clone the last sheet in that cell (+1)
+        if cell_vm.Sheets.Count > 0:
+            self.on_clone_sheet(cell_vm.Sheets[cell_vm.Sheets.Count - 1])
+            return
+
+        row_key = cell_vm.RowKey
+        col_key = cell_vm.ColKey
+        lvl_label = ""
+        if row_key.startswith("LEVEL::"):
+            lvl_label = row_key.replace("LEVEL::", "")
+        elif row_key == "SCOPE::ROOF":
+            lvl_label = "ROOF"
+        elif row_key == "SCOPE::FOUNDATION":
+            lvl_label = "FOUNDATION"
+        elif row_key == "SCOPE::SITE":
+            lvl_label = "SITE"
+
+        col_config = {
+            "FLOOR_PLANS": ("1", "01. Plans", "10 - General Floor Plans", "FLOOR PLAN - {}".format(lvl_label.upper()) if lvl_label and lvl_label not in ("SITE", "FOUNDATION", "ROOF") else ("{} PLAN".format(lvl_label.upper()) if lvl_label else "FLOOR PLAN")),
+            "CEILING_PLANS": ("1", "01. Plans", "15 - Reflected Ceiling Plans", "REFLECTED CEILING PLAN - {}".format(lvl_label.upper()) if lvl_label else "REFLECTED CEILING PLAN"),
+            "ENLARGED_PLANS": ("4", "04. Large Scale Views", "40 - Enlarged Plans & Callouts", "ENLARGED FLOOR PLAN - {}".format(lvl_label.upper()) if lvl_label else "ENLARGED FLOOR PLAN"),
+            "GENERAL": ("0", "00. General", "01 - Cover, Title & Index", "GENERAL NOTES & SYMBOLS"),
+            "ELEVATIONS": ("2", "02. Elevations", "20 - Exterior Elevations", "EXTERIOR ELEVATIONS" if not lvl_label else "INTERIOR ELEVATIONS - {}".format(lvl_label.upper())),
+            "SECTIONS": ("3", "03. Sections", "30 - Building Sections", "BUILDING SECTIONS"),
+            "DETAILS_SCHEDULES": ("5", "05. Details", "50 - Exterior & Envelope Details", "ARCHITECTURAL DETAILS"),
+        }
+        s_digit, series_name, cg_name, sh_name = col_config.get(col_key, ("1", "01. Plans", "10 - General Floor Plans", "FLOOR PLAN"))
+        sh_num = self._next_available_aia_number("A", s_digit)
+        active_col = self.Cmb_TargetCollection.Text if hasattr(self, 'Cmb_TargetCollection') and self.Cmb_TargetCollection.Text else "PERMIT SET"
+
+        new_vm = SheetViewModel(
+            ElementId.InvalidElementId,
+            sh_num,
+            sh_name,
+            active_col,
+            discipline_name="A - Architectural",
+            content_group_name=cg_name,
+            series_name=series_name,
+            is_template=True,
+            validation_callback=self.run_validation,
+            number_changed_callback=self.on_sheet_number_changed,
+            move_up_callback=self.move_item_up,
+            move_down_callback=self.move_item_down,
+            context_callback=self.get_sheet_context,
+            clone_sheet_callback=self.on_clone_sheet,
+            auto_populate_callback=self.auto_populate_sheet_views,
+            select_sheet_callback=self.on_select_sheet_vm,
+            accept_suggestion_callback=self.on_accept_sheet_suggestion
+        )
+        new_vm.OriginalCollectionName = active_col
+        new_vm.IsChecked = True
+        new_vm._action = "CREATE"
+        self.auto_populate_sheet_views(new_vm, run_val=False)
+        self.EditorItems.Add(new_vm)
+        self.build_matrix_board()
+        self.on_select_sheet_vm(new_vm)
+        self.run_validation()
+
+    def on_matrix_split_sectors(self, cell_vm):
+        """
+        One-Click `⊞ 2x2` Sector Split on any Plan cell:
+        Splits (or un-splits) that specific Level x Plan cell into 4 Sector Sheets (A, B, C, D)
+        without causing combinatorial explosion across other levels!
+        """
+        if not cell_vm:
+            return
+        from Autodesk.Revit.DB import ElementId
+
+        existing_in_cell = list(cell_vm.Sheets)
+        # If already split into >= 4 sector sheets, collapse back to 1 base sheet
+        if len(existing_in_cell) >= 4:
+            first_sh = existing_in_cell[0]
+            for extra_sh in existing_in_cell[1:]:
+                if extra_sh.IsTemplate and extra_sh in self.EditorItems:
+                    self.EditorItems.Remove(extra_sh)
+            first_sh.SheetNumber = re.sub(r'[A-D]$', '', first_sh.SheetNumber)
+            first_sh.SheetName = re.sub(r'\s*-\s*(SECTOR|QUADRANT)\s+[A-D]$', '', first_sh.SheetName, flags=re.IGNORECASE)
+            self.build_matrix_board()
+            self.on_select_sheet_vm(first_sh)
+            self.run_validation()
+            return
+
+        # Ensure at least 1 base sheet exists in the cell
+        if not existing_in_cell:
+            self.on_matrix_add_sheet(cell_vm)
+            existing_in_cell = list(cell_vm.Sheets)
+            if not existing_in_cell:
+                return
+
+        base_sh = existing_in_cell[0]
+        base_num = re.sub(r'[A-Za-z]$', '', (base_sh.SheetNumber or "A-101").strip())
+        base_name = re.sub(r'\s*-\s*(SECTOR|QUADRANT)\s+[A-D]$', '', (base_sh.SheetName or "FLOOR PLAN").strip(), flags=re.IGNORECASE)
+
+        base_sh.SheetNumber = base_num + "A"
+        base_sh.SheetName = base_name + " - SECTOR A"
+        if base_sh.Views.Count > 0:
+            base_sh.Views[0].Name = base_sh.SheetName
+
+        idx = self.EditorItems.IndexOf(base_sh)
+        for offset, sector_char in enumerate(["B", "C", "D"], start=1):
+            sec_num = base_num + sector_char
+            sec_name = "{} - SECTOR {}".format(base_name, sector_char)
+            sec_vm = SheetViewModel(
+                ElementId.InvalidElementId,
+                sec_num,
+                sec_name,
+                base_sh.CollectionName,
+                discipline_name=base_sh.DisciplineName,
+                content_group_name=base_sh.ContentGroupName,
+                series_name=base_sh.SheetSeries,
+                is_template=True,
+                validation_callback=self.run_validation,
+                number_changed_callback=self.on_sheet_number_changed,
+                move_up_callback=self.move_item_up,
+                move_down_callback=self.move_item_down,
+                context_callback=self.get_sheet_context,
+                clone_sheet_callback=self.on_clone_sheet,
+                auto_populate_callback=self.auto_populate_sheet_views,
+                select_sheet_callback=self.on_select_sheet_vm,
+                accept_suggestion_callback=self.on_accept_sheet_suggestion
+            )
+            sec_vm.OriginalCollectionName = base_sh.CollectionName
+            sec_vm.IsChecked = True
+            sec_vm._action = "CREATE"
+            self.auto_populate_sheet_views(sec_vm, run_val=False)
+            if idx >= 0 and idx + offset <= self.EditorItems.Count:
+                self.EditorItems.Insert(idx + offset, sec_vm)
+            else:
+                self.EditorItems.Add(sec_vm)
+
+        self.build_matrix_board()
+        self.on_select_sheet_vm(base_sh)
+        self.run_validation()
+
+    def on_fill_floor_plans_column(self):
+        for r_vm in list(self.main_vm.MatrixRows):
+            if r_vm.IsLevelRow and r_vm.CellFloorPlans.IsEmpty:
+                self.on_matrix_add_sheet(r_vm.CellFloorPlans)
+
+    def on_fill_ceiling_plans_column(self):
+        for r_vm in list(self.main_vm.MatrixRows):
+            if r_vm.IsLevelRow and r_vm.RowKey.startswith("LEVEL::") and r_vm.CellCeilingPlans.IsEmpty:
+                self.on_matrix_add_sheet(r_vm.CellCeilingPlans)
+
+    def on_clone_sheet(self, sheet_vm):
+        """
+        Interactive Cartoon Set Builder (+1 button on any Sheet Pill or Inspector):
+        Inserts an additional sheet in the same Discipline, Collection, and AIA Series immediately after `sheet_vm`,
+        auto-incrementing the sheet number (e.g. A-201 -> A-202) and proposing a matching view slot.
+        """
+        if not sheet_vm:
+            return
+        from Autodesk.Revit.DB import ElementId
+        base_num = (sheet_vm.SheetNumber or "A-101").strip()
+        used_nums = set((s.SheetNumber or "").strip().upper() for s in self.EditorItems if s.CollectionName == sheet_vm.CollectionName)
+
+        m = re.match(r"^([A-Za-z]+[- ]?\d)(\d+)([A-Za-z]*)$", base_num)
+        if m:
+            prefix, digits, suffix = m.group(1), m.group(2), m.group(3)
+            pad_len = len(digits)
+            next_val = int(digits) + 1
+            candidate = "{}{:0{}d}{}".format(prefix, next_val, pad_len, suffix)
+            while candidate.upper() in used_nums:
+                next_val += 1
+                candidate = "{}{:0{}d}{}".format(prefix, next_val, pad_len, suffix)
+        else:
+            idx_try = 2
+            candidate = "{}-{}".format(base_num, idx_try)
+            while candidate.upper() in used_nums:
+                idx_try += 1
+                candidate = "{}-{}".format(base_num, idx_try)
+
+        new_vm = SheetViewModel(
+            ElementId.InvalidElementId,
+            candidate,
+            sheet_vm.SheetName,
+            sheet_vm.CollectionName,
+            discipline_name=sheet_vm.DisciplineName,
+            content_group_name=sheet_vm.ContentGroupName,
+            series_name=sheet_vm.SheetSeries,
+            is_template=True,
+            validation_callback=self.run_validation,
+            number_changed_callback=self.on_sheet_number_changed,
+            move_up_callback=self.move_item_up,
+            move_down_callback=self.move_item_down,
+            context_callback=self.get_sheet_context,
+            clone_sheet_callback=self.on_clone_sheet,
+            auto_populate_callback=self.auto_populate_sheet_views,
+            select_sheet_callback=self.on_select_sheet_vm,
+            accept_suggestion_callback=self.on_accept_sheet_suggestion
+        )
+        new_vm.OriginalCollectionName = sheet_vm.CollectionName
+        new_vm.IsChecked = True
+        new_vm._action = "CREATE"
+        self.auto_populate_sheet_views(new_vm, run_val=False)
+
+        idx = self.EditorItems.IndexOf(sheet_vm)
+        if idx >= 0 and idx < self.EditorItems.Count - 1:
+            self.EditorItems.Insert(idx + 1, new_vm)
+        else:
+            self.EditorItems.Add(new_vm)
+        self.build_matrix_board()
+        self.on_select_sheet_vm(new_vm)
+        self.run_validation()
+
+    def auto_populate_sheet_views(self, sheet_vm, run_val=True):
+        """
+        Inspects an empty or template sheet and:
+        1. Searches unplaced project views in `AVAILABLE_ASSIGNABLE_VIEWS` for the best semantic match (by Level + ViewType + Name).
+        2. If a strong unplaced view exists (and isn't already assigned in `EditorItems`), links it as an `Existing` view!
+        3. Otherwise proposes a `New` View with inferred Level, ViewFamilyType, standard AIA Scale, Detail Number '1',
+           Graphic Scale, and North Arrow (for Plan views).
+        """
+        if not sheet_vm:
+            return
+        # Skip Series 0 General / Cover sheets unless the user explicitly clicked the button on that sheet
+        series_str = (sheet_vm.SheetSeries or "").lower()
+        sh_name_upper = (sheet_vm.SheetName or "").upper()
+        if not run_val and ("00." in series_str or "cover" in sh_name_upper or "index" in sh_name_upper or "general" in sh_name_upper or "schedule" in sh_name_upper):
+            return
+
+        if sheet_vm.Views.Count > 0 and not run_val:
+            return
+
+        import data_model
+        from Autodesk.Revit.DB import ElementId
+
+        # Collect already-claimed ViewIds across EditorItems so we don't assign the same view twice
+        claimed_view_ids = set()
+        for s in self.EditorItems:
+            for v in s.Views:
+                if v.ViewId and v.ViewId != ElementId.InvalidElementId:
+                    val = v.ViewId.IntegerValue if hasattr(v.ViewId, "IntegerValue") else v.ViewId.Value
+                    claimed_view_ids.add(val)
+
+        # Infer target Level from SheetName
+        inferred_level = ""
+        avail_levels = getattr(data_model, "AVAILABLE_LEVELS", [])
+        for lvl in avail_levels:
+            if lvl.upper() in sh_name_upper:
+                inferred_level = lvl
+                break
+        if not inferred_level:
+            m_lvl = re.search(r'LEVEL\s*0*(\d+)|(\d+)(ST|ND|RD|TH)\s*FLOOR', sh_name_upper)
+            if m_lvl:
+                num_str = m_lvl.group(1) or m_lvl.group(2)
+                for lvl in avail_levels:
+                    if re.search(r'0*' + re.escape(num_str) + r'\b', lvl):
+                        inferred_level = lvl
+                        break
+        if not inferred_level and avail_levels:
+            if "ROOF" in sh_name_upper:
+                roof_cands = [l for l in avail_levels if "roof" in l.lower()]
+                inferred_level = roof_cands[-1] if roof_cands else avail_levels[-1]
+            elif "FOUNDATION" in sh_name_upper or "BASEMENT" in sh_name_upper:
+                inferred_level = avail_levels[0]
+            else:
+                inferred_level = avail_levels[0]
+
+        # Infer desired ViewFamilyType & standard Scale
+        avail_vfts = getattr(data_model, "AVAILABLE_VIEW_FAMILY_TYPES", [])
+        inferred_vft = avail_vfts[0] if avail_vfts else "Floor Plan"
+        inferred_scale = "1/8\" = 1'-0\""
+        want_ceiling = "CEILING" in sh_name_upper or "RCP" in sh_name_upper
+        want_section = "SECTION" in sh_name_upper or "03." in series_str
+        want_elev = "ELEVATION" in sh_name_upper or "02." in series_str
+        want_detail = "DETAIL" in sh_name_upper or "05." in series_str
+        want_enlarged = "ENLARGED" in sh_name_upper or "04." in series_str
+
+        for vft_name in avail_vfts:
+            vl = vft_name.lower()
+            if want_ceiling and "ceiling" in vl:
+                inferred_vft = vft_name
+                break
+            elif want_section and "section" in vl:
+                inferred_vft = vft_name
+                break
+            elif want_elev and "elevation" in vl:
+                inferred_vft = vft_name
+                break
+            elif want_detail and ("detail" in vl or "drafting" in vl):
+                inferred_vft = vft_name
+                break
+            elif not (want_ceiling or want_section or want_elev or want_detail) and "floor" in vl:
+                inferred_vft = vft_name
+                break
+
+        if want_enlarged:
+            inferred_scale = "1/4\" = 1'-0\""
+        elif want_detail:
+            inferred_scale = "1 1/2\" = 1'-0\""
+        elif want_elev or want_section:
+            inferred_scale = "1/4\" = 1'-0\""
+        elif "SITE" in sh_name_upper:
+            inferred_scale = "1/16\" = 1'-0\""
+
+        # Search unplaced views in AVAILABLE_ASSIGNABLE_VIEWS for a match
+        best_av = None
+        best_score = 0.0
+        import reconciliation
+        norm_target = reconciliation.normalize_name(sh_name_upper)
+
+        for av in getattr(data_model, "AVAILABLE_ASSIGNABLE_VIEWS", []):
+            if getattr(av, "IsPlaced", False):
+                continue
+            av_vid = getattr(av, "ViewId", getattr(av, "Id", None))
+            if not av_vid:
+                continue
+            av_id_val = av_vid.IntegerValue if hasattr(av_vid, "IntegerValue") else getattr(av_vid, "Value", av_vid)
+            if av_id_val in claimed_view_ids:
+                continue
+            vt_low = (getattr(av, "ViewType", "") or "").lower()
+            if want_ceiling and "ceiling" not in vt_low:
+                continue
+            if not want_ceiling and "ceiling" in vt_low:
+                continue
+            if want_elev and "elevation" not in vt_low:
+                continue
+            if want_section and "section" not in vt_low:
+                continue
+
+            v_name = getattr(av, "ViewName", getattr(av, "Name", ""))
+            score = reconciliation.token_set_ratio(norm_target, reconciliation.normalize_name(v_name))
+            lvl_name = getattr(av, "LevelName", "") or ""
+            if inferred_level and lvl_name and lvl_name.lower() == inferred_level.lower():
+                score += 0.45
+            if score > best_score:
+                best_score = score
+                best_av = av
+
+        next_dn = str(sheet_vm.Views.Count + 1)
+        is_plan = not (want_elev or want_section or want_detail)
+
+        if best_av and best_score >= 0.65:
+            best_vid = getattr(best_av, "ViewId", getattr(best_av, "Id", ElementId.InvalidElementId))
+            new_v = ViewViewModel(
+                best_vid,
+                sheet_vm.SheetName,
+                getattr(best_av, "ViewType", None) or inferred_vft,
+                level_name=getattr(best_av, "LevelName", None) or inferred_level,
+                scale=getattr(best_av, "ScaleStr", None) or inferred_scale,
+                view_number=next_dn,
+                is_new=False,
+                parent_sheet=sheet_vm,
+                has_graphic_scale=True,
+                has_north_arrow=is_plan
+            )
+            new_v._selected_existing_view = best_av
+        else:
+            new_v = ViewViewModel(
+                ElementId.InvalidElementId,
+                sheet_vm.SheetName,
+                inferred_vft,
+                level_name=inferred_level,
+                scale=inferred_scale,
+                view_number=next_dn,
+                is_new=True,
+                parent_sheet=sheet_vm,
+                has_graphic_scale=True,
+                has_north_arrow=is_plan
+            )
+
+        sheet_vm.Views.Add(new_v)
+        sheet_vm.IsExpanded = True
+        sheet_vm.OnPropertyChanged("HasNoViews")
+        sheet_vm.OnPropertyChanged("ViewsSummaryBadge")
+        sheet_vm.OnPropertyChanged("MatrixPillSummary")
+        sheet_vm.update_action()
+        sheet_vm.notify_reconciliation_state()
+        if run_val:
+            self.run_validation()
+
+    def on_auto_populate_all_views(self, sender, e):
+        """
+        Toolbar action (`Btn_AutoSuggestViews`):
+        Populates missing views across all empty sheets currently in the workbench and standardizes View Names to match Sheet Names.
+        """
+        populated = 0
+        for sh in self.EditorItems:
+            series_str = (sh.SheetSeries or "").lower()
+            sh_name_upper = (sh.SheetName or "").upper()
+            if "00." in series_str or "cover" in sh_name_upper or "index" in sh_name_upper or "schedule" in sh_name_upper:
+                continue
+            if sh.Views.Count == 0:
+                self.auto_populate_sheet_views(sh, run_val=False)
+                populated += 1
+            elif sh.Views.Count == 1:
+                # Suggest matching the single view's Title on Sheet to the standardized Sheet Name
+                v = sh.Views[0]
+                if v.Name != sh.SheetName:
+                    v.Name = sh.SheetName
+                    sh.update_action()
+                    sh.notify_reconciliation_state()
+                    populated += 1
+            sh.OnPropertyChanged("MatrixPillSummary")
+        self.build_matrix_board()
+        self.run_validation()
             
     def get_sheet_context(self):
         append = True
@@ -2408,28 +3405,39 @@ class ManageSheetsPanel(forms.WPFWindow):
             
     def update_grid_title(self):
         node = getattr(self, "_current_selected_node", None)
-        if hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
-            node = self.NavTree.SelectedItem
-            self._current_selected_node = node
-            
+        if not node:
+            if hasattr(self, 'NavTree') and self.NavTree and hasattr(self.NavTree, "SelectedItem") and self.NavTree.SelectedItem:
+                node = self.NavTree.SelectedItem
+            elif hasattr(self, 'TargetSchemaTree') and self.TargetSchemaTree and hasattr(self.TargetSchemaTree, "SelectedItem") and self.TargetSchemaTree.SelectedItem:
+                node = self.TargetSchemaTree.SelectedItem
         if not node: return
         
         if node.NodeType == "Root":
             title = "All Sheets & Views"
         elif node.NodeType == "Collection":
-            title = "Collection: " + node.Tag
+            title = "Collection: " + str(node.Tag or node.Name)
         elif node.NodeType == "Discipline":
-            c_name, d_name = node.Tag
-            title = "Collection: {} | Discipline: {}".format(c_name, d_name)
+            if isinstance(node.Tag, tuple) and len(node.Tag) == 2:
+                c_name, d_name = node.Tag
+                title = "Collection: {} | Discipline: {}".format(c_name, d_name)
+            else:
+                title = "Discipline: {}".format(node.Tag or node.Name)
         elif node.NodeType == "ContentGroup":
-            c_name, d_name, cg_name = node.Tag
-            title = "Collection: {} | Group: {}".format(c_name, cg_name)
+            if isinstance(node.Tag, tuple) and len(node.Tag) == 3:
+                c_name, d_name, cg_name = node.Tag
+                title = "Collection: {} | Group: {}".format(c_name, cg_name)
+            elif isinstance(node.Tag, tuple) and len(node.Tag) == 2:
+                c_name, d_name = node.Tag
+                title = "Group: {}".format(node.Name)
+            else:
+                title = "Group: {}".format(node.Name)
         else:
             title = "Filtered Results"
             
         # Append diagnostic count
         title += " ({} Rows Generated)".format(self.EditorItems.Count)
-        self.Txt_GridTitle.Text = title
+        if hasattr(self, 'Txt_GridTitle') and self.Txt_GridTitle:
+            self.Txt_GridTitle.Text = title
 
     def on_sheet_number_changed(self, sheet, old_val, new_val):
         if getattr(self, "_is_auto_sequencing", False):
@@ -2525,33 +3533,47 @@ class ManageSheetsPanel(forms.WPFWindow):
                             
                         proposed_num = ns_num + delta
                         next_sheet.SheetNumber = "{}{:0{}d}".format(new_prefix, proposed_num, new_len)
-                            
-            # Sort the EditorItems list by SheetNumber
-            items_list = list(self.EditorItems)
-            
-            def get_sort_key(s):
-                num = s.SheetNumber if s.SheetNumber else ""
-                # Pad numbers so string sorting works correctly (e.g. A-010 before A-100)
-                # We split the string by numbers and text
-                parts = re.split(r'(\d+)', num)
-                key = []
-                for p in parts:
-                    if p.isdigit():
-                        key.append(p.zfill(10))
-                    else:
-                        key.append(p.lower())
-                return key
-                
-            items_list.sort(key=get_sort_key)
-            
-            self.EditorItems.Clear()
-            for item in items_list:
-                self.EditorItems.Add(item)
-                
         finally:
             self._is_auto_sequencing = False
+            self.build_matrix_board()
             self.run_validation()
             
+    def update_discipline_filter_options(self):
+        if not hasattr(self, 'Cmb_DisciplineFilter') or not self.Cmb_DisciplineFilter:
+            return
+        current_sel = self.Cmb_DisciplineFilter.SelectedItem
+        self._suppress_disc_filter = True
+        try:
+            if hasattr(self.Cmb_DisciplineFilter.Items, "Clear"):
+                self.Cmb_DisciplineFilter.Items.Clear()
+            elif hasattr(self.Cmb_DisciplineFilter.Items, "clear"):
+                self.Cmb_DisciplineFilter.Items.clear()
+            else:
+                del self.Cmb_DisciplineFilter.Items[:]
+            self.Cmb_DisciplineFilter.Items.Add(u"All Disciplines")
+            disc_set = set()
+            for item in self.EditorItems:
+                code = getattr(item, 'DisciplineCode', '')
+                short_lbl = getattr(item, 'DisciplineShortLabel', '')
+                if short_lbl:
+                    disc_set.add(short_lbl)
+                elif code:
+                    disc_set.add(code)
+            for d in sorted(list(disc_set)):
+                self.Cmb_DisciplineFilter.Items.Add(d)
+            if current_sel and current_sel in self.Cmb_DisciplineFilter.Items:
+                self.Cmb_DisciplineFilter.SelectedItem = current_sel
+            else:
+                self.Cmb_DisciplineFilter.SelectedIndex = 0
+        finally:
+            self._suppress_disc_filter = False
+
+    def on_discipline_filter_changed(self, sender, e):
+        if getattr(self, '_suppress_disc_filter', False):
+            return
+        self.apply_filters()
+        self.build_matrix_board()
+
     def apply_filters(self):
         try:
             from System.Windows.Data import CollectionViewSource, PropertyGroupDescription
@@ -2578,17 +3600,30 @@ class ManageSheetsPanel(forms.WPFWindow):
             view.SortDescriptions.Add(SortDescription("SheetNumber", ListSortDirection.Ascending))
             
             show_invalid = getattr(self, 'Chk_ShowInvalid', None) and self.Chk_ShowInvalid.IsChecked
+            sel_disc = None
+            if hasattr(self, 'Cmb_DisciplineFilter') and self.Cmb_DisciplineFilter and self.Cmb_DisciplineFilter.SelectedItem:
+                raw_val = self.Cmb_DisciplineFilter.SelectedItem
+                val = raw_val.strip() if raw_val else u""
+                if val and val != u"All Disciplines":
+                    sel_disc = val
             
             def filter_func(item):
-                if not show_invalid:
-                    return True
+                if show_invalid:
+                    has_error = getattr(item, 'IsNameUnique', True) == False or bool(getattr(item, 'ValidationWarning', ""))
+                    for v in getattr(item, 'Views', []):
+                        if getattr(v, 'ValidationWarning', ""):
+                            has_error = True
+                            break
+                    if not has_error:
+                        return False
                 
-                has_error = getattr(item, 'IsNameUnique', True) == False or bool(getattr(item, 'ValidationWarning', ""))
-                for v in getattr(item, 'Views', []):
-                    if getattr(v, 'ValidationWarning', ""):
-                        has_error = True
-                        break
-                return has_error
+                if sel_disc:
+                    item_lbl = getattr(item, 'DisciplineShortLabel', '')
+                    item_code = getattr(item, 'DisciplineCode', '')
+                    if sel_disc != item_lbl and sel_disc != item_code and not item_lbl.startswith(sel_disc):
+                        return False
+                        
+                return True
                 
             view.Filter = Predicate[Object](filter_func)
         except Exception as e:
@@ -2596,6 +3631,7 @@ class ManageSheetsPanel(forms.WPFWindow):
 
     def on_filter_changed(self, sender, e):
         self.apply_filters()
+        self.build_matrix_board()
 
     def run_validation(self):
         all_numbers = {}
@@ -2608,10 +3644,19 @@ class ManageSheetsPanel(forms.WPFWindow):
             if hasattr(node, "NodeType") and node.NodeType == "Collection":
                 active_collection = node.Name
                 
-        # Combine all real Revit sheets + any active CREATE templates currently in the grid
-        validation_pool = set(self.all_grid_nodes)
+        # Rule 6: EditorItems is the testing sandbox; include unedited baseline sheets from OTHER collections for cross-check
+        editor_ids = set()
         for item in self.EditorItems:
-            validation_pool.add(item)
+            if item.ElementId and item.ElementId != ElementId.InvalidElementId:
+                val = item.ElementId.IntegerValue if hasattr(item.ElementId, "IntegerValue") else item.ElementId.Value
+                editor_ids.add(val)
+
+        validation_pool = list(self.EditorItems)
+        for base_node in self.all_grid_nodes:
+            if base_node.ElementId and base_node.ElementId != ElementId.InvalidElementId:
+                val = base_node.ElementId.IntegerValue if hasattr(base_node.ElementId, "IntegerValue") else base_node.ElementId.Value
+                if val not in editor_ids:
+                    validation_pool.append(base_node)
             
         for r in validation_pool:
             if r.Action == "PURGE" or not r.IsChecked: continue
@@ -2645,8 +3690,6 @@ class ManageSheetsPanel(forms.WPFWindow):
         color_idx = 0
         has_error = False
         
-        # Collect all actively modified IDs across the entire grid to prevent false clashes
-        # when swapping numbers or when an existing sheet vacates its number.
         all_actively_modified_ids = set()
         for r in validation_pool:
             if not getattr(r, "IsChecked", False) or getattr(r, "Action", "") == "PURGE":
@@ -2685,19 +3728,45 @@ class ManageSheetsPanel(forms.WPFWindow):
                     i.ValidationWarning = "Sheet Number '{}' is not unique within Collection '{}'! Conflicts with:\n- {}".format(
                         i.SheetNumber, key[0], "\n- ".join(actual_conflicts))
                         
+        # Scale Uniformity Audit per (CollectionName, SheetSeries)
+        series_scale_counts = {}
+        for r in self.EditorItems:
+            if r.Action == "PURGE":
+                continue
+            s_key = (r.CollectionName, r.SheetSeries)
+            for v in r.Views:
+                sc = getattr(v, "Scale", "")
+                if sc and sc not in ("NTS", "As indicated"):
+                    if s_key not in series_scale_counts:
+                        series_scale_counts[s_key] = {}
+                    series_scale_counts[s_key][sc] = series_scale_counts[s_key].get(sc, 0) + 1
+
+        dominant_series_scale = {}
+        for s_key, counts in series_scale_counts.items():
+            total_in_series = sum(counts.values())
+            if total_in_series >= 2 and len(counts) > 1:
+                dom_scale, dom_cnt = max(counts.items(), key=lambda x: x[1])
+                if dom_cnt > 1:
+                    dominant_series_scale[s_key] = dom_scale
+
         # Setup for global view name validation
-        
         existing_view_names = getattr(self, '_cached_global_views', set())
 
         illegal_chars = r'[\\:\{\}\[\]\|;\<\>\?\~]'
         all_grid_view_names = set()
                 
-        # Validate view names, numbers, and illegal characters
-        has_work = False
+        # Validate view names, numbers, scale uniformity, and illegal characters
+        for r in self.EditorItems:
+            s_key = (r.CollectionName, r.SheetSeries)
+            dom_scale = dominant_series_scale.get(s_key, None)
+            for v in r.Views:
+                if dom_scale and v.Scale and v.Scale not in ("NTS", "As indicated") and v.Scale != dom_scale:
+                    v.ScaleWarning = "Scale outlier: '{}' differs from series majority ({})".format(v.Scale, dom_scale)
+                else:
+                    v.ScaleWarning = ""
+                v.check_semantic_mismatch()
+
         for r in validation_pool:
-            if r.IsChecked and r.Action in ["CREATE", "UPDATE", "PURGE"]:
-                has_work = True
-                
             if r.Action == "PURGE" or not r.IsChecked: continue
             
             # 1. Illegal characters in Sheet
@@ -2726,14 +3795,14 @@ class ManageSheetsPanel(forms.WPFWindow):
                     if not v.PlanType:
                         has_error = True
                         v.ValidationWarning += " Missing Plan Type."
-                    if not v.LevelName:
+                    if not v.LevelName and v.IsPlanView:
                         has_error = True
                         v.ValidationWarning += " Missing Level."
                         
                 # Revit allows Legends and Schedules to be placed on multiple sheets
                 is_legend_or_schedule = False
                 pt = getattr(v, 'PlanType', '').lower()
-                if 'legend' in pt or 'schedule' in pt:
+                if 'legend' in pt or 'schedule' in pt or 'drafting' in pt:
                     is_legend_or_schedule = True
 
                 # Check 4: Duplicate View Numbers on the SAME sheet
@@ -2745,17 +3814,15 @@ class ManageSheetsPanel(forms.WPFWindow):
                         v.ValidationWarning += " Duplicate View Number on sheet."
                     sheet_view_numbers.add(v_num)
                         
-                # Check 5: Duplicate View Names GLOBALLY
+                # Check 5: Duplicate View Names GLOBALLY (only for newly created views without detail number disambiguation)
                 v_name_lower = v.Name.lower() if v.Name else ""
-                
-                if v_name_lower and v_num and not is_legend_or_schedule:
+                if v_name_lower and not v_num and not is_legend_or_schedule:
                     if v.IsNew and v_name_lower in existing_view_names:
                         has_error = True
                         v.ValidationWarning += " Name already exists in project."
                     elif v_name_lower in all_grid_view_names:
                         has_error = True
                         v.ValidationWarning += " Name duplicated in this grid."
-                    
                     all_grid_view_names.add(v_name_lower)
             
             # Check if this row is completely valid
@@ -2763,14 +3830,18 @@ class ManageSheetsPanel(forms.WPFWindow):
             for v in r.Views:
                 if getattr(v, 'ValidationWarning', ""):
                     r_has_error = True
-                    r.ValidationBrush = "#FCA5A5"  # Highlight the sheet row in red
+                    r.ValidationBrush = "#FCA5A5"
                     if not r.ValidationWarning:
                         r.ValidationWarning = "View Error: " + v.ValidationWarning
                     elif "View Error:" not in r.ValidationWarning:
                         r.ValidationWarning += "\nView Error: " + v.ValidationWarning
                     break
+            r.OnPropertyChanged("HasWarning")
+            r.OnPropertyChanged("WarningSummary")
+            r.OnPropertyChanged("MatrixPillSummary")
                     
-            if r.IsChecked and r.Action in ["CREATE", "UPDATE", "PURGE"] and not r_has_error:
+            has_view_changes = any(v.has_pending_changes() for v in r.Views)
+            if r.IsChecked and (r.Action in ["CREATE", "UPDATE", "PURGE", "RENAME_NAME", "RENAME_NUM", "RENAME_NUMBER", "RENAME_BOTH"] or has_view_changes) and not r_has_error:
                 has_valid_work = True
                 
         self.main_vm.IsPushEnabled = has_valid_work
@@ -2783,16 +3854,20 @@ class ManageSheetsPanel(forms.WPFWindow):
         matched_count = 0
         create_count = 0
         update_count = 0
+        mismatch_count = 0
         
         for r in self.EditorItems:
-            if r.Action == "MATCHED":
+            for v in r.Views:
+                if getattr(v, "SemanticWarning", "") or getattr(v, "ScaleWarning", ""):
+                    mismatch_count += 1
+            if r.Action == "MATCHED" and not any(v.has_pending_changes() for v in r.Views):
                 matched_count += 1
             elif r.Action in ["CREATE", "MISSING"]:
                 create_count += 1
-            elif r.Action in ["UPDATE", "RENAME_NAME", "RENAME_NUM", "RENAME_NUMBER", "RENAME_BOTH"]:
+            elif r.Action in ["UPDATE", "RENAME_NAME", "RENAME_NUM", "RENAME_NUMBER", "RENAME_BOTH"] or any(v.has_pending_changes() for v in r.Views):
                 update_count += 1
                 
-            if r.Action in ["CREATE", "UPDATE", "PURGE", "RENAME_NUM", "RENAME_NUMBER", "RENAME_BOTH"]:
+            if r.Action in ["CREATE", "UPDATE", "PURGE", "RENAME_NAME", "RENAME_NUM", "RENAME_NUMBER", "RENAME_BOTH"] or any(v.has_pending_changes() for v in r.Views):
                 total_work_items += 1
                 r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
                 for v in r.Views:
@@ -2806,6 +3881,8 @@ class ManageSheetsPanel(forms.WPFWindow):
                     has_unchecked_work = True
                     
         synopsis = "Synopsis: {} Matched | {} New | {} Updating".format(matched_count, create_count, update_count)
+        if mismatch_count > 0:
+            synopsis += " | ⚠️ {} Audit Warnings".format(mismatch_count)
         
         if has_valid_work:
             self.Txt_Status.Text = "{}  »  Ready to Push".format(synopsis)
@@ -2828,12 +3905,8 @@ class ManageSheetsPanel(forms.WPFWindow):
         out = script.get_output()
         out.print_md("### Manage Sheets: Debug Log (Ordered by AIA Schema)")
         
-        validation_pool = set(self.all_grid_nodes)
-        for item in self.EditorItems:
-            validation_pool.add(item)
-            
         valid_nodes = []
-        for r in validation_pool:
+        for r in self.EditorItems:
             if not r.IsChecked or r.Action == "PURGE": continue
             r_has_error = getattr(r, 'IsNameUnique', True) == False or bool(r.ValidationWarning)
             for v in r.Views:
@@ -2847,7 +3920,6 @@ class ManageSheetsPanel(forms.WPFWindow):
         
         node_map = { r.SheetNumber: r for r in valid_nodes }
         
-        # Print using AIA Schema order
         out.print_md("#### AIA Schema Mapping")
         if hasattr(self, "generated_targets") and self.generated_targets:
             for t in self.generated_targets:
@@ -2871,7 +3943,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                     out.print_md("- **Element ID:** `[Unmatched/Unchecked]` | **Original:** `None` --> **Target:** `None` | **AIA Pure:** `{} - {}`".format(
                         target_num, pure_name))
         
-        # Print any remaining ones that didn't match the schema targets exactly
         if node_map:
             out.print_md("---\n#### Additional/Custom Sheets (Not in base schema order)")
             for r in node_map.values():
@@ -2886,6 +3957,150 @@ class ManageSheetsPanel(forms.WPFWindow):
                 
                 out.print_md("- **Element ID:** `{}` | **Original:** `{} - {}` --> **Target:** `{} - {}` | **AIA Pure:** `[None]`".format(
                     elem_id_str, orig_num, orig_name, prop_num, prop_name))
+
+    def _ensure_doc_annotation_symbol(self, doc, keyword, rfa_filename):
+        """
+        Finds an existing Generic Annotation FamilySymbol matching `keyword` (e.g., 'Graphic Scale' or 'North Arrow')
+        or loads it from the Manage Graphic Scales Resources folder.
+        """
+        from Autodesk.Revit.DB import FilteredElementCollector, FamilySymbol, BuiltInCategory
+        symbols = FilteredElementCollector(doc).OfClass(FamilySymbol).OfCategory(BuiltInCategory.OST_GenericAnnotation).ToElements()
+        kw_low = keyword.lower()
+        for sym in symbols:
+            try:
+                fam_name = (sym.Family.Name or "").lower()
+                if kw_low in fam_name:
+                    if not sym.IsActive:
+                        sym.Activate()
+                    return sym
+            except Exception:
+                pass
+
+        # Attempt to load from Manage Graphic Scales Resources folder
+        try:
+            ext_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+            rfa_path = os.path.join(
+                ext_root,
+                "ODI.tab", "03_DOCUMENTATION.panel", "Manage.pulldown",
+                "Manage Graphic Scales.pushbutton", "Resources", rfa_filename
+            )
+            if os.path.exists(rfa_path):
+                doc.LoadFamily(rfa_path)
+                symbols = FilteredElementCollector(doc).OfClass(FamilySymbol).OfCategory(BuiltInCategory.OST_GenericAnnotation).ToElements()
+                for sym in symbols:
+                    try:
+                        fam_name = (sym.Family.Name or "").lower()
+                        if kw_low in fam_name:
+                            if not sym.IsActive:
+                                sym.Activate()
+                            return sym
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return None
+
+    def _place_or_update_viewport_annotations(self, doc, sheet_elem, vp_elem, view_elem, want_gs, want_na, gs_sym, na_sym, debug_log):
+        """
+        Places and aligns Graphic Scale and North Arrow annotation instances on `sheet_elem`
+        linked to `vp_elem` & `view_elem` (updating Scale Value to `view_elem.Scale`).
+        """
+        if not sheet_elem or not vp_elem or not view_elem:
+            return
+        from Autodesk.Revit.DB import FilteredElementCollector, BuiltInCategory, BuiltInParameter, XYZ
+
+        # Determine anchor point below/beside the viewport label or box outline
+        anchor_gs = XYZ(1.0, 0.25, 0.0)
+        anchor_na = XYZ(1.35, 0.25, 0.0)
+        try:
+            lbl_outline = None
+            if hasattr(vp_elem, "GetLabelOutline"):
+                try:
+                    lbl_outline = vp_elem.GetLabelOutline()
+                except Exception:
+                    lbl_outline = None
+            if lbl_outline and lbl_outline.MinimumPoint and lbl_outline.MaximumPoint and lbl_outline.MinimumPoint.X < 1e10:
+                anchor_gs = XYZ(lbl_outline.MinimumPoint.X, lbl_outline.MinimumPoint.Y - (0.375 / 12.0), 0.0)
+                anchor_na = XYZ(lbl_outline.MaximumPoint.X + (0.625 / 12.0), (lbl_outline.MinimumPoint.Y + lbl_outline.MaximumPoint.Y) * 0.5, 0.0)
+            else:
+                box = vp_elem.GetBoxOutline()
+                if box and box.MinimumPoint and box.MaximumPoint:
+                    anchor_gs = XYZ(box.MinimumPoint.X + (0.5 / 12.0), box.MinimumPoint.Y - (0.5 / 12.0), 0.0)
+                    anchor_na = XYZ(box.MaximumPoint.X - (0.5 / 12.0), box.MinimumPoint.Y - (0.5 / 12.0), 0.0)
+        except Exception:
+            pass
+
+        # Check existing annotations on this sheet
+        existing_gs = None
+        existing_na = None
+        try:
+            annos_on_sheet = FilteredElementCollector(doc, sheet_elem.Id).OfCategory(BuiltInCategory.OST_GenericAnnotation).WhereElementIsNotElementType().ToElements()
+            for a in annos_on_sheet:
+                try:
+                    fn = (a.Symbol.Family.Name or "").lower()
+                    if "graphic scale" in fn or "scale bar" in fn:
+                        existing_gs = a
+                    elif "north" in fn:
+                        existing_na = a
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        v_id_val = view_elem.Id.IntegerValue if hasattr(view_elem.Id, "IntegerValue") else view_elem.Id.Value
+        vp_id_val = vp_elem.Id.IntegerValue if hasattr(vp_elem.Id, "IntegerValue") else vp_elem.Id.Value
+
+        # 1. Graphic Scale
+        if want_gs and gs_sym:
+            try:
+                inst = existing_gs if existing_gs else doc.Create.NewFamilyInstance(anchor_gs, gs_sym, sheet_elem)
+                if inst:
+                    for p_name in ("Scale Value", "View Scale", "Scale"):
+                        p = inst.LookupParameter(p_name)
+                        if p and not p.IsReadOnly:
+                            try:
+                                p.Set(float(view_elem.Scale))
+                            except Exception:
+                                try:
+                                    p.Set(int(view_elem.Scale))
+                                except Exception:
+                                    pass
+                    p_vid = inst.LookupParameter("View Id")
+                    if p_vid and not p_vid.IsReadOnly:
+                        try: p_vid.Set(int(v_id_val))
+                        except Exception: pass
+                    p_vpid = inst.LookupParameter("Viewport Id")
+                    if p_vpid and not p_vpid.IsReadOnly:
+                        try: p_vpid.Set(int(vp_id_val))
+                        except Exception: pass
+                    c_param = inst.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+                    if c_param and not c_param.IsReadOnly:
+                        try: c_param.Set("LINKED_VIEW:{}".format(v_id_val))
+                        except Exception: pass
+                    debug_log.append("  [Annotation] Synced Graphic Scale (1:{}) on sheet {}".format(view_elem.Scale, sheet_elem.SheetNumber))
+            except Exception as ex_gs:
+                debug_log.append("  [Annotation WARN] Graphic Scale failed: {}".format(ex_gs))
+
+        # 2. North Arrow
+        if want_na and na_sym:
+            try:
+                inst_na = existing_na if existing_na else doc.Create.NewFamilyInstance(anchor_na, na_sym, sheet_elem)
+                if inst_na:
+                    p_vid = inst_na.LookupParameter("View Id")
+                    if p_vid and not p_vid.IsReadOnly:
+                        try: p_vid.Set(int(v_id_val))
+                        except Exception: pass
+                    p_vpid = inst_na.LookupParameter("Viewport Id")
+                    if p_vpid and not p_vpid.IsReadOnly:
+                        try: p_vpid.Set(int(vp_id_val))
+                        except Exception: pass
+                    c_param = inst_na.get_Parameter(BuiltInParameter.ALL_MODEL_INSTANCE_COMMENTS)
+                    if c_param and not c_param.IsReadOnly:
+                        try: c_param.Set("LINKED_VIEW:{}".format(v_id_val))
+                        except Exception: pass
+                    debug_log.append("  [Annotation] Synced North Arrow on sheet {}".format(sheet_elem.SheetNumber))
+            except Exception as ex_na:
+                debug_log.append("  [Annotation WARN] North Arrow failed: {}".format(ex_na))
 
     def sync_to_revit(self, sender, e):
         import tempfile
@@ -2908,6 +4123,7 @@ class ManageSheetsPanel(forms.WPFWindow):
             if not doc: return
             
             from Autodesk.Revit.DB import TransactionGroup, FilteredElementCollector, ViewSheet, View, ElementId, Transaction, BuiltInCategory, Viewport, XYZ, StorageType
+            from data_model import parse_revit_scale
             
             # Collect existing sheets to infer majority parameter values for browser organization
             all_existing_sheets = FilteredElementCollector(doc).OfCategory(BuiltInCategory.OST_Sheets).WhereElementIsNotElementType().ToElements()
@@ -2933,9 +4149,8 @@ class ManageSheetsPanel(forms.WPFWindow):
                     
             debug_log.append("[Inference] Majority Parameter Values: {}".format(majority_param_values))
             
-            validation_pool = set(self.all_grid_nodes)
-            for item in self.EditorItems:
-                validation_pool.add(item)
+            # Rule 6: Sync strictly from the active EditorItems sandbox!
+            validation_pool = list(self.EditorItems)
                 
             needs_tb = any(r.IsChecked and r.Action == "CREATE" for r in validation_pool)
             if needs_tb and not tb_id_val:
@@ -2986,14 +4201,7 @@ class ManageSheetsPanel(forms.WPFWindow):
             all_live_sheets = FilteredElementCollector(doc).OfClass(ViewSheet).ToElements()
             for s in all_live_sheets:
                 if not s.IsTemplate:
-                    s_coll = "Default"
-                    try:
-                        p = s.LookupParameter("Sheet Collection")
-                        if not p:
-                            p = s.LookupParameter(" Sheet Collection")
-                        if p and p.HasValue:
-                            s_coll = p.AsString()
-                    except: pass
+                    s_coll = get_sheet_collection_name(doc, s) or "Default"
                     k = (s_coll, s.SheetNumber.strip().lower())
                     if k not in live_sheet_keys: live_sheet_keys[k] = []
                     s_id_val = s.Id.IntegerValue if hasattr(s.Id, 'IntegerValue') else s.Id.Value
@@ -3014,12 +4222,9 @@ class ManageSheetsPanel(forms.WPFWindow):
                     val = n.ElementId.IntegerValue if hasattr(n.ElementId, 'IntegerValue') else n.ElementId.Value
                     active_renaming_ids.add(val)
                     
-            # Skip any nodes that clash with the live model
-            for r in validation_pool:
+            # Auto-park any unmatched native sheet blocking a target slot (Rule 6)
+            for r in valid_nodes:
                 if not r.IsChecked or r.Action == "PURGE": continue
-                is_clash = False
-                
-                # Sheet Number collision
                 c_name = getattr(r, 'CollectionName', 'Default') or 'Default'
                 key = (c_name, (r.SheetNumber or "").strip().lower())
                 
@@ -3032,16 +4237,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                         if live_id != r_id_val and live_id not in active_renaming_ids:
                             if live_id not in auto_park_ids:
                                 auto_park_ids.append(live_id)
-                            
-                for v in getattr(r, 'Views', []):
-                        if getattr(v, 'IsNew', False) and getattr(v, 'Name', '') and v.Name.lower() in live_view_names:
-                            is_clash = True
-                            error_log.append("Skipped Sheet '{}': View name '{}' already taken by another user.".format(r.SheetNumber, v.Name))
-                            break
-                            
-                if is_clash:
-                    r.IsChecked = False
-            # ------------------------------------------------
             
             log_created = []
             log_updated = []
@@ -3134,10 +4329,16 @@ class ManageSheetsPanel(forms.WPFWindow):
                     debug_log.append("[Phase 1] Ordered Sequence: {}".format([getattr(r, 'OriginalNumber', '') for r in ordered_sequence]))
                     debug_log.append("[Phase 1] Cycle Nodes: {}".format([getattr(r, 'OriginalNumber', '') for r in cycle_nodes]))
                     
-                    # Phase 2: Finalize
+                    # Phase 2: Finalize Sheets, Views, Scales, Graphic Scales & North Arrows
                     with Transaction(doc, "Phase 2 - Finalize") as t2:
                         t2.Start()
                         try:
+                            # Pre-load Graphic Scale and North Arrow symbols if any view requests them
+                            any_gs = any(getattr(v, "HasGraphicScale", False) for r in valid_nodes for v in getattr(r, "Views", []))
+                            any_na = any(getattr(v, "HasNorthArrow", False) for r in valid_nodes for v in getattr(r, "Views", []))
+                            gs_sym = self._ensure_doc_annotation_symbol(doc, "Graphic Scale", "Symbol - Graphic Scale.rfa") if any_gs else None
+                            na_sym = self._ensure_doc_annotation_symbol(doc, "North Arrow", "Symbol - North Arrow.rfa") if any_na else None
+
                             # 1. Break Cycles
                             for r in cycle_nodes:
                                 s_elem = doc.GetElement(r.ElementId)
@@ -3165,16 +4366,14 @@ class ManageSheetsPanel(forms.WPFWindow):
                             for r in valid_nodes:
                                 if not r.IsChecked: continue
                                 new_sheet = None
+                                target_sheet_elem = None
                                 match_stat = getattr(r, 'MatchStatus', None) or r.Action
                                 debug_log.append("[Phase 2 Loop 4] Processing: {} -> {} (Action: {}, MatchStat: {})".format(getattr(r, 'OriginalNumber', 'NEW'), r.SheetNumber, r.Action, match_stat))
                                 
                                 if r.Action == "CREATE":
                                     tb_id = ElementId(tb_id_val)
-                                    debug_log.append("  [API] ViewSheet.Create(doc, tb_id={})".format(tb_id_val))
                                     new_sheet = ViewSheet.Create(doc, tb_id)
-                                    debug_log.append("  [API] new_sheet.SheetNumber = '{}'".format(r.SheetNumber))
                                     new_sheet.SheetNumber = r.SheetNumber
-                                    debug_log.append("  [API] new_sheet.Name = '{}'".format(r.SheetName))
                                     new_sheet.Name = r.SheetName
                                     assign_sheet_to_collection(doc, new_sheet, r.CollectionName)
                                     c_res = classification.classify_sheet(r.SheetNumber, r.SheetName)
@@ -3184,7 +4383,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                                     set_sheet_parameter(new_sheet, "Content Group", cg_name)
                                     set_sheet_parameter(new_sheet, "Sheet Series", getattr(r, "SheetSeries", "General"))
                                     
-                                    # Apply inferred majority parameters for browser organization
                                     for p_name, p_val in majority_param_values.items():
                                         try:
                                             param = new_sheet.LookupParameter(p_name)
@@ -3192,6 +4390,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                 param.Set(p_val)
                                         except Exception: pass
                                         
+                                    target_sheet_elem = new_sheet
                                     log_created.append("{} - {}".format(r.SheetNumber, r.SheetName))
                                     creates += 1
                                 elif r.Action in ["UPDATE", "MATCHED", "RENAME_NAME", "RENAME_NUMBER", "RENAME_BOTH"] or match_stat in ["RENAME_NUMBER", "RENAME_BOTH"]:
@@ -3205,6 +4404,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                         set_sheet_parameter(s_elem, "Discipline", disc_name)
                                         set_sheet_parameter(s_elem, "Content Group", cg_name)
                                         set_sheet_parameter(s_elem, "Sheet Series", r.SheetSeries)
+                                        target_sheet_elem = s_elem
                                         log_updated.append("{} - {}".format(r.SheetNumber, r.SheetName))
                                         renames += 1
                                 elif r.Action == "PURGE":
@@ -3214,8 +4414,8 @@ class ManageSheetsPanel(forms.WPFWindow):
                                     log_purged.append("{} - {} (Quarantined)".format(r.SheetNumber, r.SheetName))
                                     purges += 1
                                         
-                                if r.Action != "PURGE" and r.IsChecked:
-                                    target_sheet_id = r.ElementId if r.Action != "CREATE" else new_sheet.Id
+                                if r.Action != "PURGE" and r.IsChecked and target_sheet_elem:
+                                    target_sheet_id = target_sheet_elem.Id
                                     
                                     def park_conflicting_dn(doc_obj, sht_id, target_dn, skip_vp_id=None):
                                         from Autodesk.Revit.DB import FilteredElementCollector, Viewport, BuiltInParameter
@@ -3230,7 +4430,6 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                 except: pass
 
                                     for v in getattr(r, 'Views', []):
-                                        # Determine Shorthand
                                         shorthand = ""
                                         if r.CollectionName and r.CollectionName != "Undefined":
                                             words = r.CollectionName.split()
@@ -3239,7 +4438,7 @@ class ManageSheetsPanel(forms.WPFWindow):
                                             else:
                                                 shorthand = r.CollectionName[:3].upper()
                                                 
-                                        view_number_str = v.ViewNumber or "00"
+                                        view_number_str = v.ViewNumber or "1"
                                         unique_name_parts = [v.Name]
                                         if shorthand: unique_name_parts.append(shorthand)
                                         unique_name_parts.append(view_number_str)
@@ -3248,17 +4447,26 @@ class ManageSheetsPanel(forms.WPFWindow):
                                         unique_backend_name = " - ".join(unique_name_parts)
                                         
                                         from Autodesk.Revit.DB import BuiltInParameter
-                                        if getattr(v, 'ViewId', ElementId.InvalidElementId) != ElementId.InvalidElementId:
+                                        if getattr(v, 'ViewId', ElementId.InvalidElementId) != ElementId.InvalidElementId and not getattr(v, 'IsNew', False):
                                             v_elem = doc.GetElement(v.ViewId)
                                             if v_elem:
-                                                # Set Title on Sheet (Desired Name)
+                                                # 1. Update View Scale if user changed it in the workbench
+                                                desired_scale_int = parse_revit_scale(v.Scale)
+                                                if desired_scale_int and getattr(v_elem, "Scale", None) != desired_scale_int:
+                                                    try:
+                                                        v_elem.Scale = desired_scale_int
+                                                        debug_log.append("  [View Scale] Updated '{}' scale to 1:{}".format(v.Name, desired_scale_int))
+                                                    except Exception:
+                                                        pass
+
+                                                # 2. Set Title on Sheet (Desired Name)
                                                 title_param = v_elem.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION)
                                                 if title_param and not title_param.IsReadOnly:
                                                     if title_param.AsString() != v.Name:
                                                         try: title_param.Set(v.Name)
                                                         except: pass
                                                         
-                                                # Set Backend Unique Name
+                                                # 3. Set Backend Unique Name
                                                 if v.ViewNumber and v_elem.Name != unique_backend_name:
                                                     try:
                                                         v_elem.Name = unique_backend_name
@@ -3274,29 +4482,43 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                     target_vp = vp
                                                     break
                                             
+                                            final_vp = None
                                             if target_vp:
                                                 if target_vp.SheetId != target_sheet_id:
                                                     center = target_vp.GetBoxCenter()
                                                     doc.Delete(target_vp.Id)
                                                     if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
-                                                        debug_log.append("  [API] Viewport.Create(doc, target_sheet_id, v.ViewId={}, center)".format(v.ViewId.IntegerValue if hasattr(v.ViewId, 'IntegerValue') else v.ViewId.Value))
-                                                        new_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
-                                                        park_conflicting_dn(doc, target_sheet_id, v.ViewNumber, new_vp.Id)
-                                                        dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                        final_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, center)
+                                                        park_conflicting_dn(doc, target_sheet_id, v.ViewNumber, final_vp.Id)
+                                                        dn_param = final_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                         if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                            try: 
-                                                                debug_log.append("  [API] new_vp.DetailNumber.Set('{}')".format(v.ViewNumber))
-                                                                dn_param.Set(str(v.ViewNumber))
+                                                            try: dn_param.Set(str(v.ViewNumber))
                                                             except: pass
                                                 else:
+                                                    final_vp = target_vp
                                                     park_conflicting_dn(doc, target_sheet_id, v.ViewNumber, target_vp.Id)
                                                     dn_param = target_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                     if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
                                                         if dn_param.AsString() != str(v.ViewNumber):
-                                                            try: 
-                                                                debug_log.append("  [API] target_vp.DetailNumber.Set('{}')".format(v.ViewNumber))
-                                                                dn_param.Set(str(v.ViewNumber))
+                                                            try: dn_param.Set(str(v.ViewNumber))
                                                             except: pass
+                                            else:
+                                                # Unplaced Existing View selected from picker -> place onto target_sheet_id!
+                                                if Viewport.CanAddViewToSheet(doc, target_sheet_id, v.ViewId):
+                                                    final_vp = Viewport.Create(doc, target_sheet_id, v.ViewId, XYZ(1.5, 1.0, 0))
+                                                    park_conflicting_dn(doc, target_sheet_id, v.ViewNumber, final_vp.Id)
+                                                    dn_param = final_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
+                                                    if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
+                                                        try: dn_param.Set(str(v.ViewNumber))
+                                                        except: pass
+
+                                            if final_vp and v_elem:
+                                                self._place_or_update_viewport_annotations(
+                                                    doc, target_sheet_elem, final_vp, v_elem,
+                                                    getattr(v, "HasGraphicScale", False),
+                                                    getattr(v, "HasNorthArrow", False),
+                                                    gs_sym, na_sym, debug_log
+                                                )
                                         elif getattr(v, 'IsNew', False):
                                             from Autodesk.Revit.DB import ViewFamilyType, ViewFamily, Level, ViewPlan, ViewDrafting
                                             view_to_place = None
@@ -3343,20 +4565,19 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                         view_to_place = ViewDrafting.Create(doc, vft_id)
                                                         
                                                     if view_to_place:
-                                                        scale_map = {
-                                                            "12\" = 1'-0\"": 1, "6\" = 1'-0\"": 2, "3\" = 1'-0\"": 4, "1 1/2\" = 1'-0\"": 8, "1\" = 1'-0\"": 12, "3/4\" = 1'-0\"": 16, "1/2\" = 1'-0\"": 24, "3/8\" = 1'-0\"": 32, "1/4\" = 1'-0\"": 48, "3/16\" = 1'-0\"": 64, "1/8\" = 1'-0\"": 96, "1\" = 10'-0\"": 120, "3/32\" = 1'-0\"": 128, "1/16\" = 1'-0\"": 192, "1\" = 20'-0\"": 240, "3/64\" = 1'-0\"": 256, "1\" = 30'-0\"": 360, "1/32\" = 1'-0\"": 384, "1\" = 40'-0\"": 480, "1\" = 50'-0\"": 600, "1\" = 60'-0\"": 720, "1/64\" = 1'-0\"": 768, "1\" = 80'-0\"": 960, "1\" = 100'-0\"": 1200, "1\" = 160'-0\"": 1920, "1\" = 200'-0\"": 2400, "1\" = 300'-0\"": 3600, "1\" = 400'-0\"": 4800
-                                                        }
-                                                        if v.Scale in scale_map:
-                                                            view_to_place.Scale = scale_map[v.Scale]
+                                                        desired_scale_int = parse_revit_scale(v.Scale)
+                                                        if desired_scale_int:
+                                                            try:
+                                                                view_to_place.Scale = desired_scale_int
+                                                            except Exception:
+                                                                pass
                                             
                                             if view_to_place:
-                                                # Set Title on Sheet (Desired Name)
                                                 title_param = view_to_place.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION)
                                                 if title_param and not title_param.IsReadOnly:
                                                     try: title_param.Set(v.Name)
                                                     except: pass
                                                 
-                                                # Set Backend Unique Name
                                                 try:
                                                     view_to_place.Name = unique_backend_name if v.ViewNumber else v.Name
                                                     renames += 1
@@ -3364,16 +4585,19 @@ class ManageSheetsPanel(forms.WPFWindow):
                                                 except: pass
                                                 
                                                 if Viewport.CanAddViewToSheet(doc, target_sheet_id, view_to_place.Id):
-                                                    debug_log.append("  [API] Viewport.Create(doc, target_sheet_id, view_to_place.Id={}, default_center)".format(view_to_place.Id.IntegerValue if hasattr(view_to_place.Id, 'IntegerValue') else view_to_place.Id.Value))
                                                     new_vp = Viewport.Create(doc, target_sheet_id, view_to_place.Id, XYZ(1.5, 1.0, 0))
                                                     park_conflicting_dn(doc, target_sheet_id, v.ViewNumber, new_vp.Id)
                                                     from Autodesk.Revit.DB import BuiltInParameter
                                                     dn_param = new_vp.get_Parameter(BuiltInParameter.VIEWPORT_DETAIL_NUMBER)
                                                     if dn_param and not dn_param.IsReadOnly and v.ViewNumber:
-                                                        try: 
-                                                            debug_log.append("  [API] new_vp.DetailNumber.Set('{}')".format(v.ViewNumber))
-                                                            dn_param.Set(str(v.ViewNumber))
+                                                        try: dn_param.Set(str(v.ViewNumber))
                                                         except: pass
+                                                    self._place_or_update_viewport_annotations(
+                                                        doc, target_sheet_elem, new_vp, view_to_place,
+                                                        getattr(v, "HasGraphicScale", False),
+                                                        getattr(v, "HasNorthArrow", False),
+                                                        gs_sym, na_sym, debug_log
+                                                    )
                                                     creates += 1
                             t2.Commit()
                         except:

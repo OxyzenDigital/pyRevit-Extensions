@@ -1,0 +1,6 @@
+title:
+  en_us: PC to Toposolid
+tooltip: Extract bare-earth ground points from a Point Cloud (.rcp/.rcs) and create or update a Revit Toposolid.
+version: 1.1.0
+author: Oxyzen Digital
+min_revit_version: 2024

@@ -210,13 +210,24 @@ def generate_slots(generated_targets):
 def normalize_name(name):
     if not name: return ""
     name = name.lower()
-    name = re.sub(r'[-–—]', ' ', name)
+    name = re.sub(r'[-–—_]', ' ', name)
     name = re.sub(r'\s+', ' ', name).strip()
-    abbrevs = {"flr": "floor", "plt": "plant", "elev": "elevation", "dtl": "detail", "sched": "schedule", "enl": "enlarged", "rcp": "reflected ceiling plan", "demo": "demolition", "lvl": "level", "l": "level"}
+    abbrevs = {
+        "flr": "floor", "plt": "plant", "elev": "elevation", "elevs": "elevations",
+        "dtl": "detail", "dtls": "details", "sched": "schedule", "scheds": "schedules",
+        "enl": "enlarged", "rcp": "reflected ceiling plan", "clg": "ceiling",
+        "demo": "demolition", "lvl": "level", "l": "level", "sect": "section",
+        "sects": "sections", "fnd": "foundation", "int": "interior", "ext": "exterior",
+        "bldg": "building", "gen": "general", "dim": "dimension"
+    }
     words = name.split()
     for i in range(len(words)):
         if words[i] in abbrevs:
             words[i] = abbrevs[words[i]]
+        # Normalize L1, L2, L01 -> level 1, level 2
+        m_lvl = re.match(r'^l0*(\d+)$', words[i])
+        if m_lvl:
+            words[i] = "level {}".format(m_lvl.group(1))
     return " ".join(words)
 
 def token_set_ratio(s1, s2):
@@ -226,6 +237,129 @@ def token_set_ratio(s1, s2):
     if not w1 and not w2: return 1.0
     if not w1 or not w2: return 0.0
     return (2.0 * len(common)) / (len(w1) + len(w2))
+
+def infer_aia_suggestion_for_extra_sheet(sh, views_on_sheet, existing_slots):
+    """
+    Rule Book in the Back Pocket:
+    For an existing sheet that did not match any pre-generated Cartoon Slot, inspect its
+    current number, name, and placed views (ViewType, GenLevel, View Name) to suggest a
+    standardized AIA Sheet Number, Sheet Name, Discipline, and Series Name.
+    """
+    # 1. Determine prefix (default to extracted letters or 'A')
+    m_num = re.match(r"^([A-Z]+)[- ]?(\d)?(\d*)([A-Za-z]*)$", (sh.number or "").strip().upper())
+    prefix = m_num.group(1) if m_num else "A"
+    if prefix in ("SHEET", "SH", "SK", "TEMP", "NEW", "X"):
+        prefix = "A"
+
+    norm_sh = normalize_name(sh.name)
+    combined_text = norm_sh
+    primary_view = views_on_sheet[0] if views_on_sheet else None
+    if primary_view:
+        combined_text = norm_sh + " " + normalize_name(primary_view.name)
+
+    # 2. Infer AIA Series digit and Series Name from placed view type & keywords
+    series_digit = "1"
+    series_name = "01. Plans"
+    suggested_name = (sh.name or "UNNAMED SHEET").upper()
+
+    if primary_view:
+        vt_str = str(primary_view.view_type)
+        if "CeilingPlan" in vt_str or "ceiling" in combined_text:
+            series_digit = "1"
+            series_name = "01. Plans"
+            lvl_str = (primary_view.level_name or "LEVEL 1").upper()
+            suggested_name = "REFLECTED CEILING PLAN - {}".format(lvl_str)
+        elif "Elevation" in vt_str or "elevation" in combined_text:
+            series_digit = "2"
+            series_name = "02. Elevations"
+            suggested_name = "INTERIOR ELEVATIONS" if "interior" in combined_text else "BUILDING ELEVATIONS"
+        elif "Section" in vt_str or "section" in combined_text:
+            series_digit = "3"
+            series_name = "03. Sections"
+            suggested_name = "WALL SECTIONS" if "wall" in combined_text else "BUILDING SECTIONS"
+        elif "Detail" in vt_str or "detail" in combined_text:
+            if "enlarged" in combined_text:
+                series_digit = "4"
+                series_name = "04. Enlarged Views"
+                suggested_name = "ENLARGED PLAN DETAILS"
+            else:
+                series_digit = "5"
+                series_name = "05. Details"
+                suggested_name = "CONSTRUCTION DETAILS"
+        elif "ThreeD" in vt_str:
+            series_digit = "0"
+            series_name = "00. General"
+            suggested_name = "3D ISOMETRIC VIEW"
+        elif "FloorPlan" in vt_str or "EngineeringPlan" in vt_str:
+            series_digit = "1"
+            series_name = "01. Plans"
+            lvl_str = (primary_view.level_name or "").upper()
+            if "roof" in combined_text or "roof" in lvl_str.lower():
+                suggested_name = "ROOF PLAN"
+            elif "foundation" in combined_text or "fnd" in lvl_str.lower():
+                suggested_name = "FOUNDATION PLAN"
+            elif "site" in combined_text:
+                suggested_name = "SITE PLAN"
+            elif "enlarged" in combined_text:
+                series_digit = "4"
+                series_name = "04. Enlarged Views"
+                suggested_name = "ENLARGED FLOOR PLAN - {}".format(lvl_str) if lvl_str else "ENLARGED FLOOR PLAN"
+            elif "demolition" in combined_text:
+                suggested_name = "DEMOLITION PLAN - {}".format(lvl_str) if lvl_str else "DEMOLITION PLAN"
+            elif "dimension" in combined_text:
+                suggested_name = "DIMENSION PLAN - {}".format(lvl_str) if lvl_str else "DIMENSION PLAN"
+            elif lvl_str:
+                suggested_name = "FLOOR PLAN - {}".format(lvl_str)
+    else:
+        # Infer from sheet name keywords alone
+        if any(k in combined_text for k in ("cover", "title", "general", "index", "symbol", "abbreviation", "life safety", "code")):
+            series_digit = "0"
+            series_name = "00. General"
+        elif "elevation" in combined_text:
+            series_digit = "2"
+            series_name = "02. Elevations"
+        elif "section" in combined_text:
+            series_digit = "3"
+            series_name = "03. Sections"
+        elif "enlarged" in combined_text:
+            series_digit = "4"
+            series_name = "04. Enlarged Views"
+        elif "detail" in combined_text:
+            series_digit = "5"
+            series_name = "05. Details"
+        elif "schedule" in combined_text or "door" in combined_text or "window" in combined_text or "finish" in combined_text:
+            series_digit = "6"
+            series_name = "06. Schedules"
+        else:
+            series_digit = "1"
+            series_name = "01. Plans"
+
+    # If the existing sheet already has a clean AIA number in this series, keep its number
+    clean_aia = re.match(r"^([A-Z]{1,2})[- ]?(\d)(\d\d)([A-Za-z]?)$", (sh.number or "").strip())
+    if clean_aia and clean_aia.group(2) == series_digit:
+        suggested_number = "{}-{}{}{}".format(
+            clean_aia.group(1),
+            clean_aia.group(2),
+            clean_aia.group(3),
+            clean_aia.group(4)
+        )
+    else:
+        # Find next available ordinal in this collection + prefix + series_digit
+        used_ordinals = set()
+        for s in existing_slots:
+            if s.collection == sh.sheet_collection:
+                sm = re.match(r"^([A-Z]+)[- ]?(\d)(\d\d)", s.target_number or "")
+                if sm and sm.group(1) == prefix and sm.group(2) == series_digit:
+                    try:
+                        used_ordinals.add(int(sm.group(3)))
+                    except:
+                        pass
+        next_ord = 1
+        while next_ord in used_ordinals:
+            next_ord += 1
+        suggested_number = "{}-{}{:02d}".format(prefix, series_digit, next_ord)
+
+    return suggested_number, suggested_name, series_name
 
 def match_sheets(harvested_data, slots):
     """
@@ -289,7 +423,7 @@ def match_sheets(harvested_data, slots):
             is_dim_plan = "dimension" in norm_slot
             is_demo_plan = "demolition" in norm_slot
             
-            core_keywords = {"dimension", "demolition", "floor", "ceiling", "enlarged", "detail", "elevation", "section", "plan"}
+            core_keywords = {"dimension", "demolition", "floor", "ceiling", "enlarged", "detail", "elevation", "section", "plan", "roof", "foundation", "site"}
             
             for sh in list(sheets_subset):
                 sh_name_norm = normalize_name(sh.name)
@@ -411,31 +545,30 @@ def match_sheets(harvested_data, slots):
                 remove_matched(s, best_sh)
     
     # Pass 1: Strict Same Collection Matching
-    target_collections = set(s.collection for s in slots)
+    target_collections = set(s.collection for s in slots) | set(sh.sheet_collection for sh in harvested_data.sheets)
     
     for coll in target_collections:
         coll_slots = [s for s in unmatched_slots if s.collection == coll]
         coll_sheets = [sh for sh in unmatched_sheets if sh.sheet_collection == coll]
-        get_matches(coll_slots, coll_sheets)
+        if coll_slots and coll_sheets:
+            get_matches(coll_slots, coll_sheets)
 
-    # Note: Cross-Collection Migration Matching has been removed to strictly isolate Sheet Collections.
-
-    # Pass 2: Auto-Adopt properly formatted but unanticipated sheets
-    for sh in unmatched_sheets:
+    # Pass 2: Auto-Adopt or Suggest AIA Rule-Book Identity for remaining existing sheets
+    for sh in list(unmatched_sheets):
+        sh_val = sh.element_id.IntegerValue if hasattr(sh.element_id, "IntegerValue") else sh.element_id.Value
+        views_on_sheet = sheet_to_views.get(sh_val, [])
         m = re.match(r"^([A-Z]+)[- ]?(\d)(\d\d\d?)(.*)$", sh.number)
         if m:
             prefix = m.group(1)
             series_digit = m.group(2)
             
             ref_slot = None
-            # Prioritize matching a slot in the same collection for precise ContentGroup metadata
             for s in slots:
                 if s.collection == sh.sheet_collection:
                     sm = re.match(r"^([A-Z]+)[- ]?(\d)", s.target_number)
                     if sm and sm.group(1) == prefix and sm.group(2) == series_digit:
                         ref_slot = s
                         break
-            # Fallback to any collection if needed to borrow discipline/series names
             if not ref_slot:
                 for s in slots:
                     sm = re.match(r"^([A-Z]+)[- ]?(\d)", s.target_number)
@@ -462,6 +595,7 @@ def match_sheets(harvested_data, slots):
                 new_slot.existing_name = sh.name
                 new_slot.sheet_element_id = sh.element_id
                 slots.append(new_slot)
+                unmatched_sheets.remove(sh)
             elif ref_slot:
                 new_slot = SlotRecord(
                     target_number=sh.number,
@@ -481,6 +615,51 @@ def match_sheets(harvested_data, slots):
                 new_slot.existing_name = sh.name
                 new_slot.sheet_element_id = sh.element_id
                 slots.append(new_slot)
+                unmatched_sheets.remove(sh)
+            else:
+                # Has AIA-like number, infer series name from Rule Book
+                sug_num, sug_name, sug_series = infer_aia_suggestion_for_extra_sheet(sh, views_on_sheet, slots)
+                new_slot = SlotRecord(
+                    target_number=sh.number,
+                    target_name=sh.name if sh.name and sh.name.upper() != "UNNAMED" else sug_name,
+                    discipline="Unknown",
+                    series=series_digit,
+                    ordinal=int(m.group(3)),
+                    suffix=m.group(4),
+                    canonical_name=sug_name,
+                    collection=sh.sheet_collection,
+                    series_name=sug_series,
+                    cg=sug_series
+                )
+                new_slot.status = "MATCHED" if new_slot.target_name == sh.name else "RENAME_NAME"
+                new_slot.match_score = 0.85
+                new_slot.existing_number = sh.number
+                new_slot.existing_name = sh.name
+                new_slot.sheet_element_id = sh.element_id
+                slots.append(new_slot)
+                unmatched_sheets.remove(sh)
+        else:
+            # Non-standard sheet number (e.g. "SK-1", "101", "Sheet 1"): Rule Book suggests standardized AIA Number & Name!
+            sug_num, sug_name, sug_series = infer_aia_suggestion_for_extra_sheet(sh, views_on_sheet, slots)
+            new_slot = SlotRecord(
+                target_number=sug_num,
+                target_name=sug_name,
+                discipline="Unknown",
+                series=sug_series.split(".")[0] if "." in sug_series else "1",
+                ordinal=1,
+                suffix="",
+                canonical_name=sug_name,
+                collection=sh.sheet_collection,
+                series_name=sug_series,
+                cg=sug_series
+            )
+            new_slot.status = "RENAME_BOTH" if sug_name != sh.name else "RENAME_NUMBER"
+            new_slot.match_score = 0.75
+            new_slot.existing_number = sh.number
+            new_slot.existing_name = sh.name
+            new_slot.sheet_element_id = sh.element_id
+            slots.append(new_slot)
+            unmatched_sheets.remove(sh)
 
     def safe_id(eid):
         if eid == ElementId.InvalidElementId: return -1
@@ -488,10 +667,9 @@ def match_sheets(harvested_data, slots):
         
     matched_ids = set([safe_id(s.sheet_element_id) for s in slots if s.sheet_element_id != ElementId.InvalidElementId])
     
-    # Any remaining unmapped slots are MISSING, unmapped sheets (within target collections) are EXTRA
+    # Any remaining unmapped sheets are EXTRA
     extra_sheets = [sh for sh in harvested_data.sheets 
-                    if sh.sheet_collection in target_collections 
-                    and safe_id(sh.element_id) not in matched_ids]
+                    if safe_id(sh.element_id) not in matched_ids]
     
     return slots, extra_sheets
 
@@ -556,9 +734,6 @@ def apply_plan(doc, plan_rows):
             # --- PHASE 1: View Generation & Renaming ---
             with Transaction(doc, "Phase 1 - View Prep") as t1:
                 t1.Start()
-                # Placeholder for View Prep logic
-                # E.g., rename existing views to [Desired] - [Collection] - [Detail] - [Sheet]
-                # Create missing views based on Plan Type.
                 t1.Commit()
                 
             # --- PHASE 2: Sequence-Based Sheet Renaming & Creation ---
@@ -618,8 +793,6 @@ def apply_plan(doc, plan_rows):
             # --- PHASE 3: View Placement ---
             with Transaction(doc, "Phase 3 - View Placement") as t3:
                 t3.Start()
-                # Placeholder for View Placement logic
-                # E.g., placing the prepped views onto the finalized sheets via Viewport.Create()
                 t3.Commit()
 
             tg.Assimilate()
@@ -627,10 +800,12 @@ def apply_plan(doc, plan_rows):
             tg.RollBack()
             raise e
 
-def generate_plan_json(harvested_data, matched_slots, extra_sheets):
+def generate_plan_json(harvested_data, matched_slots, extra_sheets, include_missing_slots=True):
     rows = []
     seq = 1
     for s in matched_slots:
+        if s.status == "MISSING" and not include_missing_slots:
+            continue
         row = {
             "seq": seq,
             "target_number": s.target_number,
@@ -655,8 +830,8 @@ def generate_plan_json(harvested_data, matched_slots, extra_sheets):
     for sh in extra_sheets:
         row = {
             "seq": seq,
-            "target_number": "",
-            "target_name": "",
+            "target_number": sh.number,
+            "target_name": sh.name,
             "status": "EXTRA",
             "existing_number": sh.number,
             "existing_name": sh.name,
@@ -675,23 +850,36 @@ def generate_plan_json(harvested_data, matched_slots, extra_sheets):
         seq += 1
         
     return {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "grid_size": harvested_data.grid_size,
         "rows": rows,
         "warnings": harvested_data.warnings
     }
 
-def run_pipeline(doc, generated_targets, existing_sheet_ids=None):
+def run_pipeline(doc, generated_targets, existing_sheet_ids=None, h_data=None, include_missing_slots=True):
     """
-    Main entry point to run Phases 1-5
+    Main entry point to run Phases 1-5.
+    Supports cached HarvestData (`h_data`) and optional filtering of `MISSING` cartoon slots (`include_missing_slots`).
     """
-    h_data = harvest_project(doc)
+    if h_data is None:
+        h_data = harvest_project(doc)
+    else:
+        # Clone shallow sheet list so filtering doesn't mutate the cached HarvestData
+        cloned = HarvestData()
+        cloned.sheets = list(h_data.sheets)
+        cloned.views = list(h_data.views)
+        cloned.scope_boxes = list(h_data.scope_boxes)
+        cloned.levels = list(h_data.levels)
+        cloned.grid_size = h_data.grid_size
+        cloned.warnings = list(h_data.warnings)
+        h_data = cloned
     
     if existing_sheet_ids is not None:
         h_data.sheets = [sh for sh in h_data.sheets if (sh.element_id.IntegerValue if hasattr(sh.element_id, "IntegerValue") else sh.element_id.Value) in existing_sheet_ids]
         
     slots = generate_slots(generated_targets)
     matched_slots, extra_sheets = match_sheets(h_data, slots)
-    plan_json = generate_plan_json(h_data, matched_slots, extra_sheets)
+    plan_json = generate_plan_json(h_data, matched_slots, extra_sheets, include_missing_slots=include_missing_slots)
     return plan_json
+
 
