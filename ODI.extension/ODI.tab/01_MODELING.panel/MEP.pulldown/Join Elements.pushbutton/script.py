@@ -35,7 +35,9 @@ import revit_service
 doc = revit.doc
 uidoc = revit.uidoc
 
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+DEFAULT_SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "settings.json")
+USER_SETTINGS_DIR = os.path.join(os.environ.get("APPDATA", ""), "OXYZEN_Digital", "JoinElements")
+SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, "settings.json")
 
 def get_id_val(obj):
     """Safe retrieval of ElementId integer value for Revit 2024+ compatibility."""
@@ -119,6 +121,8 @@ class SettingsWindow(forms.WPFWindow):
                 "allow_rolling": self.state.allow_rolling,
                 "allow_vertical": self.state.allow_vertical
             }
+            if USER_SETTINGS_DIR and not os.path.exists(USER_SETTINGS_DIR):
+                os.makedirs(USER_SETTINGS_DIR)
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(data, f)
         except Exception as e:
@@ -264,9 +268,10 @@ def main():
     app_state = data_model.AppState()
     
     # Load Settings
-    if os.path.exists(SETTINGS_FILE):
+    cfg_path = SETTINGS_FILE if os.path.exists(SETTINGS_FILE) else DEFAULT_SETTINGS_FILE
+    if os.path.exists(cfg_path):
         try:
-            with open(SETTINGS_FILE, 'r') as f:
+            with open(cfg_path, 'r') as f:
                 data = json.load(f)
                 app_state.allow_rolling = data.get("allow_rolling", True)
                 app_state.allow_vertical = data.get("allow_vertical", True)

@@ -3,7 +3,9 @@ import os
 import json
 from Autodesk.Revit.DB import BuiltInParameter
 
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'calculation_settings.json')
+DEFAULT_SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'calculation_settings.json')
+USER_SETTINGS_DIR = os.path.join(os.environ.get('APPDATA', ''), 'OXYZEN_Digital', 'QuantifyAndMeasure')
+SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, 'calculation_settings.json')
 
 class WallCMUCalculator:
     def __init__(self):
@@ -14,9 +16,10 @@ class WallCMUCalculator:
         self.load_settings()
 
     def load_settings(self):
-        if os.path.exists(SETTINGS_FILE):
+        cfg_path = SETTINGS_FILE if os.path.exists(SETTINGS_FILE) else DEFAULT_SETTINGS_FILE
+        if os.path.exists(cfg_path):
             try:
-                with open(SETTINGS_FILE, 'r') as f:
+                with open(cfg_path, 'r') as f:
                     data = json.load(f)
                     for cat in data.get("categories", []):
                         if cat.get("name") == "Walls":

@@ -110,7 +110,9 @@ class UnitHelper:
 # ==========================================
 # 1. SETTINGS & LOGGING
 # ==========================================
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "grading_settings.json")
+DEFAULT_SETTINGS_FILE = os.path.join(os.path.dirname(__file__), "grading_settings.json")
+USER_SETTINGS_DIR = os.path.join(os.environ.get("APPDATA", ""), "OXYZEN_Digital", "Grading")
+SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, "grading_settings.json")
 RECIPE_SCHEMA_GUID = Guid("A4B9C8D2-1234-4567-8901-ABCDEF123456")
 
 # Tolerances
@@ -244,8 +246,9 @@ def load_settings_from_disk():
         "win_top": "100", "win_left": "100"
     }
     try:
-        if os.path.exists(SETTINGS_FILE):
-            with open(SETTINGS_FILE, 'r') as f:
+        cfg_path = SETTINGS_FILE if os.path.exists(SETTINGS_FILE) else DEFAULT_SETTINGS_FILE
+        if os.path.exists(cfg_path):
+            with open(cfg_path, 'r') as f:
                 data = json.load(f)
                 if data: defaults.update(data)
     except: pass
@@ -273,6 +276,8 @@ def save_state_to_disk(state):
         "win_left": str(state.win_left)
     }
     try:
+        if USER_SETTINGS_DIR and not os.path.exists(USER_SETTINGS_DIR):
+            os.makedirs(USER_SETTINGS_DIR)
         with open(SETTINGS_FILE, 'w') as f:
             json.dump(data, f)
     except: pass

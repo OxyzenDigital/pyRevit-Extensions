@@ -13,7 +13,9 @@ from System.Windows.Media import SolidColorBrush, Color as WpfColor
 from data_model import ViewModelBase
 from revit_utils import is_dark_theme
 
-SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'calculation_settings.json')
+DEFAULT_SETTINGS_FILE = os.path.join(os.path.dirname(__file__), 'calculation_settings.json')
+USER_SETTINGS_DIR = os.path.join(os.environ.get('APPDATA', ''), 'OXYZEN_Digital', 'QuantifyAndMeasure')
+SETTINGS_FILE = os.path.join(USER_SETTINGS_DIR, 'calculation_settings.json')
 
 class RelayCommand(ICommand):
     def __init__(self, action):
@@ -149,9 +151,10 @@ class SettingsViewModel(ViewModelBase):
         self.load_data()
 
     def load_data(self):
-        if os.path.exists(SETTINGS_FILE):
+        cfg_path = SETTINGS_FILE if os.path.exists(SETTINGS_FILE) else DEFAULT_SETTINGS_FILE
+        if os.path.exists(cfg_path):
             try:
-                with open(SETTINGS_FILE, 'r') as f:
+                with open(cfg_path, 'r') as f:
                     data = json.load(f)
                     for cat in data.get("categories", []):
                         self.Categories.Add(CategoryVM(cat))
@@ -337,6 +340,8 @@ class SettingsViewModel(ViewModelBase):
             "categories": [c.to_dict() for c in self.Categories]
         }
         try:
+            if USER_SETTINGS_DIR and not os.path.exists(USER_SETTINGS_DIR):
+                os.makedirs(USER_SETTINGS_DIR)
             with open(SETTINGS_FILE, 'w') as f:
                 json.dump(data, f, indent=2)
             return True

@@ -25,6 +25,7 @@ ENV/
 .backup/
 temp_target.txt
 *.tmp
+*.rvt
 
 # User-specific Configurations
 config.json
